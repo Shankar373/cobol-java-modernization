@@ -3,312 +3,737 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>COBOL → Java Migration Portal</title>
+<title>cobj Portal — Enterprise Modernization Engine</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 :root {
-  --bg:#080d18; --surface:#0f1625; --surface2:#161e30; --surface3:#1c2640;
-  --border:#243050; --border2:#2d3d5e;
-  --text:#dce8ff; --muted:#7a92b8; --dim:#4a5c7a;
-  --acc:#5b8cff; --acc2:#7ba4ff;
-  --ok:#34d399; --ok2:#10b981;
-  --warn:#fbbf24; --warn2:#f59e0b;
-  --err:#f87171; --err2:#ef4444;
-  --purple:#a78bfa; --purple2:#8b5cf6;
-  --grad: linear-gradient(135deg, #5b8cff 0%, #a78bfa 100%);
+  --bg: #090d16;
+  --surface: #0f1422;
+  --surface2: #141b2d;
+  --surface3: #1b243c;
+  --border: #1e2538;
+  --border2: #2b3552;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --dim: #475569;
+  --acc: #6366f1;
+  --acc-grad: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  --purple-grad: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --err: #ef4444;
 }
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:var(--surface)}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
-/* ---- Layout ---- */
-.topbar{display:flex;align-items:center;gap:12px;padding:14px 24px;
-  border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100}
-.logo{width:32px;height:32px;background:var(--grad);border-radius:8px;
-  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
-.topbar-title{font-weight:700;font-size:16px}
-.topbar-sub{font-size:12px;color:var(--muted);margin-top:1px}
-.badge-online{margin-left:auto;font-size:11px;font-weight:600;color:var(--ok);
-  background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.25);
-  padding:3px 10px;border-radius:20px;display:flex;align-items:center;gap:5px}
-.badge-online::before{content:'';width:6px;height:6px;border-radius:50%;
-  background:var(--ok);display:inline-block;animation:pulse 1.5s infinite}
-
-.wrap{display:grid;grid-template-columns:300px 1fr;height:calc(100vh - 57px);overflow:hidden}
-@media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}}
-.sidebar{border-right:1px solid var(--border);background:var(--surface);
-  display:flex;flex-direction:column;overflow:hidden}
-.sidebar-section{padding:14px;border-bottom:1px solid var(--border)}
-.sidebar-section h3{font-size:11px;font-weight:600;color:var(--muted);
-  text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
-.main{overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
-
-/* ---- Input card ---- */
-.input-tabs{display:flex;gap:2px;margin-bottom:12px}
-.tab-btn{flex:1;padding:7px;border:none;border-radius:7px;font-size:12px;
-  font-weight:600;cursor:pointer;background:var(--surface3);color:var(--muted);
-  transition:all .15s}
-.tab-btn.active{background:rgba(91,140,255,.2);color:var(--acc2);
-  border:1px solid rgba(91,140,255,.3)}
-.drop-zone{border:2px dashed var(--border2);border-radius:10px;padding:28px 14px;
-  text-align:center;cursor:pointer;transition:all .2s;position:relative}
-.drop-zone:hover,.drop-zone.over{border-color:var(--acc);background:rgba(91,140,255,.05)}
-.drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer}
-.drop-icon{font-size:28px;margin-bottom:8px}
-.drop-text{font-size:13px;color:var(--muted)}
-.drop-text span{color:var(--acc);cursor:pointer}
-.field{margin-bottom:10px}
-.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;font-weight:500}
-.field input{width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:8px;
-  background:var(--surface3);color:var(--text);font-size:12px;font-family:inherit;
-  transition:border .15s}
-.field input:focus{outline:none;border-color:var(--acc)}
-.btn{border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:600;
-  cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s}
-.btn-primary{background:var(--grad);color:#fff}
-.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
-.btn-secondary{background:var(--surface3);color:var(--text);border:1px solid var(--border2)}
-.btn-secondary:hover{border-color:var(--acc);color:var(--acc2)}
-.btn-danger{background:transparent;color:var(--err);border:1px solid var(--err)}
-.btn-danger:hover{background:rgba(248,113,113,.1)}
-.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
-.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-
-/* ---- Run list ---- */
-.runs-list{overflow-y:auto;flex:1}
-.run-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;
-  transition:background .15s;position:relative}
-.run-item:hover{background:var(--surface2)}
-.run-item.sel{background:var(--surface3)}
-.run-item.sel::before{content:'';position:absolute;left:0;top:0;bottom:0;
-  width:3px;background:var(--acc);border-radius:2px}
-.run-name{font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.run-meta{font-size:11px;color:var(--muted);margin-top:3px}
-.chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.03em}
-.chip-ready{background:#1c2640;color:var(--muted)}
-.chip-running{background:rgba(91,140,255,.15);color:var(--acc);animation:pulse 1.5s infinite}
-.chip-done{background:rgba(52,211,153,.12);color:var(--ok)}
-.chip-error{background:rgba(248,113,113,.12);color:var(--err)}
-.chip-interrupted{background:rgba(251,191,36,.12);color:var(--warn)}
-
-/* ---- Banner ---- */
-.verdict-banner{border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:14px;font-weight:700;font-size:14px}
-.verdict-banner.green{background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.25);color:var(--ok)}
-.verdict-banner.yellow{background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.25);color:var(--warn)}
-.verdict-banner.red{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);color:var(--err)}
-.verdict-banner.running{background:rgba(91,140,255,.1);border:1px solid rgba(91,140,255,.25);color:var(--acc)}
-.verdict-icon{font-size:28px}
-
-/* ---- Tabs ---- */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.card-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2)}
-.card-tab{padding:10px 18px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);
-  border-bottom:2px solid transparent;transition:all .15s}
-.card-tab.active{color:var(--acc2);border-bottom-color:var(--acc)}
-.card-body{padding:16px}
+/* ---- Header ---- */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 40px;
+  background-color: rgba(15, 20, 34, 0.6);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.logo-icon {
+  width: 32px;
+  height: 32px;
+  background: var(--purple-grad);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+.brand-name {
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+.brand-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.online-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ok);
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  padding: 4px 12px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.online-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ok);
+  display: inline-block;
+  animation: pulse 1.8s infinite;
+}
 
 /* ---- Stepper ---- */
-.stepper{display:flex;flex-direction:column;gap:6px}
-.step{display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:center;
-  padding:10px 12px;border:1px solid var(--border);border-radius:10px;
-  background:var(--surface2);transition:all .2s}
-.step-num{width:32px;height:32px;border-radius:50%;background:var(--surface3);
-  color:var(--muted);display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:700;flex-shrink:0}
-.step-ttl{font-size:13px;font-weight:600}
-.step-dsc{font-size:11px;color:var(--muted);margin-top:2px}
-.step-detail{font-size:11px;color:var(--muted);margin-top:3px;
-  font-family:'JetBrains Mono',monospace}
-.step-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:10px;
-  background:var(--surface3);color:var(--muted);white-space:nowrap}
-.step.done{border-color:rgba(52,211,153,.2)}
-.step.done .step-num{background:rgba(52,211,153,.15);color:var(--ok)}
-.step.done .step-badge{background:rgba(52,211,153,.12);color:var(--ok)}
-.step.running{border-color:rgba(91,140,255,.3)}
-.step.running .step-num{background:rgba(91,140,255,.15);color:var(--acc);animation:spin 2s linear infinite}
-.step.running .step-badge{background:rgba(91,140,255,.12);color:var(--acc)}
-.step.error{border-color:rgba(248,113,113,.2)}
-.step.error .step-num{background:rgba(248,113,113,.15);color:var(--err)}
-.step.error .step-badge{background:rgba(248,113,113,.12);color:var(--err)}
+.stepper-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 24px auto;
+  max-width: 800px;
+  width: 100%;
+  padding: 0 20px;
+}
+.step-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.step-node.active {
+  color: var(--text);
+}
+.step-node .circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.step-node.active .circle {
+  background: var(--purple-grad);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+}
+.step-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  max-width: 100px;
+}
 
-/* ---- Log ---- */
-.log-box{background:#060c18;border:1px solid var(--border);border-radius:10px;
-  padding:12px;height:260px;overflow:auto;
-  font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.6;
-  white-space:pre-wrap;word-break:break-word;color:#8fa8d0}
-.log-box .log-ok{color:var(--ok)}
-.log-box .log-warn{color:var(--warn)}
-.log-box .log-err{color:var(--err)}
+/* ---- Center Content / Upload Screen ---- */
+.center-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+.upload-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px;
+  max-width: 640px;
+  width: 100%;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+}
+.upload-card h2 {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+.upload-card p {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+.tab-row {
+  display: flex;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.tab-btn {
+  padding: 10px 4px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.tab-btn.active {
+  color: var(--acc-grad);
+  border-bottom-color: var(--acc);
+}
+.dropzone {
+  border: 2px dashed var(--border2);
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(20, 27, 45, 0.4);
+  position: relative;
+}
+.dropzone:hover, .dropzone.over {
+  border-color: var(--acc);
+  background: rgba(99, 102, 241, 0.04);
+}
+.dropzone input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.dropzone-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+.dropzone-text {
+  font-size: 13px;
+  color: var(--muted);
+}
+.dropzone-text span {
+  color: var(--acc);
+  font-weight: 600;
+}
+.selected-file-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.selected-file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.btn-clear {
+  background: var(--surface3);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-clear:hover {
+  background: var(--border2);
+}
 
-/* ---- Dependency / audit panels ---- */
-.section-title{font-size:11px;font-weight:700;color:var(--muted);
-  text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
-.tree-item{padding:4px 0;font-size:12px;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:6px}
-.tree-child{padding:3px 0 3px 20px;font-size:11px;color:var(--muted);
-  font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:6px;border-left:1px solid var(--border2)}
-.ok-icon{color:var(--ok);font-size:12px}
-.err-icon{color:var(--err);font-size:12px}
-.warn-icon{color:var(--warn);font-size:12px}
-table.audit-table{width:100%;border-collapse:collapse;font-size:12px}
-table.audit-table th{text-align:left;padding:6px 10px;color:var(--muted);
-  font-size:11px;font-weight:600;border-bottom:1px solid var(--border);
-  text-transform:uppercase;letter-spacing:.04em}
-table.audit-table td{padding:7px 10px;border-bottom:1px solid var(--border);
-  font-family:'JetBrains Mono',monospace;font-size:11px}
-table.audit-table tr:last-child td{border-bottom:none}
-table.audit-table tr:hover td{background:var(--surface3)}
-.hash-cell{color:var(--muted);letter-spacing:.04em}
-.status-IMMUTABLE{color:var(--ok);font-weight:700}
-.status-MODIFIED{color:var(--err);font-weight:700}
-.status-MISSING{color:var(--warn);font-weight:700}
-.status-AUTOMATIC{color:var(--ok)}
-.status-MANUAL{color:var(--warn)}
+.action-btn-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+.btn-action {
+  background: var(--purple-grad);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+}
+.btn-action:hover {
+  opacity: 0.95;
+  transform: translateY(-1px);
+}
+.btn-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
 
-.kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.kv-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px}
-.kv-card .kv-label{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
-.kv-card .kv-value{font-size:18px;font-weight:700;color:var(--text)}
-.kv-card .kv-sub{font-size:11px;color:var(--muted);margin-top:2px}
+/* ---- App Main Split Screen ---- */
+.app-container {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  flex: 1;
+  overflow: hidden;
+}
+@media(max-width:900px){.app-container{grid-template-columns:1fr;}}
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-header h3 {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+.runs-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.run-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.run-item:hover {
+  background: var(--surface2);
+}
+.run-item.active {
+  background: var(--surface2);
+  border-left: 3px solid var(--acc);
+}
+.run-title {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.run-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
 
-.dl-link{color:var(--acc2);font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
-.dl-link:hover{text-decoration:underline}
-.err-box{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2);
-  border-radius:8px;padding:10px;color:var(--err);font-size:11px;
-  font-family:'JetBrains Mono',monospace;white-space:pre-wrap}
+/* ---- Content Area ---- */
+.content-area {
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
-.select-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
-select{background:var(--surface3);border:1px solid var(--border2);border-radius:7px;
-  color:var(--text);font-size:12px;padding:6px 10px;outline:none}
-select:focus{border-color:var(--acc)}
-.none-msg{color:var(--muted);font-size:13px;padding:20px;text-align:center}
+/* ---- Verdict / Failure Banner ---- */
+.status-banner {
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-weight: 700;
+  font-size: 14px;
+}
+.status-banner.error {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: var(--err);
+}
+.status-banner.success {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: var(--ok);
+}
+.status-banner.running {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: var(--acc2);
+}
+.status-banner.warn {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  color: var(--warn);
+}
+.status-icon {
+  font-size: 24px;
+}
 
-@keyframes pulse{50%{opacity:.4}}
-@keyframes spin{to{transform:rotate(360deg)}}
+/* ---- Controls Panel ---- */
+.controls-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.control-btn {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.control-btn:hover {
+  border-color: var(--acc);
+}
+.control-btn.primary {
+  background: var(--acc-grad);
+  border: none;
+  color: #fff;
+}
+.control-btn.danger {
+  color: var(--err);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.control-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* ---- Content Tabs Card ---- */
+.tabs-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.tabs-header {
+  display: flex;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+}
+.panel-tab {
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.panel-tab.active {
+  color: var(--acc2);
+  border-bottom-color: var(--acc);
+}
+.panel-body {
+  padding: 20px;
+}
+
+/* ---- Stage Steps ---- */
+.stage-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stage-step {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.stage-step.done { border-color: rgba(16, 185, 129, 0.15); }
+.stage-step.running { border-color: rgba(99, 102, 241, 0.3); }
+.stage-step.error { border-color: rgba(239, 68, 68, 0.2); }
+
+.stage-num {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface3);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+.stage-step.done .stage-num { background: rgba(16, 185, 129, 0.12); color: var(--ok); }
+.stage-step.running .stage-num { background: rgba(99, 102, 241, 0.12); color: var(--acc); animation: spin 2s linear infinite; }
+.stage-step.error .stage-num { background: rgba(239, 68, 68, 0.12); color: var(--err); }
+
+.stage-title { font-size: 13px; font-weight: 600; }
+.stage-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.stage-status {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 20px;
+  background: var(--surface3);
+  color: var(--muted);
+}
+.stage-step.done .stage-status { background: rgba(16, 185, 129, 0.1); color: var(--ok); }
+.stage-step.running .stage-status { background: rgba(99, 102, 241, 0.1); color: var(--acc); }
+.stage-step.error .stage-status { background: rgba(239, 68, 68, 0.1); color: var(--err); }
+.stage-detail {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
+/* ---- Log Window ---- */
+.log-window {
+  background: #05080f;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  height: 350px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #8da2c4;
+}
+.log-ok { color: var(--ok); }
+.log-warn { color: var(--warn); }
+.log-err { color: var(--err); }
+
+/* ---- Files List / Logical Parity Panel ---- */
+.files-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.file-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.file-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+.file-card-title {
+  font-weight: 600;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.file-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.status-exact { background: rgba(16, 185, 129, 0.1); color: var(--ok); }
+.status-normalized { background: rgba(99, 102, 241, 0.1); color: var(--acc2); }
+.status-differ { background: rgba(239, 68, 68, 0.1); color: var(--err); }
+.status-logical { background: rgba(139, 92, 246, 0.1); color: #a78bfa; }
+
+.file-comparison-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  font-size: 12px;
+}
+@media(max-width: 600px) { .file-comparison-details { grid-template-columns: 1fr; } }
+.compare-side {
+  background: var(--surface3);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.compare-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.diff-log {
+  grid-column: 1 / -1;
+  background: #05080f;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--err);
+  white-space: pre-wrap;
+}
+
+/* ---- Footer ---- */
+.footer {
+  text-align: center;
+  padding: 24px;
+  color: var(--dim);
+  font-size: 11px;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+  letter-spacing: 0.02em;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: 0.5; } }
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="logo">c4</div>
-  <div>
-    <div class="topbar-title">cobj Portal</div>
-    <div class="topbar-sub">Enterprise COBOL → Java Modernization Engine</div>
+
+<!-- Header -->
+<div class="header">
+  <div class="brand">
+    <div class="logo-icon">c4</div>
+    <div>
+      <div class="brand-name">cobj Portal</div>
+      <div class="brand-sub">Enterprise Modernization Engine</div>
+    </div>
   </div>
-  <div class="badge-online" id="engineStatus">v2.0.0 Online</div>
+  <div class="online-badge">v2.0.0 Online</div>
 </div>
 
-<div class="wrap">
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="sidebar-section">
-      <h3>New Migration</h3>
-      <div class="input-tabs">
-        <button class="tab-btn active" id="tabZip" onclick="switchTab('zip')">📦 Upload ZIP</button>
-        <button class="tab-btn" id="tabGit" onclick="switchTab('git')">🔗 Clone Git</button>
+<!-- Progress Stepper -->
+<div class="stepper-bar">
+  <div class="step-node active"><div class="circle">1</div> Select Source</div>
+  <div class="step-line" id="line1"></div>
+  <div class="step-node" id="node2"><div class="circle">2</div> Interactive Parser</div>
+  <div class="step-line" id="line2"></div>
+  <div class="step-node" id="node3"><div class="circle">3</div> Modernize Options</div>
+  <div class="step-line" id="line3"></div>
+  <div class="step-node" id="node4"><div class="circle">4</div> Done & Download</div>
+</div>
+
+<!-- Main Area Dynamic Container -->
+<div id="mainContainer" style="flex:1; display:flex; flex-direction:column;">
+  <!-- Default Upload View -->
+  <div class="center-container">
+    <div class="upload-card">
+      <h2>Select Modernization Input Source</h2>
+      <p>Provide your legacy assets. You can upload a single COBOL file, a project ZIP archive, or clone directly from a Git repository.</p>
+      
+      <div class="tab-row">
+        <button class="tab-btn active" id="tabUpload" onclick="setInTab('zip')">Upload File / ZIP</button>
+        <button class="tab-btn" id="tabClone" onclick="setInTab('git')">Clone Git Repository</button>
       </div>
-      <div id="zipBox">
-        <div class="drop-zone" id="dropZone">
+
+      <div id="zipInputBox">
+        <div class="dropzone" id="dropZone">
           <input type="file" id="zipFile" accept=".zip" onchange="onFileSelected(this)">
-          <div class="drop-icon">📂</div>
-          <div class="drop-text">Drag & drop ZIP or <span>browse files</span></div>
-          <div id="selectedFile" style="margin-top:6px;font-size:11px;color:var(--acc)"></div>
+          <div class="dropzone-icon">📦</div>
+          <div class="dropzone-text">Drag & drop your files here, or <span>browse</span></div>
+        </div>
+        <div class="selected-file-box" id="fileSelectedBox" style="display:none">
+          <div class="selected-file-info">
+            <span>📦</span>
+            <span id="fileName">BankCore-COBOL-Legacy-Enterprise-GitRepo.zip</span>
+            <span style="color:var(--muted); font-size:11px;" id="fileSize">14.42 KB</span>
+          </div>
+          <button class="btn-clear" onclick="clearSelectedFile()">Clear</button>
         </div>
       </div>
-      <div id="gitBox" style="display:none">
-        <div class="field">
-          <label>Repository URL</label>
-          <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git">
-        </div>
-        <div class="field">
-          <label>Branch (optional)</label>
-          <input type="text" id="gitBranch" placeholder="main">
-        </div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-primary" id="ingestBtn" onclick="doIngest()">
-          ⚡ Accept Input
-        </button>
-      </div>
-    </div>
 
-    <div class="sidebar-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column;padding-bottom:0">
-      <h3>Runs</h3>
-      <div class="runs-list" id="runsList">
-        <div class="none-msg">No runs yet</div>
+      <div id="gitInputBox" style="display:none">
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="field">
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Git Repository URL</label>
+            <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+          </div>
+          <div class="field">
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Branch / Commit (optional)</label>
+            <input type="text" id="gitBranch" placeholder="main" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+          </div>
+        </div>
+      </div>
+
+      <div class="action-btn-row">
+        <button class="btn-action" id="analyzeBtn" onclick="ingest()">Analyze Project Source →</button>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Main area -->
-  <div class="main" id="mainArea">
-    <div class="none-msg" style="padding:60px 0">
-      <div style="font-size:40px;margin-bottom:12px">🔬</div>
-      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Select or create a run</div>
-      <div style="font-size:13px;color:var(--muted)">Upload a ZIP or provide a Git URL, then run the 11-stage pipeline</div>
-    </div>
-  </div>
+<!-- Footer -->
+<div class="footer">
+  cobj modernization pipeline © 2026. Standalone enterprise gaps closure architecture.
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
 let sel = localStorage.getItem('sel') || '';
 let busy = false;
-let activeTab = 'zip';
+let inTab = 'zip';
+let activeRunData = null;
 
-// ---- Input handling ----
-function switchTab(t) {
-  activeTab = t;
-  $('tabZip').classList.toggle('active', t === 'zip');
-  $('tabGit').classList.toggle('active', t === 'git');
-  $('zipBox').style.display = t === 'zip' ? '' : 'none';
-  $('gitBox').style.display = t === 'git' ? '' : 'none';
+// ---- UI Tabs / Navigation ----
+function setInTab(t) {
+  inTab = t;
+  $('tabUpload').classList.toggle('active', t === 'zip');
+  $('tabClone').classList.toggle('active', t === 'git');
+  $('zipInputBox').style.display = t === 'zip' ? '' : 'none';
+  $('gitInputBox').style.display = t === 'git' ? '' : 'none';
 }
 
 function onFileSelected(inp) {
   const f = inp.files[0];
-  $('selectedFile').textContent = f ? `✓ ${f.name} (${(f.size/1024).toFixed(0)} KB)` : '';
+  if (f) {
+    $('fileName').textContent = f.name;
+    $('fileSize').textContent = `${(f.size/1024).toFixed(2)} KB`;
+    $('fileSelectedBox').style.display = 'flex';
+    $('dropZone').style.display = 'none';
+  }
 }
 
-// Drag-drop
+function clearSelectedFile() {
+  $('zipFile').value = '';
+  $('fileSelectedBox').style.display = 'none';
+  $('dropZone').style.display = 'block';
+}
+
+// Drag & drop
 const dz = $('dropZone');
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('over'));
 dz.addEventListener('drop', e => {
-  e.preventDefault(); dz.classList.remove('over');
-  const f = e.dataTransfer.files[0];
-  if (f) { $('zipFile').files = e.dataTransfer.files; onFileSelected($('zipFile')); }
+  e.preventDefault();
+  dz.classList.remove('over');
+  if (e.dataTransfer.files.length) {
+    $('zipFile').files = e.dataTransfer.files;
+    onFileSelected($('zipFile'));
+  }
 });
 
-async function doIngest() {
-  if (busy) return;
-  busy = true; $('ingestBtn').disabled = true;
-  try {
-    let payload;
-    if (activeTab === 'zip') {
-      const f = $('zipFile').files[0];
-      if (!f) { alert('Select a ZIP file first.'); return; }
-      const buf = await f.arrayBuffer();
-      payload = { source: 'zip', name: f.name, data: b64(new Uint8Array(buf)) };
-    } else {
-      const url = $('gitUrl').value.trim();
-      if (!url) { alert('Enter a Git URL.'); return; }
-      payload = { source: 'git', name: 'git-run', url, branch: $('gitBranch').value.trim() };
-    }
-    const res = await api('/api/ingest', payload);
-    if (res.ok) { sel = res.run_id; localStorage.setItem('sel', sel); poll(); }
-    else alert('Ingest failed: ' + (res.error || 'unknown error'));
-  } finally { busy = false; $('ingestBtn').disabled = false; }
-}
-
-function b64(bytes) {
-  let bin = ''; const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk)
-    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-  return btoa(bin);
-}
-
-// ---- API ----
+// ---- API Helper ----
 async function api(path, body) {
   const r = await fetch(path, {
     method: body ? 'POST' : 'GET',
@@ -318,289 +743,523 @@ async function api(path, body) {
   return r.json();
 }
 
-// ---- Pipeline control ----
-async function runPipeline(restartFrom) {
+// Ingest input
+async function ingest() {
+  if (busy) return;
+  busy = true; $('analyzeBtn').disabled = true;
+  try {
+    let payload;
+    if (inTab === 'zip') {
+      const f = $('zipFile').files[0];
+      if (!f) { alert('Please select a project ZIP first.'); return; }
+      const buf = await f.arrayBuffer();
+      payload = { source: 'zip', name: f.name, data: bytesToBase64(new Uint8Array(buf)) };
+    } else {
+      const url = $('gitUrl').value.trim();
+      if (!url) { alert('Please enter a Git URL.'); return; }
+      payload = { source: 'git', name: 'git-run', url, branch: $('gitBranch').value.trim() };
+    }
+    const res = await api('/api/ingest', payload);
+    if (res.ok) {
+      sel = res.run_id;
+      localStorage.setItem('sel', sel);
+      poll();
+    } else {
+      alert('Ingest failed: ' + (res.error || 'unknown error'));
+    }
+  } catch(e) {
+    alert('Ingest connection failed: ' + e);
+  } finally {
+    busy = false; $('analyzeBtn').disabled = false;
+  }
+}
+
+function bytesToBase64(bytes) {
+  let bin = ''; const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  return btoa(bin);
+}
+
+// Start/run pipeline
+async function runIt(restartFrom) {
   if (!sel) return;
-  await api('/api/run', { run_id: sel, restart_from: restartFrom || 0 });
+  await api('/api/run', { run_id: sel, restart_from: restartFrom });
   poll();
 }
 
 async function resetRun() {
-  if (!sel || !confirm('Delete this run and its workspace?')) return;
+  if (!sel || !confirm('Reset this workspace and delete target outputs?')) return;
   await api('/api/reset', { run_id: sel });
-  sel = ''; localStorage.removeItem('sel'); poll();
+  sel = ''; localStorage.removeItem('sel');
+  poll();
 }
 
-// ---- Render ----
-let currentTab = 'pipeline';
+// ---- Rendering Workspace ----
+let currentPanelTab = 'pipeline';
 let depsCache = null;
 
-function setMainTab(t) {
-  currentTab = t;
-  document.querySelectorAll('.card-tab').forEach(el => {
-    el.classList.toggle('active', el.dataset.tab === t);
+function setPanelTab(tab) {
+  currentPanelTab = tab;
+  document.querySelectorAll('.panel-tab').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === tab);
   });
-  document.querySelectorAll('.card-panel').forEach(el => {
-    el.style.display = el.dataset.panel === t ? '' : 'none';
+  document.querySelectorAll('.panel-section').forEach(el => {
+    el.style.display = el.dataset.panel === tab ? '' : 'none';
   });
-}
-
-function escHtml(s) {
-  return String(s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;');
+  if (tab === 'audit' && !depsCache) {
+    loadAudit();
+  }
 }
 
 function colorLog(line) {
-  if (/\[PASS\]/i.test(line)) return `<span class="log-ok">${escHtml(line)}</span>`;
-  if (/\[(WARN|MISSING|PARTIAL)\]/i.test(line)) return `<span class="log-warn">${escHtml(line)}</span>`;
-  if (/\[(FAIL|ERROR)\]/i.test(line)) return `<span class="log-err">${escHtml(line)}</span>`;
-  return escHtml(line);
+  if (/\[PASS\]/i.test(line)) return `<span class="log-ok">${escapeHtml(line)}</span>`;
+  if (/\[(WARN|MISSING|PARTIAL)\]/i.test(line)) return `<span class="log-warn">${escapeHtml(line)}</span>`;
+  if (/\[(FAIL|ERROR)\]/i.test(line)) return `<span class="log-err">${escapeHtml(line)}</span>`;
+  return escapeHtml(line);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function selectRun(runId) {
+  sel = runId;
+  localStorage.setItem('sel', sel);
+  depsCache = null;
+  poll();
 }
 
 function renderRuns(state) {
-  const el = $('runsList');
-  if (!state.runs.length) { el.innerHTML = '<div class="none-msg">No runs yet</div>'; return; }
-  el.innerHTML = state.runs.map(r => {
-    const cls = `chip chip-${r.status}`;
-    const done = r.stages.filter(s => s.status === 'done').length;
-    return `<div class="run-item${r.run_id===sel?' sel':''}" onclick="selRun('${r.run_id}')">
-      <div class="run-name">${escHtml(r.name||r.run_id)}<span class="${cls}">${r.status}</span></div>
-      <div class="run-meta">${done}/11 stages${r.verdict?' · '+r.verdict:''}</div>
-    </div>`;
-  }).join('');
-}
-
-function selRun(id) {
-  sel = id; localStorage.setItem('sel', sel); depsCache = null; poll();
-}
-
-function verdictHtml(r) {
-  if (!r) return '';
-  if (r.status === 'running')
-    return `<div class="verdict-banner running"><div class="verdict-icon">⚙️</div><div>Pipeline running…</div></div>`;
-  const v = r.verdict || '';
-  const done = r.stages.filter(s=>s.status==='done').length;
-  const total = r.stages.length;
-  if (r.status === 'error')
-    return `<div class="verdict-banner red"><div class="verdict-icon">🔴</div><div>Stage failed — ${done}/${total} stages complete</div></div>`;
-  if (r.status === 'done') {
-    const isPass = v === 'done' || v === 'PASS';
-    return `<div class="verdict-banner ${isPass?'green':'yellow'}">
-      <div class="verdict-icon">${isPass?'🟢':'🟡'}</div>
-      <div>${isPass?'AUTOMATED AND VERIFIED':'AUTOMATED WITH LIMITATIONS'} — ${done}/${total} stages</div>
-    </div>`;
-  }
-  if (r.status === 'interrupted')
-    return `<div class="verdict-banner yellow"><div class="verdict-icon">⏸️</div><div>Interrupted — resume from checkpoint</div></div>`;
-  return '';
-}
-
-function renderMain(state) {
-  const r = state.runs.find(x => x.run_id === sel);
-  const el = $('mainArea');
-  if (!r) {
-    el.innerHTML = `<div class="none-msg" style="padding:60px 0">
-      <div style="font-size:40px;margin-bottom:12px">🔬</div>
-      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Select or create a run</div>
-      <div style="font-size:13px;color:var(--muted)">Upload a ZIP or provide a Git URL, then run the 11-stage pipeline</div>
-    </div>`;
+  const sidebar = $('runsListSidebar');
+  if (!sidebar) return;
+  if (!state.runs.length) {
+    sidebar.innerHTML = '<div style="color:var(--muted); padding:16px; font-size:12px; text-align:center;">No runs yet</div>';
     return;
   }
-
-  const lastDone = r.stages.filter(s=>s.status==='done').length - 1;
-  const stagesHtml = r.stages.map(s => {
-    const st = s.status || 'pending';
-    const detail = (st==='done'||st==='error') && s.detail
-      ? `<div class="step-detail">${escHtml(s.detail)}</div>` : '';
-    return `<div class="step ${st}">
-      <div class="step-num">${s.index}</div>
-      <div><div class="step-ttl">${escHtml(s.label)}</div>
-        <div class="step-dsc">${escHtml(s.desc)}</div>${detail}</div>
-      <span class="step-badge">${st}</span>
-    </div>`;
+  sidebar.innerHTML = state.runs.map(r => {
+    let chipClass = `chip chip-${r.status}`;
+    let doneCount = r.stages.filter(s => s.status === 'done').length;
+    return `
+      <div class="run-item ${r.run_id === sel ? 'active' : ''}" onclick="selectRun('${r.run_id}')">
+        <div class="run-title">${escapeHtml(r.name || r.run_id)} <span class="${chipClass}">${r.status}</span></div>
+        <div class="run-meta">${doneCount}/11 stages · ${r.verdict || 'No verdict'}</div>
+      </div>`;
   }).join('');
-
-  const stageOpts = r.stages.map(s =>
-    `<option value="${s.index}"${s.index===lastDone+1?' selected':''}>${s.index} – ${s.label}</option>`
-  ).join('');
-
-  const canContinue = r.status !== 'running';
-  const contLabel = r.status==='done' ? 'Re-run all' : (lastDone>=0 ? 'Continue' : 'Run pipeline');
-
-  const dlReport = r.stages.some(s=>s.label==='Report'&&s.status==='done')
-    ? `<a class="dl-link" href="/report?run_id=${encodeURIComponent(r.run_id)}" target="_blank">📄 Migration Report</a>` : '';
-  const dlArchive = r.checkpoint_size != null
-    ? `<a class="dl-link" href="/checkpoint?run_id=${encodeURIComponent(r.run_id)}" target="_blank">📦 Checkpoint (${(r.checkpoint_size/1024/1024).toFixed(1)} MB)</a>` : '';
-
-  const logHtml = (r.log||[]).map(colorLog).join('\n');
-
-  el.innerHTML = `
-    ${verdictHtml(r)}
-    ${r.error ? `<div class="err-box">${escHtml(r.error)}</div>` : ''}
-
-    <div class="select-row">
-      <button class="btn btn-primary" onclick="runPipeline(${lastDone+1})" ${!canContinue?'disabled':''}>${contLabel}</button>
-      <button class="btn btn-secondary" onclick="runPipeline(Number($('fromStage').value))" ${!canContinue?'disabled':''}>Re-run from</button>
-      <select id="fromStage">${stageOpts}</select>
-      <button class="btn btn-danger" onclick="resetRun()">🗑 Reset</button>
-      ${dlReport} ${dlArchive}
-    </div>
-
-    <div class="card">
-      <div class="card-tabs">
-        <div class="card-tab${currentTab==='pipeline'?' active':''}" data-tab="pipeline" onclick="setMainTab('pipeline')">📋 Pipeline</div>
-        <div class="card-tab${currentTab==='audit'?' active':''}" data-tab="audit" onclick="loadAudit()">🔍 Audit</div>
-        <div class="card-tab${currentTab==='log'?' active':''}" data-tab="log" onclick="setMainTab('log')">📟 Log</div>
-      </div>
-
-      <div class="card-body card-panel" data-panel="pipeline" style="${currentTab!=='pipeline'?'display:none':''}">
-        <div class="stepper">${stagesHtml}</div>
-      </div>
-
-      <div class="card-body card-panel" data-panel="audit" style="${currentTab!=='audit'?'display:none':''}">
-        <div id="auditContent"><div class="none-msg">Click the Audit tab to load dependency analysis.</div></div>
-      </div>
-
-      <div class="card-body card-panel" data-panel="log" style="${currentTab!=='log'?'display:none':''}">
-        <div class="log-box" id="logBox">${logHtml}</div>
-      </div>
-    </div>`;
-
-  const lb = $('logBox');
-  if (lb) lb.scrollTop = lb.scrollHeight;
-
-  if (currentTab === 'audit' && !depsCache) loadAudit();
-
-  if (r.status === 'running') setTimeout(poll, 1200);
 }
 
+// Render active run inside main Container
+function renderActiveWorkspace(r) {
+  const container = $('mainContainer');
+  activeRunData = r;
+
+  // Render Stepper Node indicators
+  let doneCount = r.stages.filter(s => s.status === 'done').length;
+  $('node2').classList.toggle('active', doneCount >= 2);
+  $('line1').style.background = doneCount >= 2 ? 'var(--purple-grad)' : 'var(--border)';
+  $('node3').classList.toggle('active', doneCount >= 6);
+  $('line2').style.background = doneCount >= 6 ? 'var(--purple-grad)' : 'var(--border)';
+  $('node4').classList.toggle('active', doneCount >= 10);
+  $('line3').style.background = doneCount >= 10 ? 'var(--purple-grad)' : 'var(--border)';
+
+  // Build Banner
+  let banner = '';
+  if (r.status === 'running') {
+    banner = `<div class="status-banner running"><div class="status-icon">⚙️</div><div>Pipeline running stage checks…</div></div>`;
+  } else if (r.status === 'done') {
+    banner = `<div class="status-banner success"><div class="status-icon">🟢</div><div>Pipeline completed successfully — verdict ${r.verdict || 'PASS'}</div></div>`;
+  } else if (r.status === 'error') {
+    banner = `<div class="status-banner error"><div class="status-icon">🔴</div><div>Stage failed — pipeline validation halted</div></div>`;
+  } else if (r.status === 'interrupted') {
+    banner = `<div class="status-banner warn"><div class="status-icon">⏸️</div><div>Interrupted — resume from last checkpoint</div></div>`;
+  }
+
+  // Stepper steps
+  const stepsHtml = r.stages.map(s => {
+    const st = s.status || 'pending';
+    const detail = (st === 'done' || st === 'error') && s.detail
+      ? `<div class="stage-detail">${escapeHtml(s.detail)}</div>` : '';
+    return `
+      <div class="stage-step ${st}">
+        <div class="stage-num">${s.index}</div>
+        <div>
+          <div class="stage-title">${escapeHtml(s.label)}</div>
+          <div class="stage-desc">${escapeHtml(s.desc)}</div>
+          ${detail}
+        </div>
+        <span class="stage-status">${st}</span>
+      </div>`;
+  }).join('');
+
+  // Logs
+  const logHtml = (r.log || []).map(colorLog).join('\n');
+
+  // Baseline/Parity Files Tab content
+  let filesHtml = '';
+  if (r.stages[8] && (r.stages[8].status === 'done' || r.stages[8].status === 'error' || r.last_stage >= 8)) {
+    // If compare stage was hit, show the comparison cards
+    // Retrieve comparison details from active state data
+    const compareData = r.compare_data || {};
+    const rows = compareData.rows || [];
+    if (rows.length) {
+      filesHtml = `<div class="files-grid">`;
+      rows.forEach(f => {
+        let logicalText = '';
+        if (f.logical) {
+          logicalText = `<div class="compare-side" style="grid-column: 1 / -1; background: rgba(139, 92, 246, 0.05); border:1px solid rgba(139, 92, 246, 0.15)">
+            <span class="compare-label">Logical Parity Verification (SQLite table)</span>
+            ${escapeHtml(f.logical.note)}
+          </div>`;
+        }
+        let diffBox = '';
+        if (f.diff && f.diff.length && f.verdict === 'differ' && !f.logical) {
+          diffBox = `<div class="diff-log">${f.diff.map(escapeHtml).join('\n')}</div>`;
+        }
+        filesHtml += `
+          <div class="file-card">
+            <div class="file-card-header">
+              <span class="file-card-title">📄 ${escapeHtml(f.file)}</span>
+              <span class="file-status-badge status-${f.verdict}">${f.verdict}</span>
+            </div>
+            <div class="file-comparison-details">
+              <div class="compare-side">
+                <span class="compare-label">GnuCOBOL Baseline</span>
+                <div>${f.baseline} bytes</div>
+              </div>
+              <div class="compare-side">
+                <span class="compare-label">Java (cobj) Output</span>
+                <div>${f.java} bytes</div>
+              </div>
+              ${logicalText}
+              ${diffBox}
+            </div>
+          </div>`;
+      });
+      filesHtml += `</div>`;
+    } else {
+      filesHtml = '<div style="color:var(--muted); text-align:center; padding:24px;">No files to compare.</div>';
+    }
+  } else {
+    filesHtml = '<div style="color:var(--muted); text-align:center; padding:24px;">Parity files comparison will be populated once the Baseline and Execute stages finish.</div>';
+  }
+
+  // Stepper selections
+  const selectOpts = r.stages.map(s =>
+    `<option value="${s.index}" ${s.index === r.last_stage+1 ? 'selected' : ''}>${s.index} - ${s.label}</option>`
+  ).join('');
+
+  // Primary Run buttons
+  const isDone = r.status === 'done';
+  const contText = isDone ? 'Re-run all' : (r.last_stage >= 0 ? 'Continue' : 'Run pipeline');
+
+  container.innerHTML = `
+    <div class="app-container">
+      <!-- Sidebar runs -->
+      <div class="sidebar">
+        <div class="sidebar-header">
+          <h3>Workspaces / Runs</h3>
+        </div>
+        <div class="runs-list" id="runsListSidebar">
+          <!-- Runs populates here -->
+        </div>
+      </div>
+
+      <!-- Main Action Panels -->
+      <div class="content-area">
+        ${banner}
+        ${r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px;">${escapeHtml(r.error)}</div>` : ''}
+
+        <div class="controls-panel">
+          <button class="control-btn primary" onclick="runIt(${r.last_stage+1})">⚡ ${contText}</button>
+          <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">🔄 Re-run from</button>
+          <select id="stageSelect">${selectOpts}</select>
+          <button class="control-btn danger" onclick="resetRun()">🗑 Reset Workspace</button>
+          
+          <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+            ${r.stages[9] && r.stages[9].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank">📄 View report</a>` : ''}
+            ${r.checkpoint_size != null ? `<a href="/checkpoint?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank">📦 Checkpoint (${(r.checkpoint_size/1024/1024).toFixed(1)} MB)</a>` : ''}
+          </div>
+        </div>
+
+        <div class="tabs-card">
+          <div class="tabs-header">
+            <div class="panel-tab ${currentPanelTab === 'pipeline' ? 'active' : ''}" data-tab="pipeline" onclick="setPanelTab('pipeline')">📋 Pipeline</div>
+            <div class="panel-tab ${currentPanelTab === 'audit' ? 'active' : ''}" data-tab="audit" onclick="setPanelTab('audit')">🔍 Audit</div>
+            <div class="panel-tab ${currentPanelTab === 'files' ? 'active' : ''}" data-tab="files" onclick="setPanelTab('files')">📂 Parity Files</div>
+            <div class="panel-tab ${currentPanelTab === 'log' ? 'active' : ''}" data-tab="log" onclick="setPanelTab('log')">📟 Console Log</div>
+          </div>
+
+          <div class="panel-body panel-section" data-panel="pipeline" style="${currentPanelTab !== 'pipeline' ? 'display:none' : ''}">
+            <div class="stage-steps">${stepsHtml}</div>
+          </div>
+
+          <div class="panel-body panel-section" data-panel="audit" style="${currentPanelTab !== 'audit' ? 'display:none' : ''}">
+            <div id="auditTabContent">Loading audit data…</div>
+          </div>
+
+          <div class="panel-body panel-section" data-panel="files" style="${currentPanelTab !== 'files' ? 'display:none' : ''}">
+            ${filesHtml}
+          </div>
+
+          <div class="panel-body panel-section" data-panel="log" style="${currentPanelTab !== 'log' ? 'display:none' : ''}">
+            <div class="log-window" id="logWindow">${logHtml}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  const lw = $('logWindow');
+  if (lw) lw.scrollTop = lw.scrollHeight;
+
+  // Populates runs in sidebar list
+  api('/api/state').then(renderRuns);
+}
+
+// ---- Audit Panel populator ----
 async function loadAudit() {
-  currentTab = 'audit';
-  document.querySelectorAll('.card-tab').forEach(el => {
-    el.classList.toggle('active', el.dataset.tab === 'audit');
-  });
-  document.querySelectorAll('.card-panel').forEach(el => {
-    el.style.display = el.dataset.panel === 'audit' ? '' : 'none';
-  });
-  const ac = $('auditContent');
-  if (!ac) return;
-  if (!sel) { ac.innerHTML = '<div class="none-msg">No run selected.</div>'; return; }
-  if (depsCache) { renderAudit(depsCache); return; }
-  ac.innerHTML = '<div class="none-msg">Loading audit data…</div>';
+  const content = $('auditTabContent');
+  if (!content) return;
+  content.innerHTML = '<div style="color:var(--muted); text-align:center; padding:16px;">Loading dependency graphs…</div>';
   try {
-    const res = await fetch(`/api/deps?run_id=${encodeURIComponent(sel)}`);
-    const data = await res.json();
-    if (data.ok) { depsCache = data; renderAudit(data); }
-    else ac.innerHTML = `<div class="err-box">${escHtml(data.error||'Failed to load')}</div>`;
+    const res = await api(`/api/deps?run_id=${encodeURIComponent(sel)}`);
+    if (res.ok) {
+      depsCache = res;
+      renderAuditPanel(res);
+    } else {
+      content.innerHTML = `<div class="err-box">${escapeHtml(res.error || 'Failed to load dependency data')}</div>`;
+    }
   } catch(e) {
-    ac.innerHTML = `<div class="err-box">${escHtml(String(e))}</div>`;
+    content.innerHTML = `<div class="err-box">${escapeHtml(String(e))}</div>`;
   }
 }
 
-function renderAudit(d) {
-  const ac = $('auditContent');
-  if (!ac) return;
+function renderAuditPanel(d) {
+  const el = $('auditTabContent');
+  if (!el) return;
 
-  // Source immutability
+  // Immutability
   const imm = d.immutability || [];
   const immHtml = imm.length ? `
-    <div class="section-title">Source Immutability (SHA-256)</div>
-    <table class="audit-table">
-      <tr><th>File</th><th>Ingest Hash</th><th>Current Hash</th><th>Status</th></tr>
-      ${imm.map(r => {
-        const icon = r.status==='IMMUTABLE'?'✅':r.status==='MODIFIED'?'❌':'⚠️';
-        return `<tr>
-          <td>${escHtml(r.file)}</td>
-          <td class="hash-cell">${(r.ingest_hash||'').slice(0,16)}…</td>
-          <td class="hash-cell">${(r.current_hash||'N/A').slice(0,16)}…</td>
-          <td class="status-${r.status}">${icon} ${r.status}</td>
-        </tr>`;
-      }).join('')}
-    </table><br>` : '';
+    <div class="section-title" style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">Source Immutability (SHA-256)</div>
+    <table class="audit-table" style="width:100%; border-collapse:collapse; margin-bottom:20px; font-size:12px;">
+      <tr style="border-bottom:1px solid var(--border); text-align:left; color:var(--muted); font-size:10px;"><th style="padding:6px 8px;">File</th><th style="padding:6px 8px;">Ingest Hash</th><th style="padding:6px 8px;">Current Hash</th><th style="padding:6px 8px;">Status</th></tr>
+      ${imm.map(r => `
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px; font-family:'JetBrains Mono',monospace;">${escapeHtml(r.file)}</td>
+          <td style="padding:8px; color:var(--muted); font-family:'JetBrains Mono',monospace;">${(r.ingest_hash||'').slice(0,16)}…</td>
+          <td style="padding:8px; color:var(--muted); font-family:'JetBrains Mono',monospace;">${(r.current_hash||'').slice(0,16)}…</td>
+          <td style="padding:8px; font-weight:700;" class="status-${r.status}">${r.status === 'IMMUTABLE' ? '✅ IMMUTABLE' : '❌ MODIFIED'}</td>
+        </tr>
+      `).join('')}
+    </table>` : '';
 
-  // Transpile status per program
-  const ts = d.transpile_status || {};
-  const prov = d.provenance || [];
-  const provHtml = prov.length ? `
-    <div class="section-title">Per-Program Provenance</div>
-    <table class="audit-table">
-      <tr><th>Source</th><th>Java</th><th>.class</th><th>Stub?</th><th>Status</th></tr>
-      ${prov.map(p => {
-        const ok = p.transpiled;
-        const stub = (d.stub_flags||{})[p.program_id+'.java'];
-        return `<tr>
-          <td>${escHtml(p.source||'')}</td>
-          <td>${p.java_file||'—'}</td>
-          <td>${p.class_file||'—'}</td>
-          <td>${stub?'<span class="err-icon">⚠️ STUB</span>':'<span class="ok-icon">✅</span>'}</td>
-          <td class="${ok?'status-AUTOMATIC':'status-MANUAL'}">${ok?'✅ OK':'❌ FAILED'}</td>
-        </tr>`;
-      }).join('')}
-    </table><br>` : '';
-
-  // COPY dependency graph
+  // COPY graph
   const cp = d.copy_deps || {};
   const cov = d.copybook_coverage || {};
-  const missing = d.missing_copybooks || [];
-  let copyHtml = `<div class="section-title">COPYBOOK Dependencies</div>`;
-  let anyDeps = false;
+  let copyHtml = `<div class="section-title" style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">COPYBOOK Dependency Tree</div>`;
+  let anyCopy = false;
   for (const [src, copies] of Object.entries(cp)) {
     if (!copies.length) continue;
-    anyDeps = true;
+    anyCopy = true;
     const srcCov = cov[src] || {};
     const foundMap = {};
     (srcCov.found||[]).forEach(f => foundMap[f.ref.toUpperCase()] = f.path);
-    copyHtml += `<div class="tree-item">📄 ${escHtml(src)}</div>`;
+    copyHtml += `<div style="font-family:'JetBrains Mono',monospace; font-size:12px; margin-bottom:4px;">📄 ${escapeHtml(src)}</div>`;
     copies.forEach(c => {
       const p = foundMap[c.toUpperCase()];
-      copyHtml += `<div class="tree-child">${p?'<span class="ok-icon">✅</span>':'<span class="err-icon">❌</span>'} COPY <code>${escHtml(c)}</code>${p?' → <span style="color:var(--muted)">'+escHtml(p)+'</span>':' <span style="color:var(--err)">MISSING</span>'}</div>`;
+      copyHtml += `<div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); padding-left:20px; border-left:1px solid var(--border2); margin-bottom:3px;">
+        ${p ? '✅' : '❌'} COPY <code>${escapeHtml(c)}</code> ${p ? '→ ' + escapeHtml(p) : '<span style="color:var(--err)">MISSING</span>'}
+      </div>`;
     });
   }
-  if (!anyDeps) copyHtml += '<div style="color:var(--muted);font-size:12px">No COPY statements found.</div>';
-  if (missing.length)
-    copyHtml += `<div style="margin-top:8px;color:var(--err);font-size:12px">⚠️ ${missing.length} missing copybook reference(s)</div>`;
-  copyHtml += '<br>';
+  if (!anyCopy) copyHtml += '<div style="color:var(--muted); font-size:11px; margin-bottom:20px;">No COPYBOOK statements found.</div>';
+  else copyHtml += '<br>';
 
   // CALL graph
   const cg = d.call_graph || {};
   const graph = cg.graph || {};
   const roots = cg.roots || [];
-  let callHtml = `<div class="section-title">CALL Dependency Graph</div>`;
+  let callHtml = `<div class="section-title" style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">CALL Dependency Graph</div>`;
   let anyCall = false;
   for (const [prog, deps] of Object.entries(graph)) {
     if (!deps.static?.length && !deps.dynamic?.length) continue;
     anyCall = true;
-    callHtml += `<div class="tree-item">🔷 ${escHtml(prog)}</div>`;
-    (deps.static||[]).forEach(c => callHtml += `<div class="tree-child"><span class="ok-icon">→</span> CALL <code>${escHtml(c)}</code> <span style="color:var(--muted)">(static)</span></div>`);
-    (deps.dynamic||[]).forEach(c => callHtml += `<div class="tree-child"><span class="warn-icon">→</span> CALL <code>${escHtml(c)}</code> <span style="color:var(--warn)">(DYNAMIC — manual review)</span></div>`);
+    callHtml += `<div style="font-family:'JetBrains Mono',monospace; font-size:12px; margin-bottom:4px;">🔷 ${escapeHtml(prog)}</div>`;
+    (deps.static||[]).forEach(c => {
+      callHtml += `<div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); padding-left:20px; border-left:1px solid var(--border2); margin-bottom:3px;">
+        → CALL <code>${escapeHtml(c)}</code> <span style="font-size:9px; color:var(--ok);">(static)</span>
+      </div>`;
+    });
+    (deps.dynamic||[]).forEach(c => {
+      callHtml += `<div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); padding-left:20px; border-left:1px solid var(--border2); margin-bottom:3px;">
+        → CALL <code>${escapeHtml(c)}</code> <span style="font-size:9px; color:var(--warn);">(DYNAMIC — manual review required)</span>
+      </div>`;
+    });
   }
-  if (!anyCall) callHtml += '<div style="color:var(--muted);font-size:12px">No CALL statements found.</div>';
-  callHtml += `<div style="margin-top:8px;font-size:11px;color:var(--muted)">Entry roots: <code>${roots.join(', ')||'none'}</code></div><br>`;
+  if (!anyCall) callHtml += '<div style="color:var(--muted); font-size:11px; margin-bottom:20px;">No static or dynamic program calls found.</div>';
+  else callHtml += `<div style="font-size:11px; color:var(--muted); margin-bottom:20px;">Call graph entry candidates: <code>${roots.join(', ')}</code></div>`;
 
-  // FILE/dataset map
+  // FILE map
   const fas = d.file_assigns || {};
-  let fileHtml = `<div class="section-title">File / Dataset Dependencies</div>`;
+  let fileHtml = `<div class="section-title" style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">File / SELECT ASSIGN Map</div>`;
   let anyFile = false;
   for (const [src, assigns] of Object.entries(fas)) {
     if (!assigns?.length) continue;
     anyFile = true;
-    fileHtml += `<div class="tree-item">📁 ${escHtml(src)}</div>`;
-    assigns.forEach(a => fileHtml += `<div class="tree-child"><span class="ok-icon">→</span> ${escHtml(a.logical_name)} → <code>${escHtml(a.assign_path)}</code> <span style="color:var(--muted)">[${a.organization||'?'}]</span></div>`);
+    fileHtml += `<div style="font-family:'JetBrains Mono',monospace; font-size:12px; margin-bottom:4px;">📁 ${escapeHtml(src)}</div>`;
+    assigns.forEach(a => {
+      fileHtml += `<div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); padding-left:20px; border-left:1px solid var(--border2); margin-bottom:3px;">
+        → <code>${escapeHtml(a.logical_name)}</code> assign to <code>${escapeHtml(a.assign_path)}</code> <span style="font-size:9px; color:var(--acc);">[${a.organization || 'SEQUENTIAL'}]</span>
+      </div>`;
+    });
   }
-  if (!anyFile) fileHtml += '<div style="color:var(--muted);font-size:12px">No SELECT…ASSIGN statements found.</div>';
+  if (!anyFile) fileHtml += '<div style="color:var(--muted); font-size:11px;">No file assigns found.</div>';
 
-  ac.innerHTML = immHtml + provHtml + copyHtml + callHtml + fileHtml;
+  el.innerHTML = immHtml + copyHtml + callHtml + fileHtml;
 }
 
+// ---- Main Poller ----
 async function poll() {
-  const state = await api('/api/state');
-  renderRuns(state);
-  renderMain(state);
-  if (!state.active) setTimeout(poll, 2500);
-  else setTimeout(poll, 1200);
+  try {
+    const state = await api('/api/state');
+    const r = state.runs.find(x => x.run_id === sel);
+    
+    if (r) {
+      // If we are looking at a run, render the active workspace layout
+      renderActiveWorkspace(r);
+    } else {
+      // Otherwise render default centered upload screen
+      renderDefaultUploadScreen(state);
+    }
+  } catch(e) {
+    console.error('Connection error: ', e);
+  }
 }
 
+function renderDefaultUploadScreen(state) {
+  // Reset nodes active status
+  $('node2').classList.remove('active');
+  $('node3').classList.remove('active');
+  $('node4').classList.remove('active');
+  $('line1').style.background = 'var(--border)';
+  $('line2').style.background = 'var(--border)';
+  $('line3').style.background = 'var(--border)';
+
+  const container = $('mainContainer');
+  
+  // Create sidebar element if there are runs
+  if (state.runs.length) {
+    container.innerHTML = `
+      <div class="app-container">
+        <!-- Sidebar runs -->
+        <div class="sidebar">
+          <div class="sidebar-header">
+            <h3>Workspaces / Runs</h3>
+          </div>
+          <div class="runs-list" id="runsListSidebar">
+            <!-- Runs list populates here -->
+          </div>
+        </div>
+
+        <!-- Center Upload Screen inside content-area -->
+        <div class="content-area" style="align-items:center; justify-content:center; flex:1;">
+          <div class="upload-card">
+            <h2>Select Modernization Input Source</h2>
+            <p>Provide your legacy assets. You can upload a single COBOL file, a project ZIP archive, or clone directly from a Git repository.</p>
+            
+            <div class="tab-row">
+              <button class="tab-btn ${inTab === 'zip' ? 'active' : ''}" id="tabUpload" onclick="setInTab('zip')">Upload File / ZIP</button>
+              <button class="tab-btn ${inTab === 'git' ? 'active' : ''}" id="tabClone" onclick="setInTab('git')">Clone Git Repository</button>
+            </div>
+
+            <div id="zipInputBox" style="${inTab !== 'zip' ? 'display:none' : ''}">
+              <div class="dropzone" id="dropZone">
+                <input type="file" id="zipFile" accept=".zip" onchange="onFileSelected(this)">
+                <div class="dropzone-icon">📦</div>
+                <div class="dropzone-text">Drag & drop your files here, or <span>browse</span></div>
+              </div>
+              <div class="selected-file-box" id="fileSelectedBox" style="display:none">
+                <div class="selected-file-info">
+                  <span>📦</span>
+                  <span id="fileName"></span>
+                  <span style="color:var(--muted); font-size:11px;" id="fileSize"></span>
+                </div>
+                <button class="btn-clear" onclick="clearSelectedFile()">Clear</button>
+              </div>
+            </div>
+
+            <div id="gitInputBox" style="${inTab !== 'git' ? 'display:none' : ''}">
+              <div style="display:flex; flex-direction:column; gap:12px;">
+                <div class="field">
+                  <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Git Repository URL</label>
+                  <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+                </div>
+                <div class="field">
+                  <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Branch / Commit (optional)</label>
+                  <input type="text" id="gitBranch" placeholder="main" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+                </div>
+              </div>
+            </div>
+
+            <div class="action-btn-row">
+              <button class="btn-action" id="analyzeBtn" onclick="ingest()">Analyze Project Source →</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    
+    renderRuns(state);
+  } else {
+    // Completely centered upload view (no sidebar)
+    container.innerHTML = `
+      <div class="center-container">
+        <div class="upload-card">
+          <h2>Select Modernization Input Source</h2>
+          <p>Provide your legacy assets. You can upload a single COBOL file, a project ZIP archive, or clone directly from a Git repository.</p>
+          
+          <div class="tab-row">
+            <button class="tab-btn ${inTab === 'zip' ? 'active' : ''}" id="tabUpload" onclick="setInTab('zip')">Upload File / ZIP</button>
+            <button class="tab-btn ${inTab === 'git' ? 'active' : ''}" id="tabClone" onclick="setInTab('git')">Clone Git Repository</button>
+          </div>
+
+          <div id="zipInputBox" style="${inTab !== 'zip' ? 'display:none' : ''}">
+            <div class="dropzone" id="dropZone">
+              <input type="file" id="zipFile" accept=".zip" onchange="onFileSelected(this)">
+              <div class="dropzone-icon">📦</div>
+              <div class="dropzone-text">Drag & drop your files here, or <span>browse</span></div>
+            </div>
+            <div class="selected-file-box" id="fileSelectedBox" style="display:none">
+              <div class="selected-file-info">
+                <span>📦</span>
+                <span id="fileName"></span>
+                <span style="color:var(--muted); font-size:11px;" id="fileSize"></span>
+              </div>
+              <button class="btn-clear" onclick="clearSelectedFile()">Clear</button>
+            </div>
+          </div>
+
+          <div id="gitInputBox" style="${inTab !== 'git' ? 'display:none' : ''}">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <div class="field">
+                <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Git Repository URL</label>
+                <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+              </div>
+              <div class="field">
+                <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Branch / Commit (optional)</label>
+                <input type="text" id="gitBranch" placeholder="main" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+              </div>
+            </div>
+          </div>
+
+          <div class="action-btn-row">
+            <button class="btn-action" id="analyzeBtn" onclick="ingest()">Analyze Project Source →</button>
+          </div>
+        </div>
+      </div>`;
+  }
+}
+
+// Initial poll
 poll();
 </script>
 </body>

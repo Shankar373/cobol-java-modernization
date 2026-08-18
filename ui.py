@@ -357,6 +357,7 @@ def build_state():
             "verdict": run.get("verdict"),
             "log": run["log"][-150:],
             "stages": stages,
+            "compare_data": state.get("data", {}).get("compare", {}),
             "checkpoint_size": os.path.getsize(os.path.join(run["out"], "checkpoint-archive.zip"))
             if os.path.exists(os.path.join(run["out"], "checkpoint-archive.zip")) else None,
         })
