@@ -903,7 +903,11 @@ function renderActiveWorkspace(r) {
   if (r.status === 'running') {
     banner = `<div class="status-banner running"><div class="status-icon"></div><div>Stage running… ${doneCount}/11 stages complete</div></div>`;
   } else if (r.status === 'done') {
-    banner = `<div class="status-banner success"><div class="status-icon"></div><div>Pipeline completed — verdict ${r.verdict || 'PASS'}</div></div>`;
+    if (r.verdict === 'PARTIAL') {
+      banner = `<div class="status-banner warn"><div class="status-icon"></div><div>Pipeline completed — verdict PARTIAL</div></div>`;
+    } else {
+      banner = `<div class="status-banner success"><div class="status-icon"></div><div>Pipeline completed — verdict ${r.verdict || 'PASS'}</div></div>`;
+    }
   } else if (r.status === 'error') {
     banner = `<div class="status-banner error"><div class="status-icon"></div><div>Stage failed — ${doneCount}/11 stages complete</div></div>`;
   } else if (r.status === 'interrupted') {
@@ -1005,7 +1009,7 @@ function renderActiveWorkspace(r) {
         ${r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px; margin-bottom:12px;">${escapeHtml(r.error)}</div>` : ''}
 
         <div class="controls-panel">
-          <button class="control-btn primary" onclick="runIt(${r.last_stage+1})">Continue</button>
+          <button class="control-btn primary" onclick="runIt(${isDone ? 0 : r.last_stage+1})">${contText}</button>
           <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">Re-run from</button>
           <select id="stageSelect">${selectOpts}</select>
           <button class="control-btn danger" onclick="resetRun()">Reset</button>
