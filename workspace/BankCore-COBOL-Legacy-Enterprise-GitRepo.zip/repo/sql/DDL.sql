@@ -1,0 +1,33 @@
+CREATE TABLE BANK_CUSTOMER (
+    CUST_ID          CHAR(6)       NOT NULL PRIMARY KEY,
+    CUST_NAME        VARCHAR(30)   NOT NULL,
+    CUST_TYPE        CHAR(1)       NOT NULL,
+    CUST_STATUS      CHAR(1)       NOT NULL,
+    CUST_CITY        VARCHAR(20),
+    CUST_STATE       CHAR(2),
+    CREDIT_LIMIT     DECIMAL(11,2),
+    OPEN_DATE        CHAR(8)
+);
+
+CREATE TABLE BANK_ACCOUNT (
+    ACCT_ID          CHAR(10)      NOT NULL PRIMARY KEY,
+    CUST_ID          CHAR(6)       NOT NULL,
+    ACCT_TYPE        CHAR(2)       NOT NULL,
+    ACCT_STATUS      CHAR(1)       NOT NULL,
+    CURRENCY_CODE    CHAR(3)       NOT NULL,
+    BALANCE          DECIMAL(13,2)  NOT NULL,
+    OD_LIMIT         DECIMAL(11,2)  NOT NULL,
+    OPEN_DATE        CHAR(8)
+);
+
+CREATE TABLE BANK_TRANSACTION (
+    TXN_ID           CHAR(12)      NOT NULL PRIMARY KEY,
+    TXN_DATE         CHAR(8)       NOT NULL,
+    TXN_TYPE         CHAR(1)       NOT NULL,
+    SOURCE_ACCT      CHAR(10),
+    TARGET_ACCT      CHAR(10),
+    AMOUNT           DECIMAL(11,2),
+    CURRENCY_CODE    CHAR(3),
+    CHANNEL          CHAR(2),
+    REFERENCE_TEXT   VARCHAR(40)
+);

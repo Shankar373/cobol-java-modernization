@@ -1,0 +1,21 @@
+{
+  "name": "BankCore COBOL Legacy Enterprise Test Application",
+  "version": "1.0.0",
+  "runtime": "GnuCOBOL",
+  "programs": [
+    "BCMAIN01",
+    "BCLOAD01",
+    "BCPROC01",
+    "BCREPT01"
+  ],
+  "parser_fixture": "BCLEGACYX",
+  "contains": [
+    "COBOL",
+    "copybooks",
+    "JCL",
+    "DB2 SQL",
+    "SQL DDL",
+    "sample data",
+    "build/run scripts"
+  ]
+}

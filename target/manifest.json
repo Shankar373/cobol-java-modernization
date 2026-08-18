@@ -1,0 +1,39 @@
+{
+  "engine": "opensource COBOL 4J",
+  "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
+  "generated_at": "2026-08-18T16:34:29+00:00",
+  "entry_point": "CCMAIN01",
+  "format": "free",
+  "programs": [
+    {
+      "source": "src/CCLEGACYX.cob",
+      "program_id": "CCLEGACYX"
+    },
+    {
+      "source": "src/CCLOAD01.cob",
+      "program_id": "CCLOAD01"
+    },
+    {
+      "source": "src/CCMAIN01.cob",
+      "program_id": "CCMAIN01"
+    },
+    {
+      "source": "src/CCPROC01.cob",
+      "program_id": "CCPROC01"
+    },
+    {
+      "source": "src/CCREPT01.cob",
+      "program_id": "CCREPT01"
+    }
+  ],
+  "runtime_dependency": {
+    "file": "libcobj.jar",
+    "size": 19285213,
+    "sha256": "e087bd9e65c28972666f38775aa00fa3d8f5c12deb52ffb92935551110500b93"
+  },
+  "classpath": "generated:libcobj.jar",
+  "output_dirs": [
+    "data/out",
+    "data/work"
+  ]
+}

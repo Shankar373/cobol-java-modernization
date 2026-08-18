@@ -1,0 +1,7 @@
+*.cob text eol=lf
+*.cpy text eol=lf
+*.jcl text eol=lf
+*.sqc text eol=lf
+*.sql text eol=lf
+*.md text eol=lf
+*.dat text eol=lf

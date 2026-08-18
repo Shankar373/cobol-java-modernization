@@ -1,0 +1,190 @@
+{
+  "stages": {
+    "ingest": {
+      "status": "done",
+      "at": "2026-08-18T16:42:08+00:00",
+      "detail": "repo ok: 5 COBOL programs fingerprinted",
+      "artifacts": []
+    },
+    "discover": {
+      "status": "done",
+      "at": "2026-08-18T16:42:08+00:00",
+      "detail": "5 programs discovered",
+      "artifacts": [
+        "src/BCLEGACYX.cob",
+        "src/BCLOAD01.cob",
+        "src/BCMAIN01.cob",
+        "src/BCPROC01.cob",
+        "src/BCREPT01.cob"
+      ]
+    },
+    "transpile": {
+      "status": "done",
+      "at": "2026-08-18T16:42:34+00:00",
+      "detail": "partial transpilation (4/5 ok)",
+      "artifacts": []
+    },
+    "collect": {
+      "status": "done",
+      "at": "2026-08-18T16:42:34+00:00",
+      "detail": "1 java sources, 845 LOC",
+      "artifacts": [
+        "BCREPT01.java"
+      ]
+    },
+    "preserve": {
+      "status": "done",
+      "at": "2026-08-18T16:42:40+00:00",
+      "detail": "runtime dependency preserved",
+      "artifacts": [
+        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\workspace\\BankCore-COBOL-Legacy-Enterprise-GitRepo.zip\\target\\libcobj.jar"
+      ]
+    },
+    "generate": {
+      "status": "done",
+      "at": "2026-08-18T16:42:40+00:00",
+      "detail": "target project assembled",
+      "artifacts": [
+        "manifest.json",
+        "run-java.sh",
+        "run-java.bat"
+      ]
+    },
+    "baseline": {
+      "status": "error",
+      "at": "2026-08-18T16:44:45+00:00",
+      "detail": "legacy GnuCOBOL build failed",
+      "artifacts": []
+    }
+  },
+  "data": {
+    "source_digests": {
+      "src/BCLEGACYX.cob": "7b6879cb5eb25a475975bda240c6f76f62fe7cc0f3575ee6b05f5b1ff0d36526",
+      "src/BCLOAD01.cob": "b288b6bc8be6c6bab33103681a671f92c81d769f7878d5402642328743d8cefa",
+      "src/BCMAIN01.cob": "1cf9aa687e8ef95a0de10df1fecabea05d2e1edc514f21f49fb2330345759db2",
+      "src/BCPROC01.cob": "d2723c133466ffdceb9608025c582a9f0941b976c7337da827d7efe6dc11784b",
+      "src/BCREPT01.cob": "2b2d2715b7f1b73b31ac37e79f86e6f0e270be7b0f3548fbad6ffae0407d6a3b"
+    },
+    "discover": {
+      "sources": [
+        "src/BCLEGACYX.cob",
+        "src/BCLOAD01.cob",
+        "src/BCMAIN01.cob",
+        "src/BCPROC01.cob",
+        "src/BCREPT01.cob"
+      ],
+      "program_ids": {
+        "src/BCLEGACYX.cob": "BCLEGACYX",
+        "src/BCLOAD01.cob": "BCLOAD01",
+        "src/BCMAIN01.cob": "BCMAIN01",
+        "src/BCPROC01.cob": "BCPROC01",
+        "src/BCREPT01.cob": "BCREPT01"
+      },
+      "copybook_dirs": [
+        "copybooks"
+      ],
+      "format": "free",
+      "entry": "BCMAIN01",
+      "output_dirs": [
+        "data/out",
+        "data/work"
+      ],
+      "programs": [
+        {
+          "source": "src/BCLEGACYX.cob",
+          "program_id": "BCLEGACYX",
+          "lines": 41
+        },
+        {
+          "source": "src/BCLOAD01.cob",
+          "program_id": "BCLOAD01",
+          "lines": 135
+        },
+        {
+          "source": "src/BCMAIN01.cob",
+          "program_id": "BCMAIN01",
+          "lines": 41
+        },
+        {
+          "source": "src/BCPROC01.cob",
+          "program_id": "BCPROC01",
+          "lines": 266
+        },
+        {
+          "source": "src/BCREPT01.cob",
+          "program_id": "BCREPT01",
+          "lines": 106
+        }
+      ]
+    },
+    "transpile": {
+      "all_at_once_rc": 1,
+      "status": {
+        "src/BCLEGACYX.cob": false,
+        "src/BCLOAD01.cob": true,
+        "src/BCMAIN01.cob": true,
+        "src/BCPROC01.cob": true,
+        "src/BCREPT01.cob": true
+      },
+      "stderr_tail": "src/BCLEGACYX.cob:3: Error: syntax error\n",
+      "image": "opensourcecobol/opensourcecobol4j:2.0.0"
+    },
+    "collect": {
+      "java_files": [
+        "BCREPT01.java"
+      ],
+      "loc_generated": 845,
+      "class_files": 11
+    },
+    "preserve": {
+      "jar": "libcobj.jar",
+      "version": "opensourcecobol/opensourcecobol4j:2.0.0",
+      "size": 19285213,
+      "sha256": "e087bd9e65c28972666f38775aa00fa3d8f5c12deb52ffb92935551110500b93"
+    },
+    "manifest": {
+      "engine": "opensource COBOL 4J",
+      "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
+      "generated_at": "2026-08-18T16:42:40+00:00",
+      "entry_point": "BCMAIN01",
+      "format": "free",
+      "programs": [
+        {
+          "source": "src/BCLEGACYX.cob",
+          "program_id": "BCLEGACYX"
+        },
+        {
+          "source": "src/BCLOAD01.cob",
+          "program_id": "BCLOAD01"
+        },
+        {
+          "source": "src/BCMAIN01.cob",
+          "program_id": "BCMAIN01"
+        },
+        {
+          "source": "src/BCPROC01.cob",
+          "program_id": "BCPROC01"
+        },
+        {
+          "source": "src/BCREPT01.cob",
+          "program_id": "BCREPT01"
+        }
+      ],
+      "runtime_dependency": {
+        "file": "libcobj.jar",
+        "size": 19285213,
+        "sha256": "e087bd9e65c28972666f38775aa00fa3d8f5c12deb52ffb92935551110500b93"
+      },
+      "classpath": "generated:libcobj.jar",
+      "output_dirs": [
+        "data/out",
+        "data/work"
+      ]
+    },
+    "legacy": {
+      "build_rc": 1,
+      "build_stderr_tail": "src/BCLEGACYX.cob:3: error: PROCEDURE DIVISION header missing\nsrc/BCLEGACYX.cob:3: error: syntax error, unexpected *\nsrc/BCLEGACYX.cob:5: error: syntax error, unexpected *\nsrc/BCLEGACYX.cob:6: error: syntax error, unexpected *\nsrc/BCLEGACYX.cob:8: error: syntax error, unexpected WORKING-STORAGE\nsrc/BCLEGACYX.cob:9: error: unknown statement '01'\nsrc/BCLEGACYX.cob:10: error: unknown statement '05'\nsrc/BCLEGACYX.cob:11: error: unknown statement '05'\nsrc/BCLEGACYX.cob:12: error: unknown statement '05'\nsrc/BCLEGACYX.cob:13: error: unknown statement '05'\nsrc/BCLEGACYX.cob:14: error: unknown statement '10'\nsrc/BCLEGACYX.cob:15: error: unknown statement '01'\nsrc/BCLEGACYX.cob:16: error: unknown statement '01'\nsrc/BCLEGACYX.cob:18: error: syntax error, unexpected PROCEDURE\nsrc/BCLEGACYX.cob: in paragraph '1000-VALIDATE':\nsrc/BCLEGACYX.cob:25: error: 'WS-CODE' is not defined\nsrc/BCLEGACYX.cob:26: error: 'WS-RESULT' is not defined\nsrc/BCLEGACYX.cob:32: error: 'WS-COUNT' is not defined\nsrc/BCLEGACYX.cob:34: error: 'WS-FLAG' is not defined\n",
+      "image": "hurriedreformist/gnucobol:3.1-builder"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+generated/
+data/work/*.dat
+data/out/claim-audit.dat
+data/out/claim-exceptions.dat
+data/out/eod-claims-report.txt
+__pycache__/

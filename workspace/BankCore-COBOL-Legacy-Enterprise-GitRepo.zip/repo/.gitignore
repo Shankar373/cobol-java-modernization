@@ -1,0 +1,22 @@
+# Build artifacts
+bin/
+obj/
+*.exe
+*.dll
+*.so
+*.o
+
+# Runtime/generated data
+data/work/*.dat
+data/out/*
+!data/out/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local logs
+*.log

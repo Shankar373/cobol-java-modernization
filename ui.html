@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>COBOL -&gt; Java Migration</title>
+<style>
+  :root {
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1d2740; --line:#2a3550;
+    --text:#dbe4f5; --muted:#8fa1c0; --acc:#4f8cff; --ok:#3ecf8e; --warn:#ffb454; --err:#ff6b6b;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial; background:var(--bg); color:var(--text); }
+  .wrap { max-width:1280px; margin:0 auto; padding:20px; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:18px; }
+  .layout { display:grid; grid-template-columns:340px 1fr; gap:16px; }
+  @media (max-width:900px){ .layout{ grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  label { font-size:13px; color:var(--muted); display:block; margin:8px 0 4px; }
+  input[type=text], input[type=file] { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+    background:var(--panel2); color:var(--text); font-size:13px; }
+  button { cursor:pointer; border:none; border-radius:8px; padding:9px 14px; font-size:13px; font-weight:600; }
+  .btn { background:var(--acc); color:#fff; }
+  .btn.gray { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
+  .btn.danger { background:transparent; color:var(--err); border:1px solid var(--err); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .radio-row { display:flex; gap:14px; margin:4px 0 8px; }
+  .radio-row label { margin:0; display:flex; gap:6px; align-items:center; cursor:pointer; color:var(--text); }
+  .run-item { padding:9px 10px; border-radius:8px; border:1px solid var(--line); margin-bottom:8px; cursor:pointer; }
+  .run-item.sel { border-color:var(--acc); background:var(--panel2); }
+  .run-item .rname { font-weight:600; font-size:13px; }
+  .chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; margin-left:6px; vertical-align:1px; }
+  .chip.ready{background:#27334f;color:var(--muted)} .chip.running{background:#233a5e;color:var(--acc)}
+  .chip.done{background:#15362a;color:var(--ok)} .chip.error{background:#4a2020;color:var(--err)}
+  .chip.interrupted{background:#3a3320;color:var(--warn)}
+  .stepper { display:grid; gap:6px; }
+  .step { display:grid; grid-template-columns:26px 1fr auto; gap:10px; align-items:center; padding:9px 10px;
+    border:1px solid var(--line); border-radius:9px; background:var(--panel); }
+  .step .num { width:26px; height:26px; border-radius:50%; background:var(--panel2); color:var(--muted);
+    display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; }
+  .step .ttl { font-size:13px; font-weight:600; }
+  .step .dsc { font-size:12px; color:var(--muted); }
+  .step.done .num { background:#15362a; color:var(--ok); }
+  .step.done { border-color:#1d3a2d; }
+  .step.running .num { background:#233a5e; color:var(--acc); animation:pulse 1.2s infinite; }
+  .step.running { border-color:var(--acc); }
+  .step.error .num { background:#4a2020; color:var(--err); }
+  .step.error { border-color:var(--err); }
+  @keyframes pulse { 50% { opacity:.45; } }
+  .st-badge { font-size:11px; padding:2px 8px; border-radius:20px; background:var(--panel2); color:var(--muted); }
+  .step.done .st-badge { background:#15362a; color:var(--ok); }
+  .step.running .st-badge { background:#233a5e; color:var(--acc); }
+  .step.error .st-badge { background:#4a2020; color:var(--err); }
+  .banner { border-radius:10px; padding:12px 14px; margin-bottom:14px; font-weight:700; font-size:15px; }
+  .banner.done { background:#15362a; color:var(--ok); border:1px solid #1d3a2d; }
+  .banner.error { background:#4a2020; color:var(--err); border:1px solid #6b2c2c; }
+  .banner.interrupted { background:#3a3320; color:var(--warn); border:1px solid #57491f; }
+  .log { background:#0a0e18; border:1px solid var(--line); border-radius:10px; padding:10px; height:300px;
+    overflow:auto; font-family:ui-monospace,Consolas,monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+  .log .dim { color:#5a6b8c; }
+  a.dl { color:var(--acc); font-size:13px; text-decoration:none; }
+  .muted { color:var(--muted); font-size:12px; }
+  .err-box { background:#2a1515; border:1px solid var(--err); border-radius:8px; padding:10px; color:var(--err); font-size:12px; white-space:pre-wrap; }
+  .none { color:var(--muted); padding:10px 0; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>COBOL &#8594; Java Migration</h1>
+  <div class="sub">
+    Upload a ZIP or a git URL first (step 0). Nothing is changed until you press Run; the source is copied into an
+    isolated workspace. Each of the 11 stages is a checkpoint, so any run can be resumed, restarted from a stage, or reset.
+  </div>
+  <div class="layout">
+    <div>
+      <div class="card">
+        <h2>1. New input</h2>
+        <div class="radio-row">
+          <label><input type="radio" name="src" value="zip" checked onchange="toggleSrc()"> ZIP file</label>
+          <label><input type="radio" name="src" value="git" onchange="toggleSrc()"> git URL</label>
+        </div>
+        <div id="zip-box">
+          <label>Repository zip (all files)</label>
+          <input type="file" id="zipfile" accept=".zip">
+        </div>
+        <div id="git-box" style="display:none">
+          <label>git URL</label>
+          <input type="text" id="giturl" placeholder="https://github.com/org/repo.git">
+          <label>branch (optional)</label>
+          <input type="text" id="gitbranch" placeholder="main">
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="ingestbtn" onclick="ingest()">Accept input</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Runs</h2>
+        <div id="runs"></div>
+      </div>
+    </div>
+    <div id="main"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let sel = localStorage.getItem('sel') || '';
+let busy = false;
+
+function toggleSrc(){
+  const v = document.querySelector('input[name=src]:checked').value;
+  $('zip-box').style.display = v==='zip' ? '' : 'none';
+  $('git-box').style.display = v==='git' ? '' : 'none';
+}
+
+async function api(path, body){
+  const r = await fetch(path, { method: body? 'POST':'GET',
+    headers: {'Content-Type':'application/json'},
+    body: body? JSON.stringify(body) : undefined });
+  return r.json();
+}
+
+async function ingest(){
+  if (busy) return;
+  const v = document.querySelector('input[name=src]:checked').value;
+  busy = true; $('ingestbtn').disabled = true;
+  try {
+    let payload;
+    if (v === 'zip') {
+      const f = $('zipfile').files[0];
+      if (!f) { alert('pick a zip file'); busy=false; $('ingestbtn').disabled=false; return; }
+      const buf = await f.arrayBuffer();
+      const b64 = bytesToBase64(new Uint8Array(buf));
+      payload = { source:'zip', name: f.name, data: b64 };
+    } else {
+      const url = $('giturl').value.trim();
+      if (!url) { alert('paste a git url'); busy=false; $('ingestbtn').disabled=false; return; }
+      payload = { source:'git', name:'git-run', url, branch: $('gitbranch').value.trim() };
+    }
+    const res = await api('/api/ingest', payload);
+    if (res.ok) { sel = res.run_id; localStorage.setItem('sel', sel); poll(); }
+    else alert('ingest failed: ' + (res.error||''));
+  } finally { busy=false; $('ingestbtn').disabled=false; }
+}
+
+function bytesToBase64(bytes){
+  let bin=''; const chunk=0x8000;
+  for (let i=0;i<bytes.length;i+=chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i,i+chunk));
+  return btoa(bin);
+}
+
+async function runIt(restartFrom){
+  if (!sel) return;
+  await api('/api/run', { run_id: sel, restart_from: restartFrom });
+}
+
+async function resetRun(){
+  if (!sel) return;
+  if (!confirm('Delete this run and its workspace?')) return;
+  await api('/api/reset', { run_id: sel });
+  sel=''; localStorage.removeItem('sel'); poll();
+}
+
+function statusOf(st){ return st && st.status ? st.status : 'pending'; }
+
+function render(state){
+  const runsEl = $('runs');
+  if (!runsEl) return;
+  runsEl.innerHTML = state.runs.length ? '' : '<div class="none">no runs yet</div>';
+  state.runs.forEach(r => {
+    const d = document.createElement('div');
+    d.className = 'run-item' + (r.run_id===sel ? ' sel' : '');
+    const nm = document.createElement('div');
+    nm.className = 'rname';
+    nm.innerHTML = escapeHtml(r.name || r.run_id) + '<span class="chip '+r.status+'">'+r.status+'</span>';
+    const st = document.createElement('div');
+    st.className = 'muted';
+    st.textContent = (r.stages.filter(s=>s.status==='done').length) + '/11 stages  |  ' +
+      (r.verdict ? ('verdict: ' + r.verdict) : (r.run_id));
+    d.append(nm, st);
+    d.onclick = () => { sel = r.run_id; localStorage.setItem('sel', sel); poll(); };
+    runsEl.appendChild(d);
+  });
+
+  const main = $('main');
+  const r = state.runs.find(x => x.run_id === sel);
+  if (!r) {
+    main.innerHTML = '<div class="card"><div class="none">Select or create a run on the left to start.</div></div>';
+    return;
+  }
+
+  let banner = '';
+  if (r.status==='running') banner = '<div class="banner interrupted">Running stages...</div>';
+  else if (r.status==='done') banner = '<div class="banner done">Pipeline completed - verdict ' +
+        (r.verdict||'?') + '</div>';
+  else if (r.status==='error') banner = '<div class="banner error">Stage failed</div>';
+  else if (r.status==='interrupted') banner = '<div class="banner interrupted">Interrupted - resume from a checkpoint</div>';
+
+  const steps = r.stages.map(s => {
+    const st = statusOf(s);
+    const detail = (st==='done' || st==='error') && s.detail ? '<div class="muted">'+escapeHtml(s.detail)+'</div>' : '';
+    return '<div class="step '+st+'">' +
+      '<div class="num">'+s.index+'</div>' +
+      '<div><div class="ttl">'+s.label+'</div><div class="dsc">'+s.desc+'</div>'+detail+'</div>' +
+      '<span class="st-badge">'+st+'</span></div>';
+  }).join('');
+
+  const continueLabel = r.status==='done' ? 'Re-run all' : (r.last_stage>=0 ? 'Continue' : 'Run pipeline');
+  const restartSel = '<select id="from">'+r.stages.map(s =>
+      '<option value="'+s.index+'"'+(s.index===r.last_stage+1?' selected':'')+'>'+s.index+' - '+s.label+'</option>'
+    ).join('')+'</select>';
+
+  const errHtml = r.error ? '<div class="err-box">'+escapeHtml(r.error)+'</div><br>' : '';
+  const dl = r.checkpoint_size != null
+      ? '<a class="dl" href="/checkpoint?run_id='+encodeURIComponent(r.run_id)+'" target="_blank">Download checkpoint ('+r.checkpoint_size+' bytes)</a>'
+      : '';
+
+  main.innerHTML =
+    '<div class="card">'+banner+
+    '<div class="row" style="margin-bottom:12px">'+
+    '<button class="btn" id="go" onclick="runIt('+(r.last_stage+1)+')">'+continueLabel+'</button>'+
+    '<button class="gray btn" onclick="runIt(Number($(\'from\').value))">Re-run from stage</button>'+restartSel+
+    '<button class="danger btn" onclick="resetRun()">Reset</button>'+
+    '</div>'+
+    '<div class="row" style="margin-bottom:4px">'+
+    '<a class="dl" href="/report?run_id='+encodeURIComponent(r.run_id)+'" target="_blank">View report</a>'+
+    '<span class="muted">|</span>'+dl+
+    '</div>'+
+    '</div>'+
+    '<div class="card"><h2>Workflow stages</h2><div class="stepper">'+steps+'</div></div>'+
+    '<div class="card"><h2>Log</h2><div class="log" id="logbox">'+
+      (r.log||[]).map(l => escapeHtml(l)).join('\n') +
+    '</div></div>';
+
+  const box = $('logbox');
+  if (box) box.scrollTop = box.scrollHeight;
+  if (r.status==='running') setTimeout(poll, 1200);
+}
+
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function poll(){
+  const state = await api('/api/state');
+  render(state);
+  const anyRunning = state.active;
+  if (!anyRunning) setTimeout(poll, 2500); else setTimeout(poll, 1200);
+}
+poll();
+</script>
+</body>
+</html>

@@ -1,0 +1,376 @@
+{
+  "stages": {
+    "ingest": {
+      "status": "done",
+      "at": "2026-08-18T16:34:18+00:00",
+      "detail": "repo ok: 5 COBOL programs fingerprinted",
+      "artifacts": []
+    },
+    "discover": {
+      "status": "done",
+      "at": "2026-08-18T16:34:18+00:00",
+      "detail": "5 programs discovered",
+      "artifacts": [
+        "src/CCLEGACYX.cob",
+        "src/CCLOAD01.cob",
+        "src/CCMAIN01.cob",
+        "src/CCPROC01.cob",
+        "src/CCREPT01.cob"
+      ]
+    },
+    "transpile": {
+      "status": "done",
+      "at": "2026-08-18T16:34:25+00:00",
+      "detail": "5 programs transpiled",
+      "artifacts": [
+        "src/CCLEGACYX.cob",
+        "src/CCLOAD01.cob",
+        "src/CCMAIN01.cob",
+        "src/CCPROC01.cob",
+        "src/CCREPT01.cob"
+      ]
+    },
+    "collect": {
+      "status": "done",
+      "at": "2026-08-18T16:34:26+00:00",
+      "detail": "5 java sources, 3234 LOC",
+      "artifacts": [
+        "CCLEGACYX.java",
+        "CCLOAD01.java",
+        "CCMAIN01.java",
+        "CCPROC01.java",
+        "CCREPT01.java"
+      ]
+    },
+    "preserve": {
+      "status": "done",
+      "at": "2026-08-18T16:34:29+00:00",
+      "detail": "runtime dependency preserved",
+      "artifacts": [
+        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\libcobj.jar"
+      ]
+    },
+    "generate": {
+      "status": "done",
+      "at": "2026-08-18T16:34:29+00:00",
+      "detail": "target project assembled",
+      "artifacts": [
+        "manifest.json",
+        "run-java.sh",
+        "run-java.bat"
+      ]
+    },
+    "baseline": {
+      "status": "done",
+      "at": "2026-08-18T16:34:34+00:00",
+      "detail": "baseline produced 5 output files",
+      "artifacts": [
+        "data/out/claim-audit.dat",
+        "data/out/claim-exceptions.dat",
+        "data/out/eod-claims-report.txt",
+        "data/work/customer.dat",
+        "data/work/policy.dat"
+      ]
+    },
+    "execute": {
+      "status": "done",
+      "at": "2026-08-18T16:34:41+00:00",
+      "detail": "java run produced 5 output files",
+      "artifacts": [
+        "data/out/claim-audit.dat",
+        "data/out/claim-exceptions.dat",
+        "data/out/eod-claims-report.txt",
+        "data/work/customer.dat",
+        "data/work/policy.dat"
+      ]
+    },
+    "compare": {
+      "status": "done",
+      "at": "2026-08-18T16:34:41+00:00",
+      "detail": "{'baseline-only': 0, 'exact': 3, 'differ': 2, 'normalized': 0, 'java-only': 0}",
+      "artifacts": [
+        "data/out/claim-audit.dat",
+        "data/out/claim-exceptions.dat",
+        "data/out/eod-claims-report.txt",
+        "data/work/customer.dat",
+        "data/work/policy.dat"
+      ]
+    },
+    "report": {
+      "status": "done",
+      "at": "2026-08-18T16:34:52+00:00",
+      "detail": "verdict PASS",
+      "artifacts": []
+    },
+    "checkpoint": {
+      "status": "done",
+      "at": "2026-08-18T16:34:54+00:00",
+      "detail": "checkpoint archive built",
+      "artifacts": [
+        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\checkpoint-archive.zip"
+      ]
+    }
+  },
+  "data": {
+    "source_digests": {
+      "src/CCLEGACYX.cob": "791f1b6774f34ba524ebaa4eb2c1ceb59e8ecec53db25eb36d190c88f17f5276",
+      "src/CCLOAD01.cob": "448abf1fa5aff4b6d9b238463017264634ac4308e2fbe139af96c6c3da49c6c8",
+      "src/CCMAIN01.cob": "c4afcb139c81bdace03f328376e7908bcef7ac1eb7d586ed7df8d2c712c016ee",
+      "src/CCPROC01.cob": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
+      "src/CCREPT01.cob": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085"
+    },
+    "discover": {
+      "sources": [
+        "src/CCLEGACYX.cob",
+        "src/CCLOAD01.cob",
+        "src/CCMAIN01.cob",
+        "src/CCPROC01.cob",
+        "src/CCREPT01.cob"
+      ],
+      "program_ids": {
+        "src/CCLEGACYX.cob": "CCLEGACYX",
+        "src/CCLOAD01.cob": "CCLOAD01",
+        "src/CCMAIN01.cob": "CCMAIN01",
+        "src/CCPROC01.cob": "CCPROC01",
+        "src/CCREPT01.cob": "CCREPT01"
+      },
+      "copybook_dirs": [
+        "copybooks"
+      ],
+      "format": "free",
+      "entry": "CCMAIN01",
+      "output_dirs": [
+        "data/out",
+        "data/work"
+      ],
+      "programs": [
+        {
+          "source": "src/CCLEGACYX.cob",
+          "program_id": "CCLEGACYX",
+          "lines": 30
+        },
+        {
+          "source": "src/CCLOAD01.cob",
+          "program_id": "CCLOAD01",
+          "lines": 70
+        },
+        {
+          "source": "src/CCMAIN01.cob",
+          "program_id": "CCMAIN01",
+          "lines": 18
+        },
+        {
+          "source": "src/CCPROC01.cob",
+          "program_id": "CCPROC01",
+          "lines": 130
+        },
+        {
+          "source": "src/CCREPT01.cob",
+          "program_id": "CCREPT01",
+          "lines": 65
+        }
+      ]
+    },
+    "transpile": {
+      "all_at_once_rc": 0,
+      "status": {
+        "src/CCLEGACYX.cob": true,
+        "src/CCLOAD01.cob": true,
+        "src/CCMAIN01.cob": true,
+        "src/CCPROC01.cob": true,
+        "src/CCREPT01.cob": true
+      },
+      "stderr_tail": "",
+      "image": "opensourcecobol/opensourcecobol4j:2.0.0"
+    },
+    "collect": {
+      "java_files": [
+        "CCLEGACYX.java",
+        "CCLOAD01.java",
+        "CCMAIN01.java",
+        "CCPROC01.java",
+        "CCREPT01.java"
+      ],
+      "loc_generated": 3234,
+      "class_files": 42
+    },
+    "preserve": {
+      "jar": "libcobj.jar",
+      "version": "opensourcecobol/opensourcecobol4j:2.0.0",
+      "size": 19285213,
+      "sha256": "e087bd9e65c28972666f38775aa00fa3d8f5c12deb52ffb92935551110500b93"
+    },
+    "manifest": {
+      "engine": "opensource COBOL 4J",
+      "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
+      "generated_at": "2026-08-18T16:34:29+00:00",
+      "entry_point": "CCMAIN01",
+      "format": "free",
+      "programs": [
+        {
+          "source": "src/CCLEGACYX.cob",
+          "program_id": "CCLEGACYX"
+        },
+        {
+          "source": "src/CCLOAD01.cob",
+          "program_id": "CCLOAD01"
+        },
+        {
+          "source": "src/CCMAIN01.cob",
+          "program_id": "CCMAIN01"
+        },
+        {
+          "source": "src/CCPROC01.cob",
+          "program_id": "CCPROC01"
+        },
+        {
+          "source": "src/CCREPT01.cob",
+          "program_id": "CCREPT01"
+        }
+      ],
+      "runtime_dependency": {
+        "file": "libcobj.jar",
+        "size": 19285213,
+        "sha256": "e087bd9e65c28972666f38775aa00fa3d8f5c12deb52ffb92935551110500b93"
+      },
+      "classpath": "generated:libcobj.jar",
+      "output_dirs": [
+        "data/out",
+        "data/work"
+      ]
+    },
+    "legacy": {
+      "build_rc": 0,
+      "build_stderr_tail": "",
+      "image": "hurriedreformist/gnucobol:3.1-builder",
+      "run_rc": 0,
+      "run_stdout": "CLAIMSCORE ENTERPRISE NIGHTLY BATCH\nCLAIMS PROCESSED: 0000007\nCLAIMSCORE NIGHTLY BATCH COMPLETED\n",
+      "run_stderr": "",
+      "gcc_version": "cobc (GnuCOBOL) 3.1.2.0"
+    },
+    "baseline_files": [
+      "data/out/claim-audit.dat",
+      "data/out/claim-exceptions.dat",
+      "data/out/eod-claims-report.txt",
+      "data/work/customer.dat",
+      "data/work/policy.dat"
+    ],
+    "execute": {
+      "rc": 0,
+      "stdout_tail": "CLAIMSCORE ENTERPRISE NIGHTLY BATCH\nCLAIMS PROCESSED: 0000007\nCLAIMSCORE NIGHTLY BATCH COMPLETED\n",
+      "stderr_tail": "",
+      "command": "java -cp generated:libcobj.jar CCMAIN01 "
+    },
+    "results_files": [
+      "data/out/claim-audit.dat",
+      "data/out/claim-exceptions.dat",
+      "data/out/eod-claims-report.txt",
+      "data/work/customer.dat",
+      "data/work/policy.dat"
+    ],
+    "compare": {
+      "rows": [
+        {
+          "file": "data/out/claim-audit.dat",
+          "verdict": "exact",
+          "baseline": 884,
+          "java": 884,
+          "mode": "exact",
+          "diff": []
+        },
+        {
+          "file": "data/out/claim-exceptions.dat",
+          "verdict": "exact",
+          "baseline": 663,
+          "java": 663,
+          "mode": "exact",
+          "diff": []
+        },
+        {
+          "file": "data/out/eod-claims-report.txt",
+          "verdict": "exact",
+          "baseline": 344,
+          "java": 344,
+          "mode": "normalized",
+          "diff": []
+        },
+        {
+          "file": "data/work/customer.dat",
+          "verdict": "differ",
+          "baseline": 8192,
+          "java": 36864,
+          "mode": "exact",
+          "diff": [
+            "binary: sizes 8192 vs 36864 bytes, first diff at offset 0"
+          ]
+        },
+        {
+          "file": "data/work/policy.dat",
+          "verdict": "differ",
+          "baseline": 8192,
+          "java": 36864,
+          "mode": "exact",
+          "diff": [
+            "binary: sizes 8192 vs 36864 bytes, first diff at offset 0"
+          ]
+        }
+      ],
+      "verdict_counts": {
+        "baseline-only": 0,
+        "exact": 3,
+        "differ": 2,
+        "normalized": 0,
+        "java-only": 0
+      },
+      "checks": [
+        {
+          "name": "data/out/claim-audit.dat",
+          "kind": "comp3",
+          "ok": true,
+          "actual": [
+            "95000.00",
+            "35000.00",
+            "295000.00",
+            "300000.00"
+          ],
+          "expected": [
+            "95000.00",
+            "35000.00",
+            "295000.00",
+            "300000.00"
+          ],
+          "note": "decoded packed-decimal column"
+        },
+        {
+          "name": "data/out/eod-claims-report.txt",
+          "kind": "regex",
+          "ok": true,
+          "actual": "0000004",
+          "expected": "4",
+          "note": "regex group match"
+        },
+        {
+          "name": "data/out/eod-claims-report.txt",
+          "kind": "regex",
+          "ok": true,
+          "actual": "0000003",
+          "expected": "3",
+          "note": "regex group match"
+        },
+        {
+          "name": "data/out/eod-claims-report.txt",
+          "kind": "regex",
+          "ok": true,
+          "actual": "0000002",
+          "expected": "2",
+          "note": "regex group match"
+        }
+      ]
+    },
+    "checkpoint": {
+      "file": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\checkpoint-archive.zip",
+      "size": 18880764,
+      "sha256": "e77b3bbf354ab82c92c2fc8a3c2436c5d31ef557a1f1747feca37396d5576661"
+    }
+  }
+}

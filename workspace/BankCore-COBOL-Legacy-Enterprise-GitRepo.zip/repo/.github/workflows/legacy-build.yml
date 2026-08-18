@@ -1,0 +1,32 @@
+name: Legacy COBOL Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install GnuCOBOL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnucobol
+
+      - name: Build BankCore
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh
+
+      - name: Run BankCore
+        run: |
+          chmod +x scripts/run.sh
+          ./scripts/run.sh
+
+      - name: Verify report
+        run: |
+          test -f data/out/end-of-day-report.txt
+          grep -q "STATUS: BATCH COMPLETED" data/out/end-of-day-report.txt

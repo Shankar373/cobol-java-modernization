@@ -1,0 +1,105 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BCREPT01.
+
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT AUDIT-IN ASSIGN TO "data/out/transaction-audit.dat"
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-AUDIT-STATUS.
+           SELECT EXCEPTION-IN ASSIGN TO "data/out/transaction-exceptions.dat"
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-EXC-STATUS.
+           SELECT REPORT-OUT ASSIGN TO "data/out/end-of-day-report.txt"
+               ORGANIZATION IS LINE SEQUENTIAL
+               FILE STATUS IS WS-REPORT-STATUS.
+
+       DATA DIVISION.
+       FILE SECTION.
+       FD AUDIT-IN.
+       01 AUDIT-LINE PIC X(220).
+       FD EXCEPTION-IN.
+       01 EXCEPTION-LINE PIC X(220).
+       FD REPORT-OUT.
+       01 REPORT-LINE PIC X(160).
+
+       WORKING-STORAGE SECTION.
+       01 WS-AUDIT-STATUS         PIC XX.
+       01 WS-EXC-STATUS           PIC XX.
+       01 WS-REPORT-STATUS        PIC XX.
+       01 WS-AUDIT-EOF            PIC X VALUE "N".
+       01 WS-EXC-EOF              PIC X VALUE "N".
+       01 WS-POSTED               PIC 9(7) VALUE ZERO.
+       01 WS-REJECTED             PIC 9(7) VALUE ZERO.
+       01 WS-CREDIT-COUNT         PIC 9(7) VALUE ZERO.
+       01 WS-DEBIT-COUNT          PIC 9(7) VALUE ZERO.
+       01 WS-TRANSFER-COUNT       PIC 9(7) VALUE ZERO.
+       01 WS-LINE                 PIC X(160).
+
+       PROCEDURE DIVISION.
+       MAIN-SECTION.
+           PERFORM OPEN-FILES
+           PERFORM READ-AUDIT-FILE
+           PERFORM READ-EXCEPTION-FILE
+           PERFORM WRITE-REPORT
+           PERFORM CLOSE-FILES
+           DISPLAY "END-OF-DAY REPORT GENERATED."
+           GOBACK.
+
+       OPEN-FILES.
+           OPEN INPUT AUDIT-IN
+           OPEN INPUT EXCEPTION-IN
+           OPEN OUTPUT REPORT-OUT.
+
+       READ-AUDIT-FILE.
+           PERFORM UNTIL WS-AUDIT-EOF = "Y"
+               READ AUDIT-IN
+                   AT END MOVE "Y" TO WS-AUDIT-EOF
+                   NOT AT END
+                       ADD 1 TO WS-POSTED
+                       EVALUATE AUDIT-LINE(23:1)
+                           WHEN "C" ADD 1 TO WS-CREDIT-COUNT
+                           WHEN "D" ADD 1 TO WS-DEBIT-COUNT
+                           WHEN "T" ADD 1 TO WS-TRANSFER-COUNT
+                       END-EVALUATE
+               END-READ
+           END-PERFORM.
+
+       READ-EXCEPTION-FILE.
+           PERFORM UNTIL WS-EXC-EOF = "Y"
+               READ EXCEPTION-IN
+                   AT END MOVE "Y" TO WS-EXC-EOF
+                   NOT AT END ADD 1 TO WS-REJECTED
+               END-READ
+           END-PERFORM.
+
+       WRITE-REPORT.
+           MOVE ALL "=" TO REPORT-LINE
+           WRITE REPORT-LINE
+           MOVE "BANKCORE ENTERPRISE - END OF DAY REPORT" TO REPORT-LINE
+           WRITE REPORT-LINE
+           MOVE ALL "=" TO REPORT-LINE
+           WRITE REPORT-LINE
+           MOVE "POSTED TRANSACTIONS       : " TO REPORT-LINE
+           STRING "POSTED TRANSACTIONS       : "
+                  WS-POSTED DELIMITED BY SIZE INTO REPORT-LINE
+           WRITE REPORT-LINE
+           STRING "REJECTED TRANSACTIONS     : "
+                  WS-REJECTED DELIMITED BY SIZE INTO REPORT-LINE
+           WRITE REPORT-LINE
+           STRING "CREDIT TRANSACTIONS       : "
+                  WS-CREDIT-COUNT DELIMITED BY SIZE INTO REPORT-LINE
+           WRITE REPORT-LINE
+           STRING "DEBIT TRANSACTIONS        : "
+                  WS-DEBIT-COUNT DELIMITED BY SIZE INTO REPORT-LINE
+           WRITE REPORT-LINE
+           STRING "TRANSFER TRANSACTIONS     : "
+                  WS-TRANSFER-COUNT DELIMITED BY SIZE INTO REPORT-LINE
+           WRITE REPORT-LINE
+           MOVE ALL "-" TO REPORT-LINE
+           WRITE REPORT-LINE
+           MOVE "STATUS: BATCH COMPLETED" TO REPORT-LINE
+           WRITE REPORT-LINE.
+
+       CLOSE-FILES.
+           CLOSE AUDIT-IN EXCEPTION-IN REPORT-OUT.

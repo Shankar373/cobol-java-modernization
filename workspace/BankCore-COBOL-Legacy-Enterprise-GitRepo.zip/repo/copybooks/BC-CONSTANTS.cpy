@@ -1,0 +1,10 @@
+       78  WS-VALID               VALUE 'V'.
+       78  WS-INVALID             VALUE 'I'.
+       78  WS-POSTED              VALUE 'P'.
+       78  WS-REJECTED            VALUE 'R'.
+       78  WS-CREDIT              VALUE 'C'.
+       78  WS-DEBIT               VALUE 'D'.
+       78  WS-TRANSFER            VALUE 'T'.
+       78  WS-USD                 VALUE 'USD'.
+       78  WS-EUR                 VALUE 'EUR'.
+       78  WS-INR                 VALUE 'INR'.
