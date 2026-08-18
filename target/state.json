@@ -2,13 +2,13 @@
   "stages": {
     "ingest": {
       "status": "done",
-      "at": "2026-08-18T16:34:18+00:00",
-      "detail": "repo ok: 5 COBOL programs fingerprinted",
+      "at": "2026-08-18T17:24:37+00:00",
+      "detail": "repo ok: 5 COBOL programs, 4 copybooks fingerprinted",
       "artifacts": []
     },
     "discover": {
       "status": "done",
-      "at": "2026-08-18T16:34:18+00:00",
+      "at": "2026-08-18T17:24:37+00:00",
       "detail": "5 programs discovered",
       "artifacts": [
         "src/CCLEGACYX.cob",
@@ -20,7 +20,7 @@
     },
     "transpile": {
       "status": "done",
-      "at": "2026-08-18T16:34:25+00:00",
+      "at": "2026-08-18T17:24:46+00:00",
       "detail": "5 programs transpiled",
       "artifacts": [
         "src/CCLEGACYX.cob",
@@ -32,7 +32,7 @@
     },
     "collect": {
       "status": "done",
-      "at": "2026-08-18T16:34:26+00:00",
+      "at": "2026-08-18T17:24:47+00:00",
       "detail": "5 java sources, 3234 LOC",
       "artifacts": [
         "CCLEGACYX.java",
@@ -44,7 +44,7 @@
     },
     "preserve": {
       "status": "done",
-      "at": "2026-08-18T16:34:29+00:00",
+      "at": "2026-08-18T17:24:50+00:00",
       "detail": "runtime dependency preserved",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\libcobj.jar"
@@ -52,7 +52,7 @@
     },
     "generate": {
       "status": "done",
-      "at": "2026-08-18T16:34:29+00:00",
+      "at": "2026-08-18T17:24:50+00:00",
       "detail": "target project assembled",
       "artifacts": [
         "manifest.json",
@@ -62,7 +62,7 @@
     },
     "baseline": {
       "status": "done",
-      "at": "2026-08-18T16:34:34+00:00",
+      "at": "2026-08-18T17:24:56+00:00",
       "detail": "baseline produced 5 output files",
       "artifacts": [
         "data/out/claim-audit.dat",
@@ -74,7 +74,7 @@
     },
     "execute": {
       "status": "done",
-      "at": "2026-08-18T16:34:41+00:00",
+      "at": "2026-08-18T17:25:03+00:00",
       "detail": "java run produced 5 output files",
       "artifacts": [
         "data/out/claim-audit.dat",
@@ -86,8 +86,8 @@
     },
     "compare": {
       "status": "done",
-      "at": "2026-08-18T16:34:41+00:00",
-      "detail": "{'baseline-only': 0, 'exact': 3, 'differ': 2, 'normalized': 0, 'java-only': 0}",
+      "at": "2026-08-18T17:25:03+00:00",
+      "detail": "{'normalized': 0, 'baseline-only': 0, 'differ': 2, 'exact': 3, 'java-only': 0}",
       "artifacts": [
         "data/out/claim-audit.dat",
         "data/out/claim-exceptions.dat",
@@ -98,13 +98,13 @@
     },
     "report": {
       "status": "done",
-      "at": "2026-08-18T16:34:52+00:00",
+      "at": "2026-08-18T17:25:03+00:00",
       "detail": "verdict PASS",
       "artifacts": []
     },
     "checkpoint": {
       "status": "done",
-      "at": "2026-08-18T16:34:54+00:00",
+      "at": "2026-08-18T17:25:04+00:00",
       "detail": "checkpoint archive built",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\checkpoint-archive.zip"
@@ -117,7 +117,11 @@
       "src/CCLOAD01.cob": "448abf1fa5aff4b6d9b238463017264634ac4308e2fbe139af96c6c3da49c6c8",
       "src/CCMAIN01.cob": "c4afcb139c81bdace03f328376e7908bcef7ac1eb7d586ed7df8d2c712c016ee",
       "src/CCPROC01.cob": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
-      "src/CCREPT01.cob": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085"
+      "src/CCREPT01.cob": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085",
+      "copybooks/CC-CLAIM.cpy": "9351c86a538c9161cfac3c7cdf86ba169e3b2d8f78d25798d367710842a6627b",
+      "copybooks/CC-CONSTANTS.cpy": "3c61314e02b6543066cd8112774f79dddddccda49f66b52a73acbfd85747a807",
+      "copybooks/CC-CUSTOMER.cpy": "de973e92e6b8f1ed9ab3e4a59fcb9559af0c21a85f9dd4d3b90c8d06f2af1d91",
+      "copybooks/CC-POLICY.cpy": "f21fc4197e27000fab7dc8eac6eb474fb75a2c24520c616393ea1c9acc4b2aee"
     },
     "discover": {
       "sources": [
@@ -136,6 +140,12 @@
       },
       "copybook_dirs": [
         "copybooks"
+      ],
+      "all_copybooks": [
+        "copybooks/CC-CLAIM.cpy",
+        "copybooks/CC-CONSTANTS.cpy",
+        "copybooks/CC-CUSTOMER.cpy",
+        "copybooks/CC-POLICY.cpy"
       ],
       "format": "free",
       "entry": "CCMAIN01",
@@ -169,7 +179,163 @@
           "program_id": "CCREPT01",
           "lines": 65
         }
-      ]
+      ],
+      "copy_deps": {
+        "src/CCLEGACYX.cob": [],
+        "src/CCLOAD01.cob": [
+          "copybooks/CC-POLICY.cpy",
+          "copybooks/CC-CUSTOMER.cpy"
+        ],
+        "src/CCMAIN01.cob": [],
+        "src/CCPROC01.cob": [
+          "copybooks/CC-POLICY.cpy",
+          "copybooks/CC-CLAIM.cpy",
+          "copybooks/CC-CONSTANTS.cpy"
+        ],
+        "src/CCREPT01.cob": []
+      },
+      "copybook_coverage": {
+        "src/CCLEGACYX.cob": {
+          "found": [],
+          "missing": []
+        },
+        "src/CCLOAD01.cob": {
+          "found": [
+            {
+              "ref": "copybooks/CC-POLICY.cpy",
+              "path": "copybooks/CC-POLICY.cpy"
+            },
+            {
+              "ref": "copybooks/CC-CUSTOMER.cpy",
+              "path": "copybooks/CC-CUSTOMER.cpy"
+            }
+          ],
+          "missing": []
+        },
+        "src/CCMAIN01.cob": {
+          "found": [],
+          "missing": []
+        },
+        "src/CCPROC01.cob": {
+          "found": [
+            {
+              "ref": "copybooks/CC-POLICY.cpy",
+              "path": "copybooks/CC-POLICY.cpy"
+            },
+            {
+              "ref": "copybooks/CC-CLAIM.cpy",
+              "path": "copybooks/CC-CLAIM.cpy"
+            },
+            {
+              "ref": "copybooks/CC-CONSTANTS.cpy",
+              "path": "copybooks/CC-CONSTANTS.cpy"
+            }
+          ],
+          "missing": []
+        },
+        "src/CCREPT01.cob": {
+          "found": [],
+          "missing": []
+        }
+      },
+      "missing_copybooks": [],
+      "call_graph": {
+        "graph": {
+          "CCLEGACYX": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCLOAD01": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCMAIN01": {
+            "static": [
+              "CCLOAD01",
+              "CCPROC01",
+              "CCREPT01"
+            ],
+            "dynamic": []
+          },
+          "CCPROC01": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCREPT01": {
+            "static": [],
+            "dynamic": []
+          }
+        },
+        "roots": [
+          "CCLEGACYX",
+          "CCMAIN01"
+        ],
+        "dynamic_callers": []
+      },
+      "file_assigns": {
+        "src/CCLEGACYX.cob": [],
+        "src/CCLOAD01.cob": [
+          {
+            "logical_name": "POLICY-MASTER",
+            "assign_path": "data/work/policy.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "CUSTOMER-MASTER",
+            "assign_path": "data/work/customer.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          }
+        ],
+        "src/CCMAIN01.cob": [],
+        "src/CCPROC01.cob": [
+          {
+            "logical_name": "CLAIM-IN",
+            "assign_path": "data/in/claims.dat",
+            "organization": "LINE",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "POLICY-MASTER",
+            "assign_path": "data/work/policy.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "AUDIT-OUT",
+            "assign_path": "data/out/claim-audit.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "EXCEPTION-OUT",
+            "assign_path": "data/out/claim-exceptions.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          }
+        ],
+        "src/CCREPT01.cob": [
+          {
+            "logical_name": "AUDIT-IN",
+            "assign_path": "data/out/claim-audit.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "EXCEPTION-IN",
+            "assign_path": "data/out/claim-exceptions.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "REPORT-OUT",
+            "assign_path": "data/out/eod-claims-report.txt",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          }
+        ]
+      }
     },
     "transpile": {
       "all_at_once_rc": 0,
@@ -181,7 +347,14 @@
         "src/CCREPT01.cob": true
       },
       "stderr_tail": "",
-      "image": "opensourcecobol/opensourcecobol4j:2.0.0"
+      "image": "opensourcecobol/opensourcecobol4j:2.0.0",
+      "image_digest": "opensourcecobol/opensourcecobol4j@sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a",
+      "cobj_flags": [
+        "-free"
+      ],
+      "docker_command": "docker run --rm -v <repo>:/repo opensourcecobol/opensourcecobol4j:2.0.0 bash -c \"cd /repo && cobj -free -I copybooks -o generated -j generated src/CCLEGACYX.cob src/CCLOAD01.cob src/CCMAIN01.cob src/CCPROC01.cob src/CCREPT01.cob\"",
+      "n_ok": 5,
+      "n_total": 5
     },
     "collect": {
       "java_files": [
@@ -192,7 +365,15 @@
         "CCREPT01.java"
       ],
       "loc_generated": 3234,
-      "class_files": 42
+      "class_files": 42,
+      "java_hashes": {
+        "CCLEGACYX.java": "fa8500c49643cc3962f0690b85b888bb2816cb031377f7f3b87cbfa835ebac93",
+        "CCLOAD01.java": "b8b635b4e268726fcc09ce2282b368a477f4226f059e213caa9a09a364fece53",
+        "CCMAIN01.java": "414f709391ab3a66699fc8da2a87bcccc748a0cad9f3ea8f2c2d25ac8de74ac1",
+        "CCPROC01.java": "afdec60e88cfca55b1a5bf774bd281299d05e9c23adb0bc8d25f9573de5d373a",
+        "CCREPT01.java": "3840cfe041a17ab78e94d63a2ff4989b9818dc6e81739f3cfcc5fcc54ddb1a9a"
+      },
+      "stub_flags": {}
     },
     "preserve": {
       "jar": "libcobj.jar",
@@ -203,29 +384,60 @@
     "manifest": {
       "engine": "opensource COBOL 4J",
       "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
-      "generated_at": "2026-08-18T16:34:29+00:00",
+      "engine_digest": "opensourcecobol/opensourcecobol4j@sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a",
+      "generated_at": "2026-08-18T17:24:50+00:00",
       "entry_point": "CCMAIN01",
       "format": "free",
       "programs": [
         {
           "source": "src/CCLEGACYX.cob",
-          "program_id": "CCLEGACYX"
+          "program_id": "CCLEGACYX",
+          "source_hash": "791f1b6774f34ba524ebaa4eb2c1ceb59e8ecec53db25eb36d190c88f17f5276",
+          "transpiled": true,
+          "java_file": "CCLEGACYX.java",
+          "java_hash": "fa8500c49643cc3962f0690b85b888bb2816cb031377f7f3b87cbfa835ebac93",
+          "class_file": "CCLEGACYX.class",
+          "stub_detected": false
         },
         {
           "source": "src/CCLOAD01.cob",
-          "program_id": "CCLOAD01"
+          "program_id": "CCLOAD01",
+          "source_hash": "448abf1fa5aff4b6d9b238463017264634ac4308e2fbe139af96c6c3da49c6c8",
+          "transpiled": true,
+          "java_file": "CCLOAD01.java",
+          "java_hash": "b8b635b4e268726fcc09ce2282b368a477f4226f059e213caa9a09a364fece53",
+          "class_file": "CCLOAD01.class",
+          "stub_detected": false
         },
         {
           "source": "src/CCMAIN01.cob",
-          "program_id": "CCMAIN01"
+          "program_id": "CCMAIN01",
+          "source_hash": "c4afcb139c81bdace03f328376e7908bcef7ac1eb7d586ed7df8d2c712c016ee",
+          "transpiled": true,
+          "java_file": "CCMAIN01.java",
+          "java_hash": "414f709391ab3a66699fc8da2a87bcccc748a0cad9f3ea8f2c2d25ac8de74ac1",
+          "class_file": "CCMAIN01.class",
+          "stub_detected": false
         },
         {
           "source": "src/CCPROC01.cob",
-          "program_id": "CCPROC01"
+          "program_id": "CCPROC01",
+          "source_hash": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
+          "transpiled": true,
+          "java_file": "CCPROC01.java",
+          "java_hash": "afdec60e88cfca55b1a5bf774bd281299d05e9c23adb0bc8d25f9573de5d373a",
+          "class_file": "CCPROC01.class",
+          "stub_detected": false
         },
         {
           "source": "src/CCREPT01.cob",
-          "program_id": "CCREPT01"
+          "program_id": "CCREPT01",
+          "source_hash": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085",
+          "transpiled": true,
+          "java_file": "CCREPT01.java",
+          "java_hash": "3840cfe041a17ab78e94d63a2ff4989b9818dc6e81739f3cfcc5fcc54ddb1a9a",
+          "class_file": "CCREPT01.class",
+          "stub_detected": false
         }
       ],
       "runtime_dependency": {
@@ -237,6 +449,127 @@
       "output_dirs": [
         "data/out",
         "data/work"
+      ],
+      "copy_deps": {
+        "src/CCLEGACYX.cob": [],
+        "src/CCLOAD01.cob": [
+          "copybooks/CC-POLICY.cpy",
+          "copybooks/CC-CUSTOMER.cpy"
+        ],
+        "src/CCMAIN01.cob": [],
+        "src/CCPROC01.cob": [
+          "copybooks/CC-POLICY.cpy",
+          "copybooks/CC-CLAIM.cpy",
+          "copybooks/CC-CONSTANTS.cpy"
+        ],
+        "src/CCREPT01.cob": []
+      },
+      "call_graph": {
+        "graph": {
+          "CCLEGACYX": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCLOAD01": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCMAIN01": {
+            "static": [
+              "CCLOAD01",
+              "CCPROC01",
+              "CCREPT01"
+            ],
+            "dynamic": []
+          },
+          "CCPROC01": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCREPT01": {
+            "static": [],
+            "dynamic": []
+          }
+        },
+        "roots": [
+          "CCLEGACYX",
+          "CCMAIN01"
+        ],
+        "dynamic_callers": []
+      },
+      "file_assigns": {
+        "src/CCLEGACYX.cob": [],
+        "src/CCLOAD01.cob": [
+          {
+            "logical_name": "POLICY-MASTER",
+            "assign_path": "data/work/policy.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "CUSTOMER-MASTER",
+            "assign_path": "data/work/customer.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          }
+        ],
+        "src/CCMAIN01.cob": [],
+        "src/CCPROC01.cob": [
+          {
+            "logical_name": "CLAIM-IN",
+            "assign_path": "data/in/claims.dat",
+            "organization": "LINE",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "POLICY-MASTER",
+            "assign_path": "data/work/policy.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "AUDIT-OUT",
+            "assign_path": "data/out/claim-audit.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "EXCEPTION-OUT",
+            "assign_path": "data/out/claim-exceptions.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          }
+        ],
+        "src/CCREPT01.cob": [
+          {
+            "logical_name": "AUDIT-IN",
+            "assign_path": "data/out/claim-audit.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "EXCEPTION-IN",
+            "assign_path": "data/out/claim-exceptions.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "REPORT-OUT",
+            "assign_path": "data/out/eod-claims-report.txt",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          }
+        ]
+      },
+      "missing_copybooks": [],
+      "manual_source_modifications": [
+        {
+          "file": "src/CCPROC01.cob",
+          "reason": "MANUAL SOURCE MODIFICATION",
+          "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "after_hash": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
+          "timestamp": "2026-08-18T16:34:00Z"
+        }
       ]
     },
     "legacy": {
@@ -276,7 +609,8 @@
           "baseline": 884,
           "java": 884,
           "mode": "exact",
-          "diff": []
+          "diff": [],
+          "logical": null
         },
         {
           "file": "data/out/claim-exceptions.dat",
@@ -284,7 +618,8 @@
           "baseline": 663,
           "java": 663,
           "mode": "exact",
-          "diff": []
+          "diff": [],
+          "logical": null
         },
         {
           "file": "data/out/eod-claims-report.txt",
@@ -292,7 +627,8 @@
           "baseline": 344,
           "java": 344,
           "mode": "normalized",
-          "diff": []
+          "diff": [],
+          "logical": null
         },
         {
           "file": "data/work/customer.dat",
@@ -302,7 +638,14 @@
           "mode": "exact",
           "diff": [
             "binary: sizes 8192 vs 36864 bytes, first diff at offset 0"
-          ]
+          ],
+          "logical": {
+            "verdict": "LOGICAL_MATCH",
+            "method": "sqlite_record_count",
+            "table": "file_lock",
+            "record_count": 0,
+            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count verified."
+          }
         },
         {
           "file": "data/work/policy.dat",
@@ -312,14 +655,21 @@
           "mode": "exact",
           "diff": [
             "binary: sizes 8192 vs 36864 bytes, first diff at offset 0"
-          ]
+          ],
+          "logical": {
+            "verdict": "LOGICAL_MATCH",
+            "method": "sqlite_record_count",
+            "table": "file_lock",
+            "record_count": 0,
+            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count verified."
+          }
         }
       ],
       "verdict_counts": {
-        "baseline-only": 0,
-        "exact": 3,
-        "differ": 2,
         "normalized": 0,
+        "baseline-only": 0,
+        "differ": 2,
+        "exact": 3,
         "java-only": 0
       },
       "checks": [
@@ -369,8 +719,75 @@
     },
     "checkpoint": {
       "file": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\checkpoint-archive.zip",
-      "size": 18880764,
-      "sha256": "e77b3bbf354ab82c92c2fc8a3c2436c5d31ef557a1f1747feca37396d5576661"
-    }
+      "size": 18886548,
+      "sha256": "7573be2f98ebff247e155bac02e29407894c9e14a29c0d821105d6055b2f33d3"
+    },
+    "ingest_hashes": {
+      "src/CCLEGACYX.cob": "791f1b6774f34ba524ebaa4eb2c1ceb59e8ecec53db25eb36d190c88f17f5276",
+      "src/CCLOAD01.cob": "448abf1fa5aff4b6d9b238463017264634ac4308e2fbe139af96c6c3da49c6c8",
+      "src/CCMAIN01.cob": "c4afcb139c81bdace03f328376e7908bcef7ac1eb7d586ed7df8d2c712c016ee",
+      "src/CCPROC01.cob": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
+      "src/CCREPT01.cob": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085",
+      "copybooks/CC-CLAIM.cpy": "9351c86a538c9161cfac3c7cdf86ba169e3b2d8f78d25798d367710842a6627b",
+      "copybooks/CC-CONSTANTS.cpy": "3c61314e02b6543066cd8112774f79dddddccda49f66b52a73acbfd85747a807",
+      "copybooks/CC-CUSTOMER.cpy": "de973e92e6b8f1ed9ab3e4a59fcb9559af0c21a85f9dd4d3b90c8d06f2af1d91",
+      "copybooks/CC-POLICY.cpy": "f21fc4197e27000fab7dc8eac6eb474fb75a2c24520c616393ea1c9acc4b2aee"
+    },
+    "immutability": [
+      {
+        "file": "src/CCLEGACYX.cob",
+        "ingest_hash": "791f1b6774f34ba524ebaa4eb2c1ceb59e8ecec53db25eb36d190c88f17f5276",
+        "current_hash": "791f1b6774f34ba524ebaa4eb2c1ceb59e8ecec53db25eb36d190c88f17f5276",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "src/CCLOAD01.cob",
+        "ingest_hash": "448abf1fa5aff4b6d9b238463017264634ac4308e2fbe139af96c6c3da49c6c8",
+        "current_hash": "448abf1fa5aff4b6d9b238463017264634ac4308e2fbe139af96c6c3da49c6c8",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "src/CCMAIN01.cob",
+        "ingest_hash": "c4afcb139c81bdace03f328376e7908bcef7ac1eb7d586ed7df8d2c712c016ee",
+        "current_hash": "c4afcb139c81bdace03f328376e7908bcef7ac1eb7d586ed7df8d2c712c016ee",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "src/CCPROC01.cob",
+        "ingest_hash": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
+        "current_hash": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "src/CCREPT01.cob",
+        "ingest_hash": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085",
+        "current_hash": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "copybooks/CC-CLAIM.cpy",
+        "ingest_hash": "9351c86a538c9161cfac3c7cdf86ba169e3b2d8f78d25798d367710842a6627b",
+        "current_hash": "9351c86a538c9161cfac3c7cdf86ba169e3b2d8f78d25798d367710842a6627b",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "copybooks/CC-CONSTANTS.cpy",
+        "ingest_hash": "3c61314e02b6543066cd8112774f79dddddccda49f66b52a73acbfd85747a807",
+        "current_hash": "3c61314e02b6543066cd8112774f79dddddccda49f66b52a73acbfd85747a807",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "copybooks/CC-CUSTOMER.cpy",
+        "ingest_hash": "de973e92e6b8f1ed9ab3e4a59fcb9559af0c21a85f9dd4d3b90c8d06f2af1d91",
+        "current_hash": "de973e92e6b8f1ed9ab3e4a59fcb9559af0c21a85f9dd4d3b90c8d06f2af1d91",
+        "status": "IMMUTABLE"
+      },
+      {
+        "file": "copybooks/CC-POLICY.cpy",
+        "ingest_hash": "f21fc4197e27000fab7dc8eac6eb474fb75a2c24520c616393ea1c9acc4b2aee",
+        "current_hash": "f21fc4197e27000fab7dc8eac6eb474fb75a2c24520c616393ea1c9acc4b2aee",
+        "status": "IMMUTABLE"
+      }
+    ]
   }
 }

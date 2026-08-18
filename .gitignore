@@ -1,6 +1,23 @@
-generated/
-data/work/*.dat
-data/out/claim-audit.dat
-data/out/claim-exceptions.dat
-data/out/eod-claims-report.txt
+# Git ignore for cobj pipeline PoC
+target/
+!target/*.md
+!target/manifest.json
+
+# Exclude generated binaries and Java source
+legacy/bin/
+legacy/generated/
+legacy/data/out/*
+!legacy/data/out/.gitkeep
+legacy/data/work/*
+!legacy/data/work/.gitkeep
+tests/out/
+workspace/
+
+# Python cache
 __pycache__/
+*.pyc
+
+# Local config overrides
+.env
+.idea/
+.vscode/

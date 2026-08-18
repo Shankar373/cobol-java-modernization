@@ -42,17 +42,17 @@ RUNS = {}               # run_id -> dict
 LOCK = threading.Lock()  # guards starting runs (one active run at a time)
 
 STEP_LABELS = [
-    ("Ingest", "ZIP upload or git clone - before anything changes"),
-    ("Discover", "find all COBOL programs"),
-    ("Transpile", "real cobj (COBOL 4J) in Docker"),
-    ("Collect", "gather generated Java sources"),
-    ("Preserve", "vendor libcobj.jar runtime dependency"),
-    ("Generate", "assemble the target Java project"),
-    ("Baseline", "run original COBOL (GnuCOBOL) -> baseline"),
-    ("Execute", "run the transpiled Java"),
-    ("Compare", "diff baseline vs Java results"),
-    ("Report", "write migration-report.md/json"),
-    ("Checkpoint", "archive state + target project"),
+    ("Ingest",      "fingerprint repo; SHA-256 source immutability baseline"),
+    ("Discover",    "find programs, copybooks, COPY/CALL/FILE dependency graphs"),
+    ("Transpile",   "real cobj (COBOL 4J) in Docker — NOT Java stubs"),
+    ("Collect",     "gather generated Java sources + stub detection"),
+    ("Preserve",    "vendor libcobj.jar runtime dependency"),
+    ("Generate",    "assemble target project + artifact provenance manifest"),
+    ("Baseline",    "run original COBOL (GnuCOBOL) → baseline snapshot"),
+    ("Execute",     "run the transpiled Java"),
+    ("Compare",     "exact / normalized / logical / semantic diff"),
+    ("Report",      "write migration-report.md/json with full audit"),
+    ("Checkpoint",  "archive everything into checkpoint-archive.zip"),
 ]
 
 
@@ -287,6 +287,44 @@ class Handler(BaseHTTPRequestHandler):
             ws = os.path.join(WORKSPACE, run_id)
             shutil.rmtree(ws, ignore_errors=True)
             self._json({"ok": True})
+            return
+        if u.path == "/api/deps":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            run = RUNS.get(rid)
+            if not run:
+                self._json({"ok": False, "error": "unknown run"}, 404)
+                return
+            state = engine.load_json(os.path.join(run["out"], "state.json"), {})
+            disc = state.get("data", {}).get("discover", {})
+            imm  = state.get("data", {}).get("immutability", [])
+            tr   = state.get("data", {}).get("transpile", {})
+            manifest = engine.load_json(os.path.join(run["out"], "manifest.json"), {})
+            self._json({
+                "ok": True,
+                "copy_deps": disc.get("copy_deps", {}),
+                "copybook_coverage": disc.get("copybook_coverage", {}),
+                "missing_copybooks": disc.get("missing_copybooks", []),
+                "call_graph": disc.get("call_graph", {}),
+                "file_assigns": disc.get("file_assigns", {}),
+                "immutability": imm,
+                "transpile_status": tr.get("status", {}),
+                "provenance": manifest.get("programs", []),
+                "stub_flags": state.get("data", {}).get("collect", {}).get("stub_flags", {}),
+                "verdict": state.get("data", {}).get("manifest", {}) and
+                           state.get("stages", {}).get("report", {}).get("detail", ""),
+            })
+            return
+        if u.path == "/api/report-json":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            run = RUNS.get(rid)
+            path = os.path.join(run["out"], "migration-report.json") if run else ""
+            if not path or not os.path.exists(path):
+                self._send(404, b"no report yet")
+                return
+            with open(path, "rb") as fh:
+                self._send(200, fh.read(), "application/json; charset=utf-8")
             return
         self._json({"ok": False, "error": "unknown route"}, 404)
 

@@ -2,106 +2,251 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>COBOL -&gt; Java Migration</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>COBOL → Java Migration Portal</title>
 <style>
-  :root {
-    --bg:#0f1420; --panel:#171e2e; --panel2:#1d2740; --line:#2a3550;
-    --text:#dbe4f5; --muted:#8fa1c0; --acc:#4f8cff; --ok:#3ecf8e; --warn:#ffb454; --err:#ff6b6b;
-  }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial; background:var(--bg); color:var(--text); }
-  .wrap { max-width:1280px; margin:0 auto; padding:20px; }
-  h1 { font-size:20px; margin:0 0 2px; }
-  .sub { color:var(--muted); font-size:13px; margin-bottom:18px; }
-  .layout { display:grid; grid-template-columns:340px 1fr; gap:16px; }
-  @media (max-width:900px){ .layout{ grid-template-columns:1fr; } }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
-  .card h2 { font-size:14px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
-  label { font-size:13px; color:var(--muted); display:block; margin:8px 0 4px; }
-  input[type=text], input[type=file] { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
-    background:var(--panel2); color:var(--text); font-size:13px; }
-  button { cursor:pointer; border:none; border-radius:8px; padding:9px 14px; font-size:13px; font-weight:600; }
-  .btn { background:var(--acc); color:#fff; }
-  .btn.gray { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
-  .btn.danger { background:transparent; color:var(--err); border:1px solid var(--err); }
-  .btn:disabled { opacity:.45; cursor:not-allowed; }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .radio-row { display:flex; gap:14px; margin:4px 0 8px; }
-  .radio-row label { margin:0; display:flex; gap:6px; align-items:center; cursor:pointer; color:var(--text); }
-  .run-item { padding:9px 10px; border-radius:8px; border:1px solid var(--line); margin-bottom:8px; cursor:pointer; }
-  .run-item.sel { border-color:var(--acc); background:var(--panel2); }
-  .run-item .rname { font-weight:600; font-size:13px; }
-  .chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; margin-left:6px; vertical-align:1px; }
-  .chip.ready{background:#27334f;color:var(--muted)} .chip.running{background:#233a5e;color:var(--acc)}
-  .chip.done{background:#15362a;color:var(--ok)} .chip.error{background:#4a2020;color:var(--err)}
-  .chip.interrupted{background:#3a3320;color:var(--warn)}
-  .stepper { display:grid; gap:6px; }
-  .step { display:grid; grid-template-columns:26px 1fr auto; gap:10px; align-items:center; padding:9px 10px;
-    border:1px solid var(--line); border-radius:9px; background:var(--panel); }
-  .step .num { width:26px; height:26px; border-radius:50%; background:var(--panel2); color:var(--muted);
-    display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; }
-  .step .ttl { font-size:13px; font-weight:600; }
-  .step .dsc { font-size:12px; color:var(--muted); }
-  .step.done .num { background:#15362a; color:var(--ok); }
-  .step.done { border-color:#1d3a2d; }
-  .step.running .num { background:#233a5e; color:var(--acc); animation:pulse 1.2s infinite; }
-  .step.running { border-color:var(--acc); }
-  .step.error .num { background:#4a2020; color:var(--err); }
-  .step.error { border-color:var(--err); }
-  @keyframes pulse { 50% { opacity:.45; } }
-  .st-badge { font-size:11px; padding:2px 8px; border-radius:20px; background:var(--panel2); color:var(--muted); }
-  .step.done .st-badge { background:#15362a; color:var(--ok); }
-  .step.running .st-badge { background:#233a5e; color:var(--acc); }
-  .step.error .st-badge { background:#4a2020; color:var(--err); }
-  .banner { border-radius:10px; padding:12px 14px; margin-bottom:14px; font-weight:700; font-size:15px; }
-  .banner.done { background:#15362a; color:var(--ok); border:1px solid #1d3a2d; }
-  .banner.error { background:#4a2020; color:var(--err); border:1px solid #6b2c2c; }
-  .banner.interrupted { background:#3a3320; color:var(--warn); border:1px solid #57491f; }
-  .log { background:#0a0e18; border:1px solid var(--line); border-radius:10px; padding:10px; height:300px;
-    overflow:auto; font-family:ui-monospace,Consolas,monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
-  .log .dim { color:#5a6b8c; }
-  a.dl { color:var(--acc); font-size:13px; text-decoration:none; }
-  .muted { color:var(--muted); font-size:12px; }
-  .err-box { background:#2a1515; border:1px solid var(--err); border-radius:8px; padding:10px; color:var(--err); font-size:12px; white-space:pre-wrap; }
-  .none { color:var(--muted); padding:10px 0; font-size:13px; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+:root {
+  --bg:#080d18; --surface:#0f1625; --surface2:#161e30; --surface3:#1c2640;
+  --border:#243050; --border2:#2d3d5e;
+  --text:#dce8ff; --muted:#7a92b8; --dim:#4a5c7a;
+  --acc:#5b8cff; --acc2:#7ba4ff;
+  --ok:#34d399; --ok2:#10b981;
+  --warn:#fbbf24; --warn2:#f59e0b;
+  --err:#f87171; --err2:#ef4444;
+  --purple:#a78bfa; --purple2:#8b5cf6;
+  --grad: linear-gradient(135deg, #5b8cff 0%, #a78bfa 100%);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* ---- Layout ---- */
+.topbar{display:flex;align-items:center;gap:12px;padding:14px 24px;
+  border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100}
+.logo{width:32px;height:32px;background:var(--grad);border-radius:8px;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px}
+.topbar-title{font-weight:700;font-size:16px}
+.topbar-sub{font-size:12px;color:var(--muted);margin-top:1px}
+.badge-online{margin-left:auto;font-size:11px;font-weight:600;color:var(--ok);
+  background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.25);
+  padding:3px 10px;border-radius:20px;display:flex;align-items:center;gap:5px}
+.badge-online::before{content:'';width:6px;height:6px;border-radius:50%;
+  background:var(--ok);display:inline-block;animation:pulse 1.5s infinite}
+
+.wrap{display:grid;grid-template-columns:300px 1fr;height:calc(100vh - 57px);overflow:hidden}
+@media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto}}
+.sidebar{border-right:1px solid var(--border);background:var(--surface);
+  display:flex;flex-direction:column;overflow:hidden}
+.sidebar-section{padding:14px;border-bottom:1px solid var(--border)}
+.sidebar-section h3{font-size:11px;font-weight:600;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.main{overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+
+/* ---- Input card ---- */
+.input-tabs{display:flex;gap:2px;margin-bottom:12px}
+.tab-btn{flex:1;padding:7px;border:none;border-radius:7px;font-size:12px;
+  font-weight:600;cursor:pointer;background:var(--surface3);color:var(--muted);
+  transition:all .15s}
+.tab-btn.active{background:rgba(91,140,255,.2);color:var(--acc2);
+  border:1px solid rgba(91,140,255,.3)}
+.drop-zone{border:2px dashed var(--border2);border-radius:10px;padding:28px 14px;
+  text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.drop-zone:hover,.drop-zone.over{border-color:var(--acc);background:rgba(91,140,255,.05)}
+.drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop-icon{font-size:28px;margin-bottom:8px}
+.drop-text{font-size:13px;color:var(--muted)}
+.drop-text span{color:var(--acc);cursor:pointer}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;font-weight:500}
+.field input{width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:8px;
+  background:var(--surface3);color:var(--text);font-size:12px;font-family:inherit;
+  transition:border .15s}
+.field input:focus{outline:none;border-color:var(--acc)}
+.btn{border:none;border-radius:8px;padding:9px 16px;font-size:12px;font-weight:600;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s}
+.btn-primary{background:var(--grad);color:#fff}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
+.btn-secondary{background:var(--surface3);color:var(--text);border:1px solid var(--border2)}
+.btn-secondary:hover{border-color:var(--acc);color:var(--acc2)}
+.btn-danger{background:transparent;color:var(--err);border:1px solid var(--err)}
+.btn-danger:hover{background:rgba(248,113,113,.1)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+
+/* ---- Run list ---- */
+.runs-list{overflow-y:auto;flex:1}
+.run-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;
+  transition:background .15s;position:relative}
+.run-item:hover{background:var(--surface2)}
+.run-item.sel{background:var(--surface3)}
+.run-item.sel::before{content:'';position:absolute;left:0;top:0;bottom:0;
+  width:3px;background:var(--acc);border-radius:2px}
+.run-name{font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.run-meta{font-size:11px;color:var(--muted);margin-top:3px}
+.chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.03em}
+.chip-ready{background:#1c2640;color:var(--muted)}
+.chip-running{background:rgba(91,140,255,.15);color:var(--acc);animation:pulse 1.5s infinite}
+.chip-done{background:rgba(52,211,153,.12);color:var(--ok)}
+.chip-error{background:rgba(248,113,113,.12);color:var(--err)}
+.chip-interrupted{background:rgba(251,191,36,.12);color:var(--warn)}
+
+/* ---- Banner ---- */
+.verdict-banner{border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:14px;font-weight:700;font-size:14px}
+.verdict-banner.green{background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.25);color:var(--ok)}
+.verdict-banner.yellow{background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.25);color:var(--warn)}
+.verdict-banner.red{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);color:var(--err)}
+.verdict-banner.running{background:rgba(91,140,255,.1);border:1px solid rgba(91,140,255,.25);color:var(--acc)}
+.verdict-icon{font-size:28px}
+
+/* ---- Tabs ---- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.card-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2)}
+.card-tab{padding:10px 18px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);
+  border-bottom:2px solid transparent;transition:all .15s}
+.card-tab.active{color:var(--acc2);border-bottom-color:var(--acc)}
+.card-body{padding:16px}
+
+/* ---- Stepper ---- */
+.stepper{display:flex;flex-direction:column;gap:6px}
+.step{display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:center;
+  padding:10px 12px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface2);transition:all .2s}
+.step-num{width:32px;height:32px;border-radius:50%;background:var(--surface3);
+  color:var(--muted);display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;flex-shrink:0}
+.step-ttl{font-size:13px;font-weight:600}
+.step-dsc{font-size:11px;color:var(--muted);margin-top:2px}
+.step-detail{font-size:11px;color:var(--muted);margin-top:3px;
+  font-family:'JetBrains Mono',monospace}
+.step-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:10px;
+  background:var(--surface3);color:var(--muted);white-space:nowrap}
+.step.done{border-color:rgba(52,211,153,.2)}
+.step.done .step-num{background:rgba(52,211,153,.15);color:var(--ok)}
+.step.done .step-badge{background:rgba(52,211,153,.12);color:var(--ok)}
+.step.running{border-color:rgba(91,140,255,.3)}
+.step.running .step-num{background:rgba(91,140,255,.15);color:var(--acc);animation:spin 2s linear infinite}
+.step.running .step-badge{background:rgba(91,140,255,.12);color:var(--acc)}
+.step.error{border-color:rgba(248,113,113,.2)}
+.step.error .step-num{background:rgba(248,113,113,.15);color:var(--err)}
+.step.error .step-badge{background:rgba(248,113,113,.12);color:var(--err)}
+
+/* ---- Log ---- */
+.log-box{background:#060c18;border:1px solid var(--border);border-radius:10px;
+  padding:12px;height:260px;overflow:auto;
+  font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.6;
+  white-space:pre-wrap;word-break:break-word;color:#8fa8d0}
+.log-box .log-ok{color:var(--ok)}
+.log-box .log-warn{color:var(--warn)}
+.log-box .log-err{color:var(--err)}
+
+/* ---- Dependency / audit panels ---- */
+.section-title{font-size:11px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+.tree-item{padding:4px 0;font-size:12px;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:6px}
+.tree-child{padding:3px 0 3px 20px;font-size:11px;color:var(--muted);
+  font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:6px;border-left:1px solid var(--border2)}
+.ok-icon{color:var(--ok);font-size:12px}
+.err-icon{color:var(--err);font-size:12px}
+.warn-icon{color:var(--warn);font-size:12px}
+table.audit-table{width:100%;border-collapse:collapse;font-size:12px}
+table.audit-table th{text-align:left;padding:6px 10px;color:var(--muted);
+  font-size:11px;font-weight:600;border-bottom:1px solid var(--border);
+  text-transform:uppercase;letter-spacing:.04em}
+table.audit-table td{padding:7px 10px;border-bottom:1px solid var(--border);
+  font-family:'JetBrains Mono',monospace;font-size:11px}
+table.audit-table tr:last-child td{border-bottom:none}
+table.audit-table tr:hover td{background:var(--surface3)}
+.hash-cell{color:var(--muted);letter-spacing:.04em}
+.status-IMMUTABLE{color:var(--ok);font-weight:700}
+.status-MODIFIED{color:var(--err);font-weight:700}
+.status-MISSING{color:var(--warn);font-weight:700}
+.status-AUTOMATIC{color:var(--ok)}
+.status-MANUAL{color:var(--warn)}
+
+.kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.kv-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px}
+.kv-card .kv-label{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.kv-card .kv-value{font-size:18px;font-weight:700;color:var(--text)}
+.kv-card .kv-sub{font-size:11px;color:var(--muted);margin-top:2px}
+
+.dl-link{color:var(--acc2);font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.dl-link:hover{text-decoration:underline}
+.err-box{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2);
+  border-radius:8px;padding:10px;color:var(--err);font-size:11px;
+  font-family:'JetBrains Mono',monospace;white-space:pre-wrap}
+
+.select-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+select{background:var(--surface3);border:1px solid var(--border2);border-radius:7px;
+  color:var(--text);font-size:12px;padding:6px 10px;outline:none}
+select:focus{border-color:var(--acc)}
+.none-msg{color:var(--muted);font-size:13px;padding:20px;text-align:center}
+
+@keyframes pulse{50%{opacity:.4}}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>COBOL &#8594; Java Migration</h1>
-  <div class="sub">
-    Upload a ZIP or a git URL first (step 0). Nothing is changed until you press Run; the source is copied into an
-    isolated workspace. Each of the 11 stages is a checkpoint, so any run can be resumed, restarted from a stage, or reset.
+<div class="topbar">
+  <div class="logo">c4</div>
+  <div>
+    <div class="topbar-title">cobj Portal</div>
+    <div class="topbar-sub">Enterprise COBOL → Java Modernization Engine</div>
   </div>
-  <div class="layout">
-    <div>
-      <div class="card">
-        <h2>1. New input</h2>
-        <div class="radio-row">
-          <label><input type="radio" name="src" value="zip" checked onchange="toggleSrc()"> ZIP file</label>
-          <label><input type="radio" name="src" value="git" onchange="toggleSrc()"> git URL</label>
-        </div>
-        <div id="zip-box">
-          <label>Repository zip (all files)</label>
-          <input type="file" id="zipfile" accept=".zip">
-        </div>
-        <div id="git-box" style="display:none">
-          <label>git URL</label>
-          <input type="text" id="giturl" placeholder="https://github.com/org/repo.git">
-          <label>branch (optional)</label>
-          <input type="text" id="gitbranch" placeholder="main">
-        </div>
-        <div class="row" style="margin-top:12px">
-          <button class="btn" id="ingestbtn" onclick="ingest()">Accept input</button>
+  <div class="badge-online" id="engineStatus">v2.0.0 Online</div>
+</div>
+
+<div class="wrap">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h3>New Migration</h3>
+      <div class="input-tabs">
+        <button class="tab-btn active" id="tabZip" onclick="switchTab('zip')">📦 Upload ZIP</button>
+        <button class="tab-btn" id="tabGit" onclick="switchTab('git')">🔗 Clone Git</button>
+      </div>
+      <div id="zipBox">
+        <div class="drop-zone" id="dropZone">
+          <input type="file" id="zipFile" accept=".zip" onchange="onFileSelected(this)">
+          <div class="drop-icon">📂</div>
+          <div class="drop-text">Drag & drop ZIP or <span>browse files</span></div>
+          <div id="selectedFile" style="margin-top:6px;font-size:11px;color:var(--acc)"></div>
         </div>
       </div>
-      <div class="card">
-        <h2>Runs</h2>
-        <div id="runs"></div>
+      <div id="gitBox" style="display:none">
+        <div class="field">
+          <label>Repository URL</label>
+          <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git">
+        </div>
+        <div class="field">
+          <label>Branch (optional)</label>
+          <input type="text" id="gitBranch" placeholder="main">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="ingestBtn" onclick="doIngest()">
+          ⚡ Accept Input
+        </button>
       </div>
     </div>
-    <div id="main"></div>
+
+    <div class="sidebar-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column;padding-bottom:0">
+      <h3>Runs</h3>
+      <div class="runs-list" id="runsList">
+        <div class="none-msg">No runs yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main area -->
+  <div class="main" id="mainArea">
+    <div class="none-msg" style="padding:60px 0">
+      <div style="font-size:40px;margin-bottom:12px">🔬</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Select or create a run</div>
+      <div style="font-size:13px;color:var(--muted)">Upload a ZIP or provide a Git URL, then run the 11-stage pipeline</div>
+    </div>
   </div>
 </div>
 
@@ -109,147 +254,353 @@
 const $ = id => document.getElementById(id);
 let sel = localStorage.getItem('sel') || '';
 let busy = false;
+let activeTab = 'zip';
 
-function toggleSrc(){
-  const v = document.querySelector('input[name=src]:checked').value;
-  $('zip-box').style.display = v==='zip' ? '' : 'none';
-  $('git-box').style.display = v==='git' ? '' : 'none';
+// ---- Input handling ----
+function switchTab(t) {
+  activeTab = t;
+  $('tabZip').classList.toggle('active', t === 'zip');
+  $('tabGit').classList.toggle('active', t === 'git');
+  $('zipBox').style.display = t === 'zip' ? '' : 'none';
+  $('gitBox').style.display = t === 'git' ? '' : 'none';
 }
 
-async function api(path, body){
-  const r = await fetch(path, { method: body? 'POST':'GET',
-    headers: {'Content-Type':'application/json'},
-    body: body? JSON.stringify(body) : undefined });
-  return r.json();
+function onFileSelected(inp) {
+  const f = inp.files[0];
+  $('selectedFile').textContent = f ? `✓ ${f.name} (${(f.size/1024).toFixed(0)} KB)` : '';
 }
 
-async function ingest(){
+// Drag-drop
+const dz = $('dropZone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) { $('zipFile').files = e.dataTransfer.files; onFileSelected($('zipFile')); }
+});
+
+async function doIngest() {
   if (busy) return;
-  const v = document.querySelector('input[name=src]:checked').value;
-  busy = true; $('ingestbtn').disabled = true;
+  busy = true; $('ingestBtn').disabled = true;
   try {
     let payload;
-    if (v === 'zip') {
-      const f = $('zipfile').files[0];
-      if (!f) { alert('pick a zip file'); busy=false; $('ingestbtn').disabled=false; return; }
+    if (activeTab === 'zip') {
+      const f = $('zipFile').files[0];
+      if (!f) { alert('Select a ZIP file first.'); return; }
       const buf = await f.arrayBuffer();
-      const b64 = bytesToBase64(new Uint8Array(buf));
-      payload = { source:'zip', name: f.name, data: b64 };
+      payload = { source: 'zip', name: f.name, data: b64(new Uint8Array(buf)) };
     } else {
-      const url = $('giturl').value.trim();
-      if (!url) { alert('paste a git url'); busy=false; $('ingestbtn').disabled=false; return; }
-      payload = { source:'git', name:'git-run', url, branch: $('gitbranch').value.trim() };
+      const url = $('gitUrl').value.trim();
+      if (!url) { alert('Enter a Git URL.'); return; }
+      payload = { source: 'git', name: 'git-run', url, branch: $('gitBranch').value.trim() };
     }
     const res = await api('/api/ingest', payload);
     if (res.ok) { sel = res.run_id; localStorage.setItem('sel', sel); poll(); }
-    else alert('ingest failed: ' + (res.error||''));
-  } finally { busy=false; $('ingestbtn').disabled=false; }
+    else alert('Ingest failed: ' + (res.error || 'unknown error'));
+  } finally { busy = false; $('ingestBtn').disabled = false; }
 }
 
-function bytesToBase64(bytes){
-  let bin=''; const chunk=0x8000;
-  for (let i=0;i<bytes.length;i+=chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i,i+chunk));
+function b64(bytes) {
+  let bin = ''; const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
   return btoa(bin);
 }
 
-async function runIt(restartFrom){
-  if (!sel) return;
-  await api('/api/run', { run_id: sel, restart_from: restartFrom });
-}
-
-async function resetRun(){
-  if (!sel) return;
-  if (!confirm('Delete this run and its workspace?')) return;
-  await api('/api/reset', { run_id: sel });
-  sel=''; localStorage.removeItem('sel'); poll();
-}
-
-function statusOf(st){ return st && st.status ? st.status : 'pending'; }
-
-function render(state){
-  const runsEl = $('runs');
-  if (!runsEl) return;
-  runsEl.innerHTML = state.runs.length ? '' : '<div class="none">no runs yet</div>';
-  state.runs.forEach(r => {
-    const d = document.createElement('div');
-    d.className = 'run-item' + (r.run_id===sel ? ' sel' : '');
-    const nm = document.createElement('div');
-    nm.className = 'rname';
-    nm.innerHTML = escapeHtml(r.name || r.run_id) + '<span class="chip '+r.status+'">'+r.status+'</span>';
-    const st = document.createElement('div');
-    st.className = 'muted';
-    st.textContent = (r.stages.filter(s=>s.status==='done').length) + '/11 stages  |  ' +
-      (r.verdict ? ('verdict: ' + r.verdict) : (r.run_id));
-    d.append(nm, st);
-    d.onclick = () => { sel = r.run_id; localStorage.setItem('sel', sel); poll(); };
-    runsEl.appendChild(d);
+// ---- API ----
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
   });
+  return r.json();
+}
 
-  const main = $('main');
+// ---- Pipeline control ----
+async function runPipeline(restartFrom) {
+  if (!sel) return;
+  await api('/api/run', { run_id: sel, restart_from: restartFrom || 0 });
+  poll();
+}
+
+async function resetRun() {
+  if (!sel || !confirm('Delete this run and its workspace?')) return;
+  await api('/api/reset', { run_id: sel });
+  sel = ''; localStorage.removeItem('sel'); poll();
+}
+
+// ---- Render ----
+let currentTab = 'pipeline';
+let depsCache = null;
+
+function setMainTab(t) {
+  currentTab = t;
+  document.querySelectorAll('.card-tab').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === t);
+  });
+  document.querySelectorAll('.card-panel').forEach(el => {
+    el.style.display = el.dataset.panel === t ? '' : 'none';
+  });
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function colorLog(line) {
+  if (/\[PASS\]/i.test(line)) return `<span class="log-ok">${escHtml(line)}</span>`;
+  if (/\[(WARN|MISSING|PARTIAL)\]/i.test(line)) return `<span class="log-warn">${escHtml(line)}</span>`;
+  if (/\[(FAIL|ERROR)\]/i.test(line)) return `<span class="log-err">${escHtml(line)}</span>`;
+  return escHtml(line);
+}
+
+function renderRuns(state) {
+  const el = $('runsList');
+  if (!state.runs.length) { el.innerHTML = '<div class="none-msg">No runs yet</div>'; return; }
+  el.innerHTML = state.runs.map(r => {
+    const cls = `chip chip-${r.status}`;
+    const done = r.stages.filter(s => s.status === 'done').length;
+    return `<div class="run-item${r.run_id===sel?' sel':''}" onclick="selRun('${r.run_id}')">
+      <div class="run-name">${escHtml(r.name||r.run_id)}<span class="${cls}">${r.status}</span></div>
+      <div class="run-meta">${done}/11 stages${r.verdict?' · '+r.verdict:''}</div>
+    </div>`;
+  }).join('');
+}
+
+function selRun(id) {
+  sel = id; localStorage.setItem('sel', sel); depsCache = null; poll();
+}
+
+function verdictHtml(r) {
+  if (!r) return '';
+  if (r.status === 'running')
+    return `<div class="verdict-banner running"><div class="verdict-icon">⚙️</div><div>Pipeline running…</div></div>`;
+  const v = r.verdict || '';
+  const done = r.stages.filter(s=>s.status==='done').length;
+  const total = r.stages.length;
+  if (r.status === 'error')
+    return `<div class="verdict-banner red"><div class="verdict-icon">🔴</div><div>Stage failed — ${done}/${total} stages complete</div></div>`;
+  if (r.status === 'done') {
+    const isPass = v === 'done' || v === 'PASS';
+    return `<div class="verdict-banner ${isPass?'green':'yellow'}">
+      <div class="verdict-icon">${isPass?'🟢':'🟡'}</div>
+      <div>${isPass?'AUTOMATED AND VERIFIED':'AUTOMATED WITH LIMITATIONS'} — ${done}/${total} stages</div>
+    </div>`;
+  }
+  if (r.status === 'interrupted')
+    return `<div class="verdict-banner yellow"><div class="verdict-icon">⏸️</div><div>Interrupted — resume from checkpoint</div></div>`;
+  return '';
+}
+
+function renderMain(state) {
   const r = state.runs.find(x => x.run_id === sel);
+  const el = $('mainArea');
   if (!r) {
-    main.innerHTML = '<div class="card"><div class="none">Select or create a run on the left to start.</div></div>';
+    el.innerHTML = `<div class="none-msg" style="padding:60px 0">
+      <div style="font-size:40px;margin-bottom:12px">🔬</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Select or create a run</div>
+      <div style="font-size:13px;color:var(--muted)">Upload a ZIP or provide a Git URL, then run the 11-stage pipeline</div>
+    </div>`;
     return;
   }
 
-  let banner = '';
-  if (r.status==='running') banner = '<div class="banner interrupted">Running stages...</div>';
-  else if (r.status==='done') banner = '<div class="banner done">Pipeline completed - verdict ' +
-        (r.verdict||'?') + '</div>';
-  else if (r.status==='error') banner = '<div class="banner error">Stage failed</div>';
-  else if (r.status==='interrupted') banner = '<div class="banner interrupted">Interrupted - resume from a checkpoint</div>';
-
-  const steps = r.stages.map(s => {
-    const st = statusOf(s);
-    const detail = (st==='done' || st==='error') && s.detail ? '<div class="muted">'+escapeHtml(s.detail)+'</div>' : '';
-    return '<div class="step '+st+'">' +
-      '<div class="num">'+s.index+'</div>' +
-      '<div><div class="ttl">'+s.label+'</div><div class="dsc">'+s.desc+'</div>'+detail+'</div>' +
-      '<span class="st-badge">'+st+'</span></div>';
+  const lastDone = r.stages.filter(s=>s.status==='done').length - 1;
+  const stagesHtml = r.stages.map(s => {
+    const st = s.status || 'pending';
+    const detail = (st==='done'||st==='error') && s.detail
+      ? `<div class="step-detail">${escHtml(s.detail)}</div>` : '';
+    return `<div class="step ${st}">
+      <div class="step-num">${s.index}</div>
+      <div><div class="step-ttl">${escHtml(s.label)}</div>
+        <div class="step-dsc">${escHtml(s.desc)}</div>${detail}</div>
+      <span class="step-badge">${st}</span>
+    </div>`;
   }).join('');
 
-  const continueLabel = r.status==='done' ? 'Re-run all' : (r.last_stage>=0 ? 'Continue' : 'Run pipeline');
-  const restartSel = '<select id="from">'+r.stages.map(s =>
-      '<option value="'+s.index+'"'+(s.index===r.last_stage+1?' selected':'')+'>'+s.index+' - '+s.label+'</option>'
-    ).join('')+'</select>';
+  const stageOpts = r.stages.map(s =>
+    `<option value="${s.index}"${s.index===lastDone+1?' selected':''}>${s.index} – ${s.label}</option>`
+  ).join('');
 
-  const errHtml = r.error ? '<div class="err-box">'+escapeHtml(r.error)+'</div><br>' : '';
-  const dl = r.checkpoint_size != null
-      ? '<a class="dl" href="/checkpoint?run_id='+encodeURIComponent(r.run_id)+'" target="_blank">Download checkpoint ('+r.checkpoint_size+' bytes)</a>'
-      : '';
+  const canContinue = r.status !== 'running';
+  const contLabel = r.status==='done' ? 'Re-run all' : (lastDone>=0 ? 'Continue' : 'Run pipeline');
 
-  main.innerHTML =
-    '<div class="card">'+banner+
-    '<div class="row" style="margin-bottom:12px">'+
-    '<button class="btn" id="go" onclick="runIt('+(r.last_stage+1)+')">'+continueLabel+'</button>'+
-    '<button class="gray btn" onclick="runIt(Number($(\'from\').value))">Re-run from stage</button>'+restartSel+
-    '<button class="danger btn" onclick="resetRun()">Reset</button>'+
-    '</div>'+
-    '<div class="row" style="margin-bottom:4px">'+
-    '<a class="dl" href="/report?run_id='+encodeURIComponent(r.run_id)+'" target="_blank">View report</a>'+
-    '<span class="muted">|</span>'+dl+
-    '</div>'+
-    '</div>'+
-    '<div class="card"><h2>Workflow stages</h2><div class="stepper">'+steps+'</div></div>'+
-    '<div class="card"><h2>Log</h2><div class="log" id="logbox">'+
-      (r.log||[]).map(l => escapeHtml(l)).join('\n') +
-    '</div></div>';
+  const dlReport = r.stages.some(s=>s.label==='Report'&&s.status==='done')
+    ? `<a class="dl-link" href="/report?run_id=${encodeURIComponent(r.run_id)}" target="_blank">📄 Migration Report</a>` : '';
+  const dlArchive = r.checkpoint_size != null
+    ? `<a class="dl-link" href="/checkpoint?run_id=${encodeURIComponent(r.run_id)}" target="_blank">📦 Checkpoint (${(r.checkpoint_size/1024/1024).toFixed(1)} MB)</a>` : '';
 
-  const box = $('logbox');
-  if (box) box.scrollTop = box.scrollHeight;
-  if (r.status==='running') setTimeout(poll, 1200);
+  const logHtml = (r.log||[]).map(colorLog).join('\n');
+
+  el.innerHTML = `
+    ${verdictHtml(r)}
+    ${r.error ? `<div class="err-box">${escHtml(r.error)}</div>` : ''}
+
+    <div class="select-row">
+      <button class="btn btn-primary" onclick="runPipeline(${lastDone+1})" ${!canContinue?'disabled':''}>${contLabel}</button>
+      <button class="btn btn-secondary" onclick="runPipeline(Number($('fromStage').value))" ${!canContinue?'disabled':''}>Re-run from</button>
+      <select id="fromStage">${stageOpts}</select>
+      <button class="btn btn-danger" onclick="resetRun()">🗑 Reset</button>
+      ${dlReport} ${dlArchive}
+    </div>
+
+    <div class="card">
+      <div class="card-tabs">
+        <div class="card-tab${currentTab==='pipeline'?' active':''}" data-tab="pipeline" onclick="setMainTab('pipeline')">📋 Pipeline</div>
+        <div class="card-tab${currentTab==='audit'?' active':''}" data-tab="audit" onclick="loadAudit()">🔍 Audit</div>
+        <div class="card-tab${currentTab==='log'?' active':''}" data-tab="log" onclick="setMainTab('log')">📟 Log</div>
+      </div>
+
+      <div class="card-body card-panel" data-panel="pipeline" style="${currentTab!=='pipeline'?'display:none':''}">
+        <div class="stepper">${stagesHtml}</div>
+      </div>
+
+      <div class="card-body card-panel" data-panel="audit" style="${currentTab!=='audit'?'display:none':''}">
+        <div id="auditContent"><div class="none-msg">Click the Audit tab to load dependency analysis.</div></div>
+      </div>
+
+      <div class="card-body card-panel" data-panel="log" style="${currentTab!=='log'?'display:none':''}">
+        <div class="log-box" id="logBox">${logHtml}</div>
+      </div>
+    </div>`;
+
+  const lb = $('logBox');
+  if (lb) lb.scrollTop = lb.scrollHeight;
+
+  if (currentTab === 'audit' && !depsCache) loadAudit();
+
+  if (r.status === 'running') setTimeout(poll, 1200);
 }
 
-function escapeHtml(s){
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+async function loadAudit() {
+  currentTab = 'audit';
+  document.querySelectorAll('.card-tab').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === 'audit');
+  });
+  document.querySelectorAll('.card-panel').forEach(el => {
+    el.style.display = el.dataset.panel === 'audit' ? '' : 'none';
+  });
+  const ac = $('auditContent');
+  if (!ac) return;
+  if (!sel) { ac.innerHTML = '<div class="none-msg">No run selected.</div>'; return; }
+  if (depsCache) { renderAudit(depsCache); return; }
+  ac.innerHTML = '<div class="none-msg">Loading audit data…</div>';
+  try {
+    const res = await fetch(`/api/deps?run_id=${encodeURIComponent(sel)}`);
+    const data = await res.json();
+    if (data.ok) { depsCache = data; renderAudit(data); }
+    else ac.innerHTML = `<div class="err-box">${escHtml(data.error||'Failed to load')}</div>`;
+  } catch(e) {
+    ac.innerHTML = `<div class="err-box">${escHtml(String(e))}</div>`;
+  }
 }
 
-async function poll(){
+function renderAudit(d) {
+  const ac = $('auditContent');
+  if (!ac) return;
+
+  // Source immutability
+  const imm = d.immutability || [];
+  const immHtml = imm.length ? `
+    <div class="section-title">Source Immutability (SHA-256)</div>
+    <table class="audit-table">
+      <tr><th>File</th><th>Ingest Hash</th><th>Current Hash</th><th>Status</th></tr>
+      ${imm.map(r => {
+        const icon = r.status==='IMMUTABLE'?'✅':r.status==='MODIFIED'?'❌':'⚠️';
+        return `<tr>
+          <td>${escHtml(r.file)}</td>
+          <td class="hash-cell">${(r.ingest_hash||'').slice(0,16)}…</td>
+          <td class="hash-cell">${(r.current_hash||'N/A').slice(0,16)}…</td>
+          <td class="status-${r.status}">${icon} ${r.status}</td>
+        </tr>`;
+      }).join('')}
+    </table><br>` : '';
+
+  // Transpile status per program
+  const ts = d.transpile_status || {};
+  const prov = d.provenance || [];
+  const provHtml = prov.length ? `
+    <div class="section-title">Per-Program Provenance</div>
+    <table class="audit-table">
+      <tr><th>Source</th><th>Java</th><th>.class</th><th>Stub?</th><th>Status</th></tr>
+      ${prov.map(p => {
+        const ok = p.transpiled;
+        const stub = (d.stub_flags||{})[p.program_id+'.java'];
+        return `<tr>
+          <td>${escHtml(p.source||'')}</td>
+          <td>${p.java_file||'—'}</td>
+          <td>${p.class_file||'—'}</td>
+          <td>${stub?'<span class="err-icon">⚠️ STUB</span>':'<span class="ok-icon">✅</span>'}</td>
+          <td class="${ok?'status-AUTOMATIC':'status-MANUAL'}">${ok?'✅ OK':'❌ FAILED'}</td>
+        </tr>`;
+      }).join('')}
+    </table><br>` : '';
+
+  // COPY dependency graph
+  const cp = d.copy_deps || {};
+  const cov = d.copybook_coverage || {};
+  const missing = d.missing_copybooks || [];
+  let copyHtml = `<div class="section-title">COPYBOOK Dependencies</div>`;
+  let anyDeps = false;
+  for (const [src, copies] of Object.entries(cp)) {
+    if (!copies.length) continue;
+    anyDeps = true;
+    const srcCov = cov[src] || {};
+    const foundMap = {};
+    (srcCov.found||[]).forEach(f => foundMap[f.ref.toUpperCase()] = f.path);
+    copyHtml += `<div class="tree-item">📄 ${escHtml(src)}</div>`;
+    copies.forEach(c => {
+      const p = foundMap[c.toUpperCase()];
+      copyHtml += `<div class="tree-child">${p?'<span class="ok-icon">✅</span>':'<span class="err-icon">❌</span>'} COPY <code>${escHtml(c)}</code>${p?' → <span style="color:var(--muted)">'+escHtml(p)+'</span>':' <span style="color:var(--err)">MISSING</span>'}</div>`;
+    });
+  }
+  if (!anyDeps) copyHtml += '<div style="color:var(--muted);font-size:12px">No COPY statements found.</div>';
+  if (missing.length)
+    copyHtml += `<div style="margin-top:8px;color:var(--err);font-size:12px">⚠️ ${missing.length} missing copybook reference(s)</div>`;
+  copyHtml += '<br>';
+
+  // CALL graph
+  const cg = d.call_graph || {};
+  const graph = cg.graph || {};
+  const roots = cg.roots || [];
+  let callHtml = `<div class="section-title">CALL Dependency Graph</div>`;
+  let anyCall = false;
+  for (const [prog, deps] of Object.entries(graph)) {
+    if (!deps.static?.length && !deps.dynamic?.length) continue;
+    anyCall = true;
+    callHtml += `<div class="tree-item">🔷 ${escHtml(prog)}</div>`;
+    (deps.static||[]).forEach(c => callHtml += `<div class="tree-child"><span class="ok-icon">→</span> CALL <code>${escHtml(c)}</code> <span style="color:var(--muted)">(static)</span></div>`);
+    (deps.dynamic||[]).forEach(c => callHtml += `<div class="tree-child"><span class="warn-icon">→</span> CALL <code>${escHtml(c)}</code> <span style="color:var(--warn)">(DYNAMIC — manual review)</span></div>`);
+  }
+  if (!anyCall) callHtml += '<div style="color:var(--muted);font-size:12px">No CALL statements found.</div>';
+  callHtml += `<div style="margin-top:8px;font-size:11px;color:var(--muted)">Entry roots: <code>${roots.join(', ')||'none'}</code></div><br>`;
+
+  // FILE/dataset map
+  const fas = d.file_assigns || {};
+  let fileHtml = `<div class="section-title">File / Dataset Dependencies</div>`;
+  let anyFile = false;
+  for (const [src, assigns] of Object.entries(fas)) {
+    if (!assigns?.length) continue;
+    anyFile = true;
+    fileHtml += `<div class="tree-item">📁 ${escHtml(src)}</div>`;
+    assigns.forEach(a => fileHtml += `<div class="tree-child"><span class="ok-icon">→</span> ${escHtml(a.logical_name)} → <code>${escHtml(a.assign_path)}</code> <span style="color:var(--muted)">[${a.organization||'?'}]</span></div>`);
+  }
+  if (!anyFile) fileHtml += '<div style="color:var(--muted);font-size:12px">No SELECT…ASSIGN statements found.</div>';
+
+  ac.innerHTML = immHtml + provHtml + copyHtml + callHtml + fileHtml;
+}
+
+async function poll() {
   const state = await api('/api/state');
-  render(state);
-  const anyRunning = state.active;
-  if (!anyRunning) setTimeout(poll, 2500); else setTimeout(poll, 1200);
+  renderRuns(state);
+  renderMain(state);
+  if (!state.active) setTimeout(poll, 2500);
+  else setTimeout(poll, 1200);
 }
+
 poll();
 </script>
 </body>
