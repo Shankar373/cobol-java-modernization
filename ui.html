@@ -3,25 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>cobj Portal — Enterprise Modernization Engine</title>
+<title>cobj Portal — Enterprise COBOL → Java Modernization Engine</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 :root {
-  --bg: #090d16;
-  --surface: #0f1422;
-  --surface2: #141b2d;
-  --surface3: #1b243c;
-  --border: #1e2538;
-  --border2: #2b3552;
-  --text: #f1f5f9;
-  --muted: #94a3b8;
-  --dim: #475569;
-  --acc: #6366f1;
-  --acc-grad: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  --bg: #07090e;
+  --surface: #0b0d16;
+  --surface2: #101322;
+  --surface3: #161a2e;
+  --border: #181d30;
+  --border2: #242c47;
+  --text: #f3f4f6;
+  --muted: #9ca3af;
+  --dim: #4b5563;
+  --acc: #3b82f6;
+  --acc2: #60a5fa;
+  --acc-grad: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   --purple-grad: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
   --ok: #10b981;
+  --ok-bg: rgba(16, 185, 129, 0.1);
   --warn: #f59e0b;
+  --warn-bg: rgba(245, 158, 11, 0.1);
   --err: #ef4444;
+  --err-bg: rgba(239, 68, 68, 0.1);
+  --pending-bg: rgba(75, 85, 99, 0.1);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -41,10 +46,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 40px;
-  background-color: rgba(15, 20, 34, 0.6);
+  padding: 14px 24px;
+  background-color: var(--surface);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(12px);
 }
 .brand {
   display: flex;
@@ -62,12 +66,12 @@ body {
   font-weight: 700;
   font-size: 14px;
   color: #fff;
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
 }
 .brand-name {
   font-weight: 700;
-  font-size: 18px;
-  letter-spacing: -0.02em;
+  font-size: 16px;
+  letter-spacing: -0.01em;
 }
 .brand-sub {
   font-size: 11px;
@@ -78,9 +82,9 @@ body {
   font-size: 11px;
   font-weight: 600;
   color: var(--ok);
-  background: rgba(16, 185, 129, 0.1);
+  background: var(--ok-bg);
   border: 1px solid rgba(16, 185, 129, 0.2);
-  padding: 4px 12px;
+  padding: 3px 10px;
   border-radius: 20px;
   display: flex;
   align-items: center;
@@ -102,7 +106,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 16px;
-  margin: 24px auto;
+  margin: 20px auto;
   max-width: 800px;
   width: 100%;
   padding: 0 20px;
@@ -153,22 +157,22 @@ body {
 .upload-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 40px;
-  max-width: 640px;
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 580px;
   width: 100%;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
 }
 .upload-card h2 {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   margin-bottom: 8px;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 .upload-card p {
   color: var(--muted);
   font-size: 13px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   line-height: 1.5;
 }
 .tab-row {
@@ -189,22 +193,22 @@ body {
   transition: all 0.15s;
 }
 .tab-btn.active {
-  color: var(--acc-grad);
+  color: var(--acc2);
   border-bottom-color: var(--acc);
 }
 .dropzone {
   border: 2px dashed var(--border2);
-  border-radius: 12px;
-  padding: 40px 20px;
+  border-radius: 8px;
+  padding: 32px 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s;
-  background: rgba(20, 27, 45, 0.4);
+  background: rgba(16, 19, 34, 0.4);
   position: relative;
 }
 .dropzone:hover, .dropzone.over {
   border-color: var(--acc);
-  background: rgba(99, 102, 241, 0.04);
+  background: rgba(59, 130, 246, 0.04);
 }
 .dropzone input {
   position: absolute;
@@ -221,13 +225,13 @@ body {
   color: var(--muted);
 }
 .dropzone-text span {
-  color: var(--acc);
+  color: var(--acc2);
   font-weight: 600;
 }
 .selected-file-box {
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px 16px;
   display: flex;
   align-items: center;
@@ -263,7 +267,7 @@ body {
   background: var(--purple-grad);
   color: #fff;
   border: none;
-  padding: 12px 24px;
+  padding: 10px 20px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
@@ -338,6 +342,18 @@ body {
   color: var(--muted);
   margin-top: 4px;
 }
+.chip {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.chip-ready { background: var(--pending-bg); color: var(--muted); }
+.chip-running { background: rgba(59, 130, 246, 0.15); color: var(--acc2); }
+.chip-done { background: var(--ok-bg); color: var(--ok); }
+.chip-error { background: var(--err-bg); color: var(--err); }
+.chip-interrupted { background: var(--warn-bg); color: var(--warn); }
 
 /* ---- Content Area ---- */
 .content-area {
@@ -350,176 +366,196 @@ body {
 
 /* ---- Verdict / Failure Banner ---- */
 .status-banner {
-  border-radius: 12px;
-  padding: 16px 20px;
+  border-radius: 8px;
+  padding: 14px 18px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
 }
 .status-banner.error {
-  background: rgba(239, 68, 68, 0.08);
+  background: var(--err-bg);
   border: 1px solid rgba(239, 68, 68, 0.2);
   color: var(--err);
 }
 .status-banner.success {
-  background: rgba(16, 185, 129, 0.08);
+  background: var(--ok-bg);
   border: 1px solid rgba(16, 185, 129, 0.2);
   color: var(--ok);
 }
 .status-banner.running {
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
   color: var(--acc2);
 }
 .status-banner.warn {
-  background: rgba(245, 158, 11, 0.08);
+  background: var(--warn-bg);
   border: 1px solid rgba(245, 158, 11, 0.2);
   color: var(--warn);
 }
 .status-icon {
-  font-size: 24px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
+.status-banner.error .status-icon { background: var(--err); }
+.status-banner.success .status-icon { background: var(--ok); }
+.status-banner.running .status-icon { background: var(--acc); animation: pulse 1.5s infinite; }
+.status-banner.warn .status-icon { background: var(--warn); }
 
 /* ---- Controls Panel ---- */
 .controls-panel {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 .control-btn {
-  background: var(--surface2);
+  background: #1d243a;
   color: var(--text);
-  border: 1px solid var(--border2);
+  border: 1px solid var(--border);
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  transition: all 0.15s;
 }
 .control-btn:hover {
-  border-color: var(--acc);
+  background: var(--border2);
 }
 .control-btn.primary {
-  background: var(--acc-grad);
+  background: #3b82f6;
   border: none;
   color: #fff;
 }
+.control-btn.primary:hover {
+  background: #2563eb;
+}
 .control-btn.danger {
+  background: transparent;
   color: var(--err);
-  border-color: rgba(239, 68, 68, 0.3);
+  border: 1px solid var(--err);
 }
 .control-btn.danger:hover {
-  background: rgba(239, 68, 68, 0.06);
+  background: rgba(239, 68, 68, 0.08);
+}
+.controls-panel select {
+  background: #111827;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 7px 10px;
+  outline: none;
 }
 
 /* ---- Content Tabs Card ---- */
 .tabs-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 .tabs-header {
   display: flex;
-  background: var(--surface2);
+  background: rgba(16, 20, 34, 0.5);
   border-bottom: 1px solid var(--border);
 }
 .panel-tab {
   padding: 12px 20px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
+  transition: all 0.15s;
 }
 .panel-tab.active {
   color: var(--acc2);
   border-bottom-color: var(--acc);
+  background: var(--surface);
 }
 .panel-body {
-  padding: 20px;
+  padding: 16px;
 }
 
 /* ---- Stage Steps ---- */
 .stage-steps {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .stage-step {
   display: grid;
-  grid-template-columns: 32px 1fr auto;
+  grid-template-columns: 28px 1fr auto;
   gap: 12px;
   align-items: center;
-  padding: 12px;
-  background: var(--surface2);
+  padding: 10px 14px;
+  background: #111827;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
 }
-.stage-step.done { border-color: rgba(16, 185, 129, 0.15); }
-.stage-step.running { border-color: rgba(99, 102, 241, 0.3); }
-.stage-step.error { border-color: rgba(239, 68, 68, 0.2); }
-
 .stage-num {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--surface3);
   color: var(--muted);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
-.stage-step.done .stage-num { background: rgba(16, 185, 129, 0.12); color: var(--ok); }
-.stage-step.running .stage-num { background: rgba(99, 102, 241, 0.12); color: var(--acc); animation: spin 2s linear infinite; }
-.stage-step.error .stage-num { background: rgba(239, 68, 68, 0.12); color: var(--err); }
+.stage-step.done { border-color: rgba(16, 185, 129, 0.1); }
+.stage-step.done .stage-num { background: var(--ok-bg); color: var(--ok); }
+.stage-step.running { border-color: rgba(59, 130, 246, 0.2); }
+.stage-step.running .stage-num { background: rgba(59, 130, 246, 0.15); color: var(--acc); }
+.stage-step.error { border-color: rgba(239, 68, 68, 0.15); }
+.stage-step.error .stage-num { background: var(--err-bg); color: var(--err); }
 
 .stage-title { font-size: 13px; font-weight: 600; }
-.stage-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
-.stage-status {
-  font-size: 10px;
+.stage-desc { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.stage-status-badge {
+  font-size: 9px;
   font-weight: 700;
-  text-transform: uppercase;
-  padding: 4px 8px;
-  border-radius: 20px;
-  background: var(--surface3);
-  color: var(--muted);
+  padding: 3px 8px;
+  border-radius: 4px;
 }
-.stage-step.done .stage-status { background: rgba(16, 185, 129, 0.1); color: var(--ok); }
-.stage-step.running .stage-status { background: rgba(99, 102, 241, 0.1); color: var(--acc); }
-.stage-step.error .stage-status { background: rgba(239, 68, 68, 0.1); color: var(--err); }
+.stage-step.done .stage-status-badge { background: var(--ok-bg); color: var(--ok); }
+.stage-step.running .stage-status-badge { background: rgba(59, 130, 246, 0.15); color: var(--acc2); }
+.stage-step.error .stage-status-badge { background: var(--err-bg); color: var(--err); }
+.stage-step.pending .stage-status-badge { background: var(--pending-bg); color: var(--muted); }
 .stage-detail {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
-  margin-top: 4px;
-  padding-left: 2px;
+  margin-top: 3px;
 }
 
 /* ---- Log Window ---- */
 .log-window {
-  background: #05080f;
+  background: #04060a;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-  height: 350px;
+  border-radius: 8px;
+  padding: 12px;
+  height: 300px;
   overflow-y: auto;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #8da2c4;
+  color: #9cb3d5;
 }
 .log-ok { color: var(--ok); }
 .log-warn { color: var(--warn); }
@@ -529,64 +565,64 @@ body {
 .files-grid {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 .file-card {
-  background: var(--surface2);
+  background: #111827;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
+  border-radius: 8px;
+  padding: 12px 16px;
 }
 .file-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 .file-card-title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   font-family: 'JetBrains Mono', monospace;
 }
 .file-status-badge {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: 4px;
 }
-.status-exact { background: rgba(16, 185, 129, 0.1); color: var(--ok); }
-.status-normalized { background: rgba(99, 102, 241, 0.1); color: var(--acc2); }
-.status-differ { background: rgba(239, 68, 68, 0.1); color: var(--err); }
+.status-exact { background: var(--ok-bg); color: var(--ok); }
+.status-normalized { background: rgba(59, 130, 246, 0.1); color: var(--acc2); }
+.status-differ { background: var(--err-bg); color: var(--err); }
 .status-logical { background: rgba(139, 92, 246, 0.1); color: #a78bfa; }
 
 .file-comparison-details {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  font-size: 12px;
+  gap: 12px;
+  font-size: 11px;
 }
 @media(max-width: 600px) { .file-comparison-details { grid-template-columns: 1fr; } }
 .compare-side {
-  background: var(--surface3);
-  padding: 10px 12px;
-  border-radius: 6px;
+  background: var(--surface);
+  padding: 8px 10px;
+  border-radius: 4px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
 }
 .compare-label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--muted);
   text-transform: uppercase;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .diff-log {
   grid-column: 1 / -1;
-  background: #05080f;
-  padding: 12px;
-  border-radius: 6px;
+  background: #04060a;
+  padding: 10px;
+  border-radius: 4px;
   border: 1px solid var(--border);
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
@@ -597,7 +633,7 @@ body {
 /* ---- Footer ---- */
 .footer {
   text-align: center;
-  padding: 24px;
+  padding: 20px;
   color: var(--dim);
   font-size: 11px;
   border-top: 1px solid var(--border);
@@ -617,7 +653,7 @@ body {
     <div class="logo-icon">c4</div>
     <div>
       <div class="brand-name">cobj Portal</div>
-      <div class="brand-sub">Enterprise Modernization Engine</div>
+      <div class="brand-sub">Enterprise COBOL → Java Modernization Engine</div>
     </div>
   </div>
   <div class="online-badge">v2.0.0 Online</div>
@@ -865,13 +901,13 @@ function renderActiveWorkspace(r) {
   // Build Banner
   let banner = '';
   if (r.status === 'running') {
-    banner = `<div class="status-banner running"><div class="status-icon">⚙️</div><div>Pipeline running stage checks…</div></div>`;
+    banner = `<div class="status-banner running"><div class="status-icon"></div><div>Stage running… ${doneCount}/11 stages complete</div></div>`;
   } else if (r.status === 'done') {
-    banner = `<div class="status-banner success"><div class="status-icon">🟢</div><div>Pipeline completed successfully — verdict ${r.verdict || 'PASS'}</div></div>`;
+    banner = `<div class="status-banner success"><div class="status-icon"></div><div>Pipeline completed — verdict ${r.verdict || 'PASS'}</div></div>`;
   } else if (r.status === 'error') {
-    banner = `<div class="status-banner error"><div class="status-icon">🔴</div><div>Stage failed — pipeline validation halted</div></div>`;
+    banner = `<div class="status-banner error"><div class="status-icon"></div><div>Stage failed — ${doneCount}/11 stages complete</div></div>`;
   } else if (r.status === 'interrupted') {
-    banner = `<div class="status-banner warn"><div class="status-icon">⏸️</div><div>Interrupted — resume from last checkpoint</div></div>`;
+    banner = `<div class="status-banner warn"><div class="status-icon"></div><div>Interrupted — resume from last checkpoint</div></div>`;
   }
 
   // Stepper steps
@@ -887,7 +923,7 @@ function renderActiveWorkspace(r) {
           <div class="stage-desc">${escapeHtml(s.desc)}</div>
           ${detail}
         </div>
-        <span class="stage-status">${st}</span>
+        <span class="stage-status-badge">${st}</span>
       </div>`;
   }).join('');
 
@@ -898,7 +934,6 @@ function renderActiveWorkspace(r) {
   let filesHtml = '';
   if (r.stages[8] && (r.stages[8].status === 'done' || r.stages[8].status === 'error' || r.last_stage >= 8)) {
     // If compare stage was hit, show the comparison cards
-    // Retrieve comparison details from active state data
     const compareData = r.compare_data || {};
     const rows = compareData.rows || [];
     if (rows.length) {
@@ -967,17 +1002,17 @@ function renderActiveWorkspace(r) {
       <!-- Main Action Panels -->
       <div class="content-area">
         ${banner}
-        ${r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px;">${escapeHtml(r.error)}</div>` : ''}
+        ${r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px; margin-bottom:12px;">${escapeHtml(r.error)}</div>` : ''}
 
         <div class="controls-panel">
-          <button class="control-btn primary" onclick="runIt(${r.last_stage+1})">⚡ ${contText}</button>
-          <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">🔄 Re-run from</button>
+          <button class="control-btn primary" onclick="runIt(${r.last_stage+1})">Continue</button>
+          <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">Re-run from</button>
           <select id="stageSelect">${selectOpts}</select>
-          <button class="control-btn danger" onclick="resetRun()">🗑 Reset Workspace</button>
+          <button class="control-btn danger" onclick="resetRun()">Reset</button>
           
           <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
-            ${r.stages[9] && r.stages[9].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank">📄 View report</a>` : ''}
-            ${r.checkpoint_size != null ? `<a href="/checkpoint?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank">📦 Checkpoint (${(r.checkpoint_size/1024/1024).toFixed(1)} MB)</a>` : ''}
+            ${r.stages[9] && r.stages[9].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📄 View report</a>` : ''}
+            ${r.checkpoint_size != null ? `<a href="/checkpoint?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📦 Checkpoint</a>` : ''}
           </div>
         </div>
 
