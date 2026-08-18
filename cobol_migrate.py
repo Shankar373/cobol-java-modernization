@@ -691,7 +691,7 @@ class Pipeline:
 
     # -- runner --------------------------------------------------------------
     def run(self, restart_from=None):
-        if restart_from is not None:
+        if restart_from is not None and restart_from < len(STAGES):
             for idx in range(restart_from, len(STAGES)):
                 self.state["stages"].pop(STAGES[idx], None)
             self.save_state()

@@ -271,7 +271,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/run":
             run_id = payload.get("run_id")
             restart = payload.get("restart_from", 0)
-            if restart is None:
+            if restart is None or restart >= len(engine.STAGES):
                 restart = 0
             with LOCK:
                 active = [r for r in RUNS.values() if r.get("status") == "running"]
