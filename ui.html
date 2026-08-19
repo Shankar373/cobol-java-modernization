@@ -663,11 +663,11 @@ body {
 <div class="stepper-bar">
   <div class="step-node active"><div class="circle">1</div> Select Source</div>
   <div class="step-line" id="line1"></div>
-  <div class="step-node" id="node2"><div class="circle">2</div> Interactive Parser</div>
+  <div class="step-node" id="node2"><div class="circle">2</div> Discover & Analyze</div>
   <div class="step-line" id="line2"></div>
-  <div class="step-node" id="node3"><div class="circle">3</div> Modernize Options</div>
+  <div class="step-node" id="node3"><div class="circle">3</div> Transpile & Validate</div>
   <div class="step-line" id="line3"></div>
-  <div class="step-node" id="node4"><div class="circle">4</div> Done & Download</div>
+  <div class="step-node" id="node4"><div class="circle">4</div> Enterprise Package</div>
 </div>
 
 <!-- Main Area Dynamic Container -->
@@ -756,11 +756,20 @@ function clearSelectedFile() {
   $('dropZone').style.display = 'block';
 }
 
-// Drag & drop
-const dz = $('dropZone');
-dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
-dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-dz.addEventListener('drop', e => {
+// Drag & drop (delegated so it survives re-renders of #mainContainer)
+document.addEventListener('dragover', e => {
+  const dz = e.target.closest('#dropZone');
+  if (!dz) return;
+  e.preventDefault();
+  dz.classList.add('over');
+});
+document.addEventListener('dragleave', e => {
+  const dz = e.target.closest('#dropZone');
+  if (dz) dz.classList.remove('over');
+});
+document.addEventListener('drop', e => {
+  const dz = e.target.closest('#dropZone');
+  if (!dz) return;
   e.preventDefault();
   dz.classList.remove('over');
   if (e.dataTransfer.files.length) {
@@ -846,6 +855,9 @@ function setPanelTab(tab) {
   if (tab === 'audit' && !depsCache) {
     loadAudit();
   }
+  if (tab === 'modernized') {
+    loadModernizedFiles();
+  }
 }
 
 function colorLog(line) {
@@ -879,7 +891,7 @@ function renderRuns(state) {
     return `
       <div class="run-item ${r.run_id === sel ? 'active' : ''}" onclick="selectRun('${r.run_id}')">
         <div class="run-title">${escapeHtml(r.name || r.run_id)} <span class="${chipClass}">${r.status}</span></div>
-        <div class="run-meta">${doneCount}/11 stages · ${r.verdict || 'No verdict'}</div>
+        <div class="run-meta">${doneCount}/${r.stages.length} stages · ${r.verdict || 'No verdict'}</div>
       </div>`;
   }).join('');
 }
@@ -891,17 +903,17 @@ function renderActiveWorkspace(r) {
 
   // Render Stepper Node indicators
   let doneCount = r.stages.filter(s => s.status === 'done').length;
-  $('node2').classList.toggle('active', doneCount >= 2);
-  $('line1').style.background = doneCount >= 2 ? 'var(--purple-grad)' : 'var(--border)';
-  $('node3').classList.toggle('active', doneCount >= 6);
-  $('line2').style.background = doneCount >= 6 ? 'var(--purple-grad)' : 'var(--border)';
-  $('node4').classList.toggle('active', doneCount >= 10);
-  $('line3').style.background = doneCount >= 10 ? 'var(--purple-grad)' : 'var(--border)';
+  $('node2').classList.toggle('active', doneCount >= 1);
+  $('line1').style.background = doneCount >= 1 ? 'var(--purple-grad)' : 'var(--border)';
+  $('node3').classList.toggle('active', doneCount >= 3);
+  $('line2').style.background = doneCount >= 3 ? 'var(--purple-grad)' : 'var(--border)';
+  $('node4').classList.toggle('active', doneCount >= 9);
+  $('line3').style.background = doneCount >= 9 ? 'var(--purple-grad)' : 'var(--border)';
 
   // Build Banner
   let banner = '';
   if (r.status === 'running') {
-    banner = `<div class="status-banner running"><div class="status-icon"></div><div>Stage running… ${doneCount}/11 stages complete</div></div>`;
+    banner = `<div class="status-banner running"><div class="status-icon"></div><div>Stage running… ${doneCount}/${r.stages.length} stages complete</div></div>`;
   } else if (r.status === 'done') {
     if (r.verdict === 'PARTIAL') {
       banner = `<div class="status-banner warn"><div class="status-icon"></div><div>Pipeline completed — verdict PARTIAL</div></div>`;
@@ -909,9 +921,9 @@ function renderActiveWorkspace(r) {
       banner = `<div class="status-banner success"><div class="status-icon"></div><div>Pipeline completed — verdict ${r.verdict || 'PASS'}</div></div>`;
     }
   } else if (r.status === 'error') {
-    banner = `<div class="status-banner error"><div class="status-icon"></div><div>Stage failed — ${doneCount}/11 stages complete</div></div>`;
+    banner = `<div class="status-banner error"><div class="status-icon"></div><div>Stage failed — ${doneCount}/${r.stages.length} stages complete</div></div>`;
   } else if (r.status === 'interrupted') {
-    banner = `<div class="status-banner warn"><div class="status-icon"></div><div>Interrupted — resume from last checkpoint</div></div>`;
+    banner = `<div class="status-banner warn"><div class="status-icon"></div><div>Interrupted — resume from last stage</div></div>`;
   }
 
   // Stepper steps
@@ -919,11 +931,24 @@ function renderActiveWorkspace(r) {
     const st = s.status || 'pending';
     const detail = (st === 'done' || st === 'error') && s.detail
       ? `<div class="stage-detail">${escapeHtml(s.detail)}</div>` : '';
+
+    // Extra badge for Gate 1 (Compare) and Gate 2 (Validate)
+    let gateBadge = '';
+    if (s.label === 'Compare' && st === 'done') {
+      gateBadge = `<span style="font-size:10px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.1); padding:2px 8px; border-radius:4px; margin-left:8px;">GATE 1 PASS ✓</span>`;
+    }
+    if (s.label === 'Validate' && st === 'done') {
+      gateBadge = `<span style="font-size:10px; font-weight:700; color:#8b5cf6; background:rgba(139,92,246,0.1); padding:2px 8px; border-radius:4px; margin-left:8px;">GATE 2 PASS ✓</span>`;
+    }
+    if (s.label === 'Validate' && st === 'error') {
+      gateBadge = `<span style="font-size:10px; font-weight:700; color:#ef4444; background:rgba(239,68,68,0.1); padding:2px 8px; border-radius:4px; margin-left:8px;">GATE 2 FAIL ✗</span>`;
+    }
+
     return `
       <div class="stage-step ${st}">
         <div class="stage-num">${s.index}</div>
         <div>
-          <div class="stage-title">${escapeHtml(s.label)}</div>
+          <div class="stage-title">${escapeHtml(s.label)}${gateBadge}</div>
           <div class="stage-desc">${escapeHtml(s.desc)}</div>
           ${detail}
         </div>
@@ -982,14 +1007,20 @@ function renderActiveWorkspace(r) {
     filesHtml = '<div style="color:var(--muted); text-align:center; padding:24px;">Parity files comparison will be populated once the Baseline and Execute stages finish.</div>';
   }
 
-  // Stepper selections
+  // Stepper selections — default to failed stage on error, else last_stage+1
+  let defaultRestartIdx = r.last_stage + 1;
+  if (r.status === 'error') {
+    const failedStage = r.stages.find(s => s.status === 'error');
+    if (failedStage) defaultRestartIdx = failedStage.index;
+  }
   const selectOpts = r.stages.map(s =>
-    `<option value="${s.index}" ${s.index === r.last_stage+1 ? 'selected' : ''}>${s.index} - ${s.label}</option>`
+    `<option value="${s.index}" ${s.index === defaultRestartIdx ? 'selected' : ''}>${s.index} - ${s.label}</option>`
   ).join('');
 
   // Primary Run buttons
   const isDone = r.status === 'done';
   const contText = isDone ? 'Re-run all' : (r.last_stage >= 0 ? 'Continue' : 'Run pipeline');
+  const contIdx = isDone ? 0 : defaultRestartIdx;
 
   container.innerHTML = `
     <div class="app-container">
@@ -1009,14 +1040,14 @@ function renderActiveWorkspace(r) {
         ${r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px; margin-bottom:12px;">${escapeHtml(r.error)}</div>` : ''}
 
         <div class="controls-panel">
-          <button class="control-btn primary" onclick="runIt(${isDone ? 0 : r.last_stage+1})">${contText}</button>
+          <button class="control-btn primary" onclick="runIt(${contIdx})">${contText}</button>
           <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">Re-run from</button>
           <select id="stageSelect">${selectOpts}</select>
           <button class="control-btn danger" onclick="resetRun()">Reset</button>
           
           <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
-            ${r.stages[9] && r.stages[9].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📄 View report</a>` : ''}
-            ${r.checkpoint_size != null ? `<a href="/checkpoint?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📦 Checkpoint</a>` : ''}
+            ${r.stages[11] && r.stages[11].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📄 View report</a>` : ''}
+            ${r.package_size != null ? `<a href="/package?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📦 Download Package</a>` : ''}
           </div>
         </div>
 
@@ -1025,6 +1056,7 @@ function renderActiveWorkspace(r) {
             <div class="panel-tab ${currentPanelTab === 'pipeline' ? 'active' : ''}" data-tab="pipeline" onclick="setPanelTab('pipeline')">📋 Pipeline</div>
             <div class="panel-tab ${currentPanelTab === 'audit' ? 'active' : ''}" data-tab="audit" onclick="setPanelTab('audit')">🔍 Audit</div>
             <div class="panel-tab ${currentPanelTab === 'files' ? 'active' : ''}" data-tab="files" onclick="setPanelTab('files')">📂 Parity Files</div>
+            <div class="panel-tab ${currentPanelTab === 'modernized' ? 'active' : ''}" data-tab="modernized" onclick="setPanelTab('modernized')">☕ Modernized App</div>
             <div class="panel-tab ${currentPanelTab === 'log' ? 'active' : ''}" data-tab="log" onclick="setPanelTab('log')">📟 Console Log</div>
           </div>
 
@@ -1038,6 +1070,10 @@ function renderActiveWorkspace(r) {
 
           <div class="panel-body panel-section" data-panel="files" style="${currentPanelTab !== 'files' ? 'display:none' : ''}">
             ${filesHtml}
+          </div>
+
+          <div class="panel-body panel-section" data-panel="modernized" style="${currentPanelTab !== 'modernized' ? 'display:none' : ''}">
+            <div id="modernizedTabContent">Loading modernized Java files…</div>
           </div>
 
           <div class="panel-body panel-section" data-panel="log" style="${currentPanelTab !== 'log' ? 'display:none' : ''}">
@@ -1075,6 +1111,40 @@ async function loadAudit() {
 function renderAuditPanel(d) {
   const el = $('auditTabContent');
   if (!el) return;
+
+  // Architecture Summary (from Stage 2 Analyze)
+  const arch = d.analyze || {};
+  const archHtml = arch.programs_count ? `
+    <div style="background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:14px 18px; margin-bottom:20px;">
+      <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:10px; letter-spacing:0.08em;">Architecture Analysis (Stage 2)</div>
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:12px;">
+        <div style="text-align:center;"><div style="font-size:22px; font-weight:700; color:var(--acc2);">${arch.programs_count || 0}</div><div style="font-size:11px; color:var(--muted);">Programs</div></div>
+        <div style="text-align:center;"><div style="font-size:22px; font-weight:700; color:#10b981;">${arch.entry_point || '—'}</div><div style="font-size:11px; color:var(--muted);">Entry Point</div></div>
+        <div style="text-align:center;"><div style="font-size:22px; font-weight:700; color:#f59e0b;">${arch.format || '—'}</div><div style="font-size:11px; color:var(--muted);">Source Format</div></div>
+        <div style="text-align:center;"><div style="font-size:22px; font-weight:700; color:#8b5cf6;">${(arch.call_graph && arch.call_graph.roots ? arch.call_graph.roots.length : 0)}</div><div style="font-size:11px; color:var(--muted);">Call Roots</div></div>
+      </div>
+      ${arch.call_graph && arch.call_graph.roots && arch.call_graph.roots.length ? `
+        <div style="font-size:11px; color:var(--muted);">Call graph roots: <code style="color:var(--acc2);">${escapeHtml(arch.call_graph.roots.join(', '))}</code></div>
+      ` : ''}
+      ${arch.missing_copybooks && arch.missing_copybooks.length ? `
+        <div style="margin-top:8px; font-size:11px; color:var(--warn);">⚠️ ${arch.missing_copybooks.length} unresolved copybook reference(s) detected</div>
+      ` : `<div style="margin-top:8px; font-size:11px; color:var(--ok);">✓ All copybook references resolved</div>`}
+    </div>
+  ` : '';
+
+  // Gate 2 Validation Summary (from Stage 10 Validate)
+  const val = d.validate || {};
+  const valHtml = val.status ? `
+    <div style="background:var(--surface2); border:1px solid ${val.gate2_passed ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}; border-radius:8px; padding:14px 18px; margin-bottom:20px;">
+      <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:10px; letter-spacing:0.08em;">Gate 2 — Native Java Behavioral Validation (Stage 10)</div>
+      <div style="display:flex; gap:24px; align-items:center; flex-wrap:wrap;">
+        <div><span style="font-weight:700; color:${val.gate2_passed ? '#10b981' : '#ef4444'}; font-size:14px;">${val.gate2_passed ? '✅ PASSED' : (val.status === 'skipped' ? '⏭️ SKIPPED' : '❌ FAILED')}</span></div>
+        ${val.claims_count != null ? `<div style="font-size:12px; color:var(--muted);">Claims: <strong style="color:var(--text);">${val.claims_count}</strong></div>` : ''}
+        ${val.exceptions_count != null ? `<div style="font-size:12px; color:var(--muted);">Exceptions: <strong style="color:var(--text);">${val.exceptions_count}</strong></div>` : ''}
+        <div style="font-size:11px; color:var(--muted); flex:1;">${escapeHtml(val.detail || '')}</div>
+      </div>
+    </div>
+  ` : '';
 
   // Immutability
   const imm = d.immutability || [];
@@ -1154,21 +1224,38 @@ function renderAuditPanel(d) {
   }
   if (!anyFile) fileHtml += '<div style="color:var(--muted); font-size:11px;">No file assigns found.</div>';
 
-  el.innerHTML = immHtml + copyHtml + callHtml + fileHtml;
+  el.innerHTML = archHtml + valHtml + immHtml + copyHtml + callHtml + fileHtml;
 }
 
 // ---- Main Poller ----
+let renderedView = null; // 'upload' | run_id currently shown in #mainContainer
+let prevRunStatus = null;
+
 async function poll() {
   try {
     const state = await api('/api/state');
     const r = state.runs.find(x => x.run_id === sel);
-    
+
     if (r) {
-      // If we are looking at a run, render the active workspace layout
-      renderActiveWorkspace(r);
+      // Keep re-rendering while the run is live (stage progress), and when its
+      // status transitions to a final state. Skip stable re-renders so the
+      // visible DOM/file input is not wiped every poll.
+      const statusChanged = prevRunStatus !== null && prevRunStatus !== r.status;
+      if (renderedView !== r.run_id || r.status === 'running' || statusChanged) {
+        renderedView = r.run_id;
+        prevRunStatus = r.status;
+        renderActiveWorkspace(r);
+      } else {
+        renderRuns(state);
+      }
     } else {
-      // Otherwise render default centered upload screen
-      renderDefaultUploadScreen(state);
+      prevRunStatus = null;
+      if (renderedView !== 'upload') {
+        renderedView = 'upload';
+        renderDefaultUploadScreen(state);
+      } else {
+        renderRuns(state);
+      }
     }
   } catch(e) {
     console.error('Connection error: ', e);
@@ -1298,8 +1385,118 @@ function renderDefaultUploadScreen(state) {
   }
 }
 
-// Initial poll
+// ---- Modernized App Explorer populator ----
+async function loadModernizedFiles() {
+  const content = $('modernizedTabContent');
+  if (!content) return;
+  content.innerHTML = '<div style="color:var(--muted); text-align:center; padding:16px;">Loading modernized Java project…</div>';
+  try {
+    const res = await api(`/api/modernized?run_id=${encodeURIComponent(sel)}`);
+    if (res.ok) {
+      if (!res.files || res.files.length === 0) {
+        content.innerHTML = '<div style="color:var(--muted); text-align:center; padding:24px;">No modernized enterprise source generated yet. Complete the Refactor stage first.</div>';
+        return;
+      }
+      
+      const refactorStage = (activeRunData.stages || []).find(s => s.label === 'Refactor') || {};
+      const validateStage = (activeRunData.stages || []).find(s => s.label === 'Validate') || {};
+      
+      const compStatus = refactorStage.status === 'done' ? 'SUCCESS (Maven Clean Compile)' : (refactorStage.status === 'error' ? 'FAILED' : 'PENDING');
+      const compColor = refactorStage.status === 'done' ? '#10b981' : (refactorStage.status === 'error' ? '#ef4444' : '#f59e0b');
+      const compBg = refactorStage.status === 'done' ? 'rgba(16,185,129,0.1)' : (refactorStage.status === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)');
+      
+      const valStatus = validateStage.status === 'done' ? '100% PARITY PASS (Gate 2)' : (validateStage.status === 'error' ? 'FAILED' : (validateStage.status === 'skipped' ? 'SKIPPED' : 'PENDING'));
+      const valColor = validateStage.status === 'done' ? '#10b981' : (validateStage.status === 'error' ? '#ef4444' : '#f59e0b');
+      const valBg = validateStage.status === 'done' ? 'rgba(16,185,129,0.1)' : (validateStage.status === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)');
+
+      content.innerHTML = `
+        <div style="display:flex; gap:20px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin-bottom:15px; font-size:12px; font-family:'Inter',sans-serif;">
+          <div><strong>Maven Compilation:</strong> <span class="status-badge" style="background:${compBg}; color:${compColor}; padding:3px 8px; border-radius:4px; font-weight:600; font-size:11px; margin-left:6px;">${compStatus}</span></div>
+          <div><strong>Gate 2 Parity Validation:</strong> <span class="status-badge" style="background:${valBg}; color:${valColor}; padding:3px 8px; border-radius:4px; font-weight:600; font-size:11px; margin-left:6px;">${valStatus}</span></div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 280px 1fr; gap: 20px; min-height: 400px;">
+          <!-- File Explorer (Left) -->
+          <div style="background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px; overflow-y:auto; max-height:550px;">
+            <!-- Modernized Architecture Tree -->
+            <div style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text); line-height:1.6; margin-bottom:15px; border-bottom:1px dashed var(--border); padding-bottom:12px;">
+              <span style="font-weight:700; color:var(--acc2);">Modernized Architecture</span><br>
+              ├── Domain<br>
+              ├── Services<br>
+              ├── Repositories<br>
+              ├── Batch<br>
+              ├── Controllers<br>
+              └── Configuration
+            </div>
+
+            <div style="font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:8px; padding:4px 6px;">Generated Files</div>
+            <div id="modernizedFilesList" style="display:flex; flex-direction:column; gap:4px;">
+              ${res.files.map(f => `
+                <div class="file-item-link" onclick="loadModernizedFileContent('${escapeJs(f.path)}', this)" 
+                     style="padding:6px 10px; border-radius:6px; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); cursor:pointer; transition:all 0.15s;"
+                     onmouseover="this.style.background='var(--surface3)';"
+                     onmouseout="if(!this.classList.contains('active')) this.style.background='none';">
+                  📄 ${escapeHtml(f.path)}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <!-- Code Preview (Right) -->
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div id="modernizedFileHeader" style="font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; color:var(--acc2); padding:4px 8px;">Select a file to preview</div>
+            <pre id="modernizedCodeWindow" style="background:#04060a; border:1px solid var(--border); border-radius:8px; padding:16px; margin:0; overflow:auto; max-height:510px; min-height:350px; font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.6; color:#9cb3d5; white-space:pre;"></pre>
+          </div>
+        </div>
+      `;
+      
+      const firstLink = document.querySelector('.file-item-link');
+      if (firstLink) {
+        firstLink.click();
+      }
+    } else {
+      content.innerHTML = `<div class="err-box">${escapeHtml(res.error || 'Failed to load modernized files')}</div>`;
+    }
+  } catch(e) {
+    content.innerHTML = `<div class="err-box">${escapeHtml(String(e))}</div>`;
+  }
+}
+
+async function loadModernizedFileContent(path, el) {
+  document.querySelectorAll('.file-item-link').forEach(x => {
+    x.classList.remove('active');
+    x.style.color = 'var(--muted)';
+    x.style.background = 'none';
+  });
+  if (el) {
+    el.classList.add('active');
+    el.style.color = 'var(--text)';
+    el.style.background = 'var(--surface3)';
+  }
+  
+  $('modernizedFileHeader').textContent = `📄 ${path}`;
+  const codeWin = $('modernizedCodeWindow');
+  codeWin.textContent = 'Loading file contents…';
+  
+  try {
+    const res = await api(`/api/modernized-file?run_id=${encodeURIComponent(sel)}&path=${encodeURIComponent(path)}`);
+    if (res.ok) {
+      codeWin.textContent = res.content;
+    } else {
+      codeWin.textContent = `Error: ${res.error || 'Failed to load content'}`;
+    }
+  } catch(e) {
+    codeWin.textContent = `Connection error: ${e}`;
+  }
+}
+
+function escapeJs(s) {
+  return String(s).replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+
+// Initial poll and periodic updates
 poll();
+setInterval(poll, 2000);
 </script>
 </body>
 </html>
