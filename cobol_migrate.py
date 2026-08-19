@@ -1759,11 +1759,15 @@ class Pipeline:
         if is_bank:
             target_url = "http://localhost:8082/api/process/transactions"
             exceptions_url = "http://localhost:8082/api/process/exceptions"
+            audits_url = None  # BankCore has no audit table
             expected_min = 8
             item_name = "transactions"
         else:
             target_url = "http://localhost:8082/api/process/claims"
             exceptions_url = "http://localhost:8082/api/process/exceptions"
+            # Gate 2 record-level comparison uses /audits (ClaimAudit) not /claims (Claim)
+            # because approvedAmount (settled) lives in ClaimAudit, not Claim.amount (raw loss)
+            audits_url = "http://localhost:8082/api/process/audits"
             expected_min = 7
             item_name = "claims"
 
@@ -1822,17 +1826,25 @@ class Pipeline:
                 # Job finished: all records are committed. Gather REST data now.
                 claims_data = _fetch_json(target_url) or []
                 exceptions_data = _fetch_json(exceptions_url) or []
+                # Fetch ClaimAudit records for record-level amount/status comparison.
+                # /audits returns ClaimAudit (approvedAmount = settled amount after
+                # deductible/cap). /claims returns raw Claim rows (amount = raw loss).
+                # Gate 2 must compare approvedAmount, not raw loss amount.
+                audits_data = _fetch_json(audits_url) if audits_url else None
 
                 # Gate 2 parity check: compare the modernized app's DB output
                 # against the GnuCOBOL golden baseline (audit amounts/statuses,
                 # per-claim status, and exception count). A count-only check is
                 # not sufficient — it would hide business-logic drift.
                 parity_issues = []
-                # The COBOL audit file records *processed* claims only; the
-                # modernized app writes every parsed line to the claims table
-                # but only assigns a status to processed claims (exceptions go
-                # to the exceptions table). Compare status-bearing claims 1:1.
-                processed = [c for c in claims_data if c.get("status")]
+                # Use /audits for ClaimsCore record-level comparison (has approvedAmount).
+                # Fall back to /claims if /audits endpoint not yet deployed.
+                if audits_data is not None:
+                    processed = audits_data  # ClaimAudit rows (one per accepted claim)
+                    amount_field = "approvedAmount"
+                else:
+                    processed = [c for c in claims_data if c.get("status")]
+                    amount_field = "lossAmount"
                 baseline_audit = os.path.join(
                     self.out, "baseline", "legacy", "data", "out", "claim-audit.dat")
                 if os.path.isfile(baseline_audit):
@@ -1853,7 +1865,8 @@ class Pipeline:
                         if st != rec["status"]:
                             parity_issues.append(
                                 f"{cid}: status '{st}' != baseline '{rec['status']}'")
-                        amt = c.get("lossAmount", c.get("amount"))
+                        # Compare approvedAmount (from /audits) against COMP-3 decoded baseline
+                        amt = c.get(amount_field, c.get("approvedAmount", c.get("amount")))
                         if amt is not None:
                             try:
                                 f_amt = float(amt)
@@ -1861,7 +1874,7 @@ class Pipeline:
                                 f_amt = None
                             if f_amt is not None and abs(f_amt - rec["amount"]) > 0.005:
                                 parity_issues.append(
-                                    f"{cid}: amount {amt} != baseline {rec['amount']:.2f}")
+                                    f"{cid}: approvedAmount {amt} != baseline {rec['amount']:.2f}")
                 else:
                     self.log("    [WARN] no baseline audit file; Gate 2 falling back to count-only")
 
@@ -1943,6 +1956,34 @@ class Pipeline:
 
                 self.log(f"    [GATE 2] {item_name.capitalize()} processed: {len(processed)} (Approved: {approved}, Review: {review})")
                 self.log(f"    [GATE 2] Exceptions caught: {exc_count}")
+                if audits_data is not None:
+                    self.log(f"    [GATE 2] Audit endpoint used: /audits (approvedAmount comparison)")
+
+                # Per-claim acceptance matrix for traceability artifact
+                per_claim_matrix = []
+                if os.path.isfile(baseline_audit):
+                    for c in processed:
+                        cid = c.get("claimId") or c.get("id")
+                        rec = by_id.get(cid) if 'by_id' in dir() else None
+                        row = {
+                            "claimId": cid,
+                            "cobolStatus": rec["status"] if rec else "?",
+                            "javaStatus": c.get("status"),
+                            "cobolApproved": rec["amount"] if rec else None,
+                            "javaApproved": c.get("approvedAmount", c.get("amount")),
+                            "result": "PASS" if rec and c.get("status") == rec["status"] else "FAIL",
+                        }
+                        per_claim_matrix.append(row)
+                    # Write per-claim acceptance matrix JSON
+                    write_json(os.path.join(self.out, "acceptance_matrix.json"), {
+                        "generated_at": now_iso(),
+                        "cobol_baseline": "GnuCOBOL golden output (claim-audit.dat decoded)",
+                        "native_java": "/api/process/audits",
+                        "records": per_claim_matrix,
+                        "total": len(per_claim_matrix),
+                        "pass": sum(1 for r in per_claim_matrix if r["result"] == "PASS"),
+                        "fail": sum(1 for r in per_claim_matrix if r["result"] == "FAIL"),
+                    })
 
                 if len(processed) > 0 and not parity_issues:
                     detail = (f"Gate 2 PASS — exact parity with GnuCOBOL baseline "
@@ -2036,6 +2077,64 @@ class Pipeline:
         write_report(report, self.out)
         self.log(f"    migration report: {os.path.join(self.out, 'migration-report.md')}")
         self.log(f"    verdict: {verdict}")
+
+        # Emit transpilation-provenance.json as a standalone audit artifact.
+        # Required by Section 8 of the migration spec: engine, version, digest,
+        # program list, libcobj.jar hash, and three-way validation summary.
+        tr = self.data("transpile", {})
+        d = self.data("discover", {})
+        pr = self.data("preserve", {})
+        val = self.data("validate", {})
+        cmp = self.data("compare", {})
+        cmp_rows = cmp.get("rows", [])
+        gate1_verdicts = {r["file"]: r["verdict"] for r in cmp_rows}
+        programs = []
+        for src in d.get("sources", []):
+            pid = d.get("program_ids", {}).get(src, "?")
+            programs.append({
+                "source": os.path.basename(src),
+                "programId": pid,
+                "transpiled": tr.get("status", {}).get(src, False),
+                "javaFile": pid + ".java" if tr.get("status", {}).get(src) else None,
+            })
+        provenance = {
+            "engine": "OpenSource COBOL 4J",
+            "version": tr.get("image", DEFAULT_COBJ_IMAGE),
+            "dockerImage": tr.get("image", DEFAULT_COBJ_IMAGE),
+            "imageDigest": tr.get("image_digest", "unknown"),
+            "generatedAt": now_iso(),
+            "programCount": tr.get("n_total", 0),
+            "programsTranspiled": tr.get("n_ok", 0),
+            "programs": programs,
+            "returnCode": tr.get("all_at_once_rc", -1),
+            "runtime": "libcobj.jar",
+            "libcobjSha256": pr.get("sha256", "unknown"),
+            "libcobjSize": pr.get("size", 0),
+            "threeWayValidation": {
+                "cobolVs4J": {
+                    "gate": "Gate 1",
+                    "method": "GnuCOBOL baseline → OpenSource COBOL 4J transpiled Java",
+                    "fileParity": {f: v for f, v in gate1_verdicts.items()},
+                },
+                "cobolVsNativeJava": {
+                    "gate": "Gate 2",
+                    "method": "GnuCOBOL baseline → Native Spring Boot Java",
+                    "result": "PASS" if val.get("gate2_passed") else "FAIL",
+                    "claimsProcessed": val.get("claims_count", 0),
+                    "exceptionsCount": val.get("exceptions_count", 0),
+                },
+                "verdictCobolVs4JVsNative": verdict,
+            },
+            "note": (
+                "Track A (COBOL 4J): original COBOL → cobj → Java + libcobj.jar → outputs. "
+                "Track B (Native): COBOL analysis → Spring Batch/JPA → native outputs. "
+                "Gate 1 compares Track A output against GnuCOBOL baseline. "
+                "Gate 2 compares Track B REST output against GnuCOBOL baseline."
+            ),
+        }
+        write_json(os.path.join(self.out, "transpilation-provenance.json"), provenance)
+        self.log(f"    transpilation provenance: {os.path.join(self.out, 'transpilation-provenance.json')}")
+
         return True, f"verdict {verdict}", []
 
     def _compute_verdict(self):
@@ -2326,6 +2425,17 @@ def write_jpa_entity(java_base, name, fields):
                 f"        return get{cap}();\n"
                 f"    }}\n"
                 f"    public void setAccountId(String val) {{\n"
+                f"        set{cap}(val);\n"
+                f"    }}"
+            )
+
+        # 7b. Transfer target account alias (BCPROC01 txnTargetAcct / txnDestAcct)
+        if camel in ("txnTargetAcct", "txnDestAcct", "targetAcct", "destAcct"):
+            getsets.append(
+                f"    public String getTargetAccountId() {{\n"
+                f"        return get{cap}();\n"
+                f"    }}\n"
+                f"    public void setTargetAccountId(String val) {{\n"
                 f"        set{cap}(val);\n"
                 f"    }}"
             )
@@ -3271,7 +3381,38 @@ public class BusinessProcessingService {
                 tx.setStatus("APPROVED");
                 accountRepository.save(acc);
             }
+        } else if ("T".equals(tx.getType())) {
+            // Transfer: debit source account, credit target account atomically.
+            // Equivalent to BCPROC01 PROCESS-TRANSFER:
+            //   READ SOURCE-ACCOUNT / READ TARGET-ACCOUNT
+            //   IF SOURCE-BALANCE < AMOUNT -> REJECTED-NSF-TRANSFER
+            //   ELSE SUBTRACT AMOUNT FROM SOURCE-BALANCE
+            //        ADD AMOUNT TO TARGET-BALANCE
+            //        REWRITE SOURCE-ACCOUNT / REWRITE TARGET-ACCOUNT
+            String targetId = tx.getTargetAccountId();
+            if (targetId == null || targetId.isBlank()) {
+                tx.setStatus("FAILED_TRANSFER");
+                transactionRepository.save(tx);
+                return;
+            }
+            Optional<Account> targetOpt = accountRepository.findById(targetId);
+            if (!targetOpt.isPresent()) {
+                tx.setStatus("FAILED_TRANSFER");
+                transactionRepository.save(tx);
+                return;
+            }
+            Account target = targetOpt.get();
+            if (balance.compareTo(amount) < 0) {
+                tx.setStatus("REJECTED_NSF_TRANSFER");
+            } else {
+                acc.setBalance(balance.subtract(amount));
+                target.setBalance(target.getBalance().add(amount));
+                tx.setStatus("APPROVED");
+                accountRepository.save(acc);
+                accountRepository.save(target);
+            }
         } else {
+            // C (credit) or any unrecognised credit-like type
             acc.setBalance(balance.add(amount));
             tx.setStatus("APPROVED");
             accountRepository.save(acc);
@@ -3677,6 +3818,9 @@ import com.systema.modernized.domain.Claim;
 import com.systema.modernized.domain.ClaimException;
 import com.systema.modernized.repository.ClaimRepository;
 import com.systema.modernized.repository.ClaimExceptionRepository;
+import com.systema.modernized.domain.ClaimAudit;
+import com.systema.modernized.repository.ClaimAuditRepository;
+import com.systema.modernized.service.EodReportService;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobInstance;
@@ -3710,6 +3854,12 @@ public class ProcessController {
     private ClaimExceptionRepository claimExceptionRepository;
 
     @Autowired
+    private ClaimAuditRepository claimAuditRepository;
+
+    @Autowired
+    private EodReportService eodReportService;
+
+    @Autowired
     private JobExplorer jobExplorer;
 
     @PostMapping("/run")
@@ -3729,6 +3879,25 @@ public class ProcessController {
     @GetMapping("/exceptions")
     public List<ClaimException> getExceptions() {
         return claimExceptionRepository.findAll();
+    }
+
+    // Native CCPROC01/CCREPT01 audit endpoint: exposes ClaimAudit rows which
+    // carry approvedAmount (settled = loss - deductible, capped at cover limit).
+    // Gate 2 validator reads this endpoint to compare against the GnuCOBOL
+    // claim-audit.dat COMP-3 decoded values.
+    @GetMapping("/audits")
+    public List<ClaimAudit> getAudits() {
+        return claimAuditRepository.findAll();
+    }
+
+    // Native CCREPT01 report endpoint: returns the regenerated EOD report text.
+    @GetMapping("/report")
+    public String getReport() {
+        try {
+            return eodReportService.generate();
+        } catch (Exception e) {
+            return "EOD report generation failed: " + e.getMessage();
+        }
     }
 
     @GetMapping("/status")
