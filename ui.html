@@ -342,6 +342,17 @@ body {
   color: var(--muted);
   margin-top: 4px;
 }
+.run-dl {
+  text-decoration: none;
+  font-size: 13px;
+  margin: 0 8px 0 4px;
+  opacity: 0.85;
+}
+.run-dl:hover {
+  opacity: 1;
+  transform: scale(1.15);
+  display: inline-block;
+}
 .chip {
   font-size: 9px;
   font-weight: 700;
@@ -888,9 +899,12 @@ function renderRuns(state) {
   sidebar.innerHTML = state.runs.map(r => {
     let chipClass = `chip chip-${r.status}`;
     let doneCount = r.stages.filter(s => s.status === 'done').length;
+    const dl = r.package_size != null
+      ? `<a class="run-dl" onclick="event.stopPropagation();" href="/package?run_id=${encodeURIComponent(r.run_id)}" title="Download modernized ZIP (${(r.package_size/1024).toFixed(0)} KB)">📦</a>`
+      : '';
     return `
       <div class="run-item ${r.run_id === sel ? 'active' : ''}" onclick="selectRun('${r.run_id}')">
-        <div class="run-title">${escapeHtml(r.name || r.run_id)} <span class="${chipClass}">${r.status}</span></div>
+        <div class="run-title">${escapeHtml(r.name || r.run_id)} ${dl}<span class="${chipClass}">${r.status}</span></div>
         <div class="run-meta">${doneCount}/${r.stages.length} stages · ${r.verdict || 'No verdict'}</div>
       </div>`;
   }).join('');
@@ -1410,9 +1424,13 @@ async function loadModernizedFiles() {
       const valBg = validateStage.status === 'done' ? 'rgba(16,185,129,0.1)' : (validateStage.status === 'error' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)');
 
       content.innerHTML = `
-        <div style="display:flex; gap:20px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin-bottom:15px; font-size:12px; font-family:'Inter',sans-serif;">
+        <div style="display:flex; gap:20px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 16px; margin-bottom:15px; font-size:12px; font-family:'Inter',sans-serif; align-items:center;">
           <div><strong>Maven Compilation:</strong> <span class="status-badge" style="background:${compBg}; color:${compColor}; padding:3px 8px; border-radius:4px; font-weight:600; font-size:11px; margin-left:6px;">${compStatus}</span></div>
           <div><strong>Gate 2 Parity Validation:</strong> <span class="status-badge" style="background:${valBg}; color:${valColor}; padding:3px 8px; border-radius:4px; font-weight:600; font-size:11px; margin-left:6px;">${valStatus}</span></div>
+          ${activeRunData.package_size != null ? `
+            <div style="margin-left:auto;">
+              <a href="/package?run_id=${encodeURIComponent(sel)}" target="_blank" class="btn-action" style="padding:8px 18px; font-size:12px; text-decoration:none; display:inline-block;">📦 Download Modernized ZIP</a>
+            </div>` : ''}
         </div>
 
         <div style="display:grid; grid-template-columns: 280px 1fr; gap: 20px; min-height: 400px;">
