@@ -144,9 +144,27 @@ def safe_extract_zip(data, dest):
         if any(p in ("..", ".") for p in parts) or name.startswith("/") or re_abs(name):
             continue
         names.append(info)
+
+    # Detect common top-level directory prefix (if all files share it)
+    common_prefix = None
+    if names:
+        first_parts = names[0].filename.replace("\\", "/").split("/")
+        if len(first_parts) > 1:
+            possible_prefix = first_parts[0]
+            all_share = True
+            for info in names:
+                parts = info.filename.replace("\\", "/").split("/")
+                if not parts or parts[0] != possible_prefix:
+                    all_share = False
+                    break
+            if all_share:
+                common_prefix = possible_prefix
+
     for info in names:
         name = info.filename.replace("\\", "/")
         strip = [p for p in name.split("/") if p not in ("", ".")]
+        if common_prefix and strip and strip[0] == common_prefix:
+            strip = strip[1:]
         target = os.path.join(dest, *strip)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if info.is_dir():
