@@ -1,7 +1,7 @@
 {
   "engine": "opensource COBOL 4J",
   "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
-  "generated_at": "2026-08-18T16:42:40+00:00",
+  "generated_at": "2026-08-18T17:34:41+00:00",
   "entry_point": "BCMAIN01",
   "format": "free",
   "programs": [

@@ -21,3 +21,8 @@ __pycache__/
 .env
 .idea/
 .vscode/
+
+# Local tool config and runtime logs
+.gemini/
+ui-server.log
+ui-server.err.log

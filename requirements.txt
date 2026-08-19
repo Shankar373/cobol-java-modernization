@@ -1,0 +1,5 @@
+# Python Standard Library only (Python 3.8+)
+# No external third-party python packages required on host.
+#
+# Docker is required on the host to execute the cobj (COBOL 4J) compiler container.
+# Maven (mvn) is optional on the host, used only for local compilation checks.

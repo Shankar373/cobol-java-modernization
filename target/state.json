@@ -98,7 +98,7 @@
     },
     "refactor": {
       "status": "done",
-      "at": "2026-08-19T09:23:14+00:00",
+      "at": "2026-08-19T12:21:07+00:00",
       "detail": "Generated and compiled successfully",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized"
@@ -106,7 +106,7 @@
     },
     "validate": {
       "status": "done",
-      "at": "2026-08-19T09:35:07+00:00",
+      "at": "2026-08-19T12:21:47+00:00",
       "detail": "Gate 2 PASS \u2014 exact parity with GnuCOBOL baseline (4 processed claims, 3 exceptions)",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized\\target\\modernized-1.0.0.jar"
@@ -114,13 +114,13 @@
     },
     "report": {
       "status": "done",
-      "at": "2026-08-19T09:35:07+00:00",
+      "at": "2026-08-19T12:21:47+00:00",
       "detail": "verdict PASS",
       "artifacts": []
     },
     "package": {
       "status": "done",
-      "at": "2026-08-19T09:35:07+00:00",
+      "at": "2026-08-19T12:21:50+00:00",
       "detail": "modernized application packaged successfully",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized-package.zip"
@@ -657,10 +657,24 @@
           ],
           "logical": {
             "verdict": "LOGICAL_MATCH",
-            "method": "sqlite_record_count",
-            "table": "table0",
-            "record_count": 3,
-            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count (3) verified in table 'table0'."
+            "method": "field_level",
+            "field_count": 7,
+            "matched_fields": 21,
+            "record_count_baseline": 3,
+            "record_count_java": 3,
+            "missing_keys": [],
+            "extra_keys": [],
+            "diffs": [],
+            "layout": [
+              "CUS-CUSTOMER-ID",
+              "CUS-NAME",
+              "CUS-STATUS",
+              "CUS-CITY",
+              "CUS-STATE",
+              "CUS-RISK-LEVEL",
+              "CUS-RESERVED"
+            ],
+            "note": "Physical formats differ (GnuCOBOL embedded-index vs COBOL 4J SQLite). Field-level decode of copybooks/CC-CUSTOMER.cpy: 7 fields, 7 compared per record."
           }
         },
         {
@@ -674,64 +688,38 @@
           ],
           "logical": {
             "verdict": "LOGICAL_MATCH",
-            "method": "sqlite_record_count",
-            "table": "table0",
-            "record_count": 3,
-            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count (3) verified in table 'table0'."
+            "method": "field_level",
+            "field_count": 10,
+            "matched_fields": 30,
+            "record_count_baseline": 3,
+            "record_count_java": 3,
+            "missing_keys": [],
+            "extra_keys": [],
+            "diffs": [],
+            "layout": [
+              "POL-POLICY-ID",
+              "POL-CUSTOMER-ID",
+              "POL-TYPE",
+              "POL-STATUS",
+              "POL-CURRENCY",
+              "POL-COVER-LIMIT",
+              "POL-DEDUCTIBLE",
+              "POL-EFFECTIVE-DATE",
+              "POL-EXPIRY-DATE",
+              "POL-RESERVED"
+            ],
+            "note": "Physical formats differ (GnuCOBOL embedded-index vs COBOL 4J SQLite). Field-level decode of copybooks/CC-POLICY.cpy: 10 fields, 10 compared per record."
           }
         }
       ],
       "verdict_counts": {
-        "differ": 2,
-        "baseline-only": 0,
         "normalized": 0,
+        "java-only": 0,
         "exact": 3,
-        "java-only": 0
+        "baseline-only": 0,
+        "differ": 2
       },
-      "checks": [
-        {
-          "name": "data/out/claim-audit.dat",
-          "kind": "comp3",
-          "ok": true,
-          "actual": [
-            "95000.00",
-            "35000.00",
-            "295000.00",
-            "300000.00"
-          ],
-          "expected": [
-            "95000.00",
-            "35000.00",
-            "295000.00",
-            "300000.00"
-          ],
-          "note": "decoded packed-decimal column"
-        },
-        {
-          "name": "data/out/eod-claims-report.txt",
-          "kind": "regex",
-          "ok": true,
-          "actual": "0000004",
-          "expected": "4",
-          "note": "regex group match"
-        },
-        {
-          "name": "data/out/eod-claims-report.txt",
-          "kind": "regex",
-          "ok": true,
-          "actual": "0000003",
-          "expected": "3",
-          "note": "regex group match"
-        },
-        {
-          "name": "data/out/eod-claims-report.txt",
-          "kind": "regex",
-          "ok": true,
-          "actual": "0000002",
-          "expected": "2",
-          "note": "regex group match"
-        }
-      ]
+      "checks": []
     },
     "checkpoint": {
       "file": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\checkpoint-archive.zip",

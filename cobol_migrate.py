@@ -36,6 +36,7 @@ import subprocess
 import sys
 import zipfile
 from datetime import datetime, timezone
+from decimal import Decimal
 
 # ---------------------------------------------------------------------------
 # defaults
@@ -300,36 +301,293 @@ def is_stub_java(java_text: str) -> bool:
     return has_stub and not has_real
 
 
-def logical_indexed_compare(baseline_file: str, result_file: str) -> dict:
-    """Compare two indexed-file blobs logically.
+def logical_indexed_compare(baseline_file, result_file, rel_key, repo_dir, dis,
+                            baseline_dir, image=DEFAULT_GNUCOBOL_IMAGE, _base=None):
+    """Compare two indexed-file blobs field-by-field.
 
-    GnuCOBOL 3.1 uses embedded-index .dat; COBOL 4J uses SQLite .dat.
-    Attempts SQLite read on the Java output; returns a logical verdict.
+    GnuCOBOL 3.1 baseline uses an embedded-index (.dat) container; COBOL 4J
+    backs the same logical records with SQLite (table0 key/value blobs holding
+    the raw fixed-layout record bytes). Both sides are decoded with the
+    copybook schema tied to the file's SELECT, then compared per record/field.
+
+    Never returns LOGICAL_MATCH from record/row counts alone: every verdict is
+    backed by per-field evidence (or an explicit UNABLE_TO_COMPARE reason).
     """
+    schema = find_indexed_layout(repo_dir, dis, rel_key)
+    if not schema:
+        return {"verdict": "UNABLE_TO_COMPARE",
+                "reason": f"no INDEXED copybook layout found for '{rel_key}'"}
     try:
-        import sqlite3
-        conn = sqlite3.connect(f"file:{result_file}?mode=ro", uri=True)
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()]
-        target_table = "table0" if "table0" in tables else (tables[0] if tables else None)
-        if not target_table:
-            conn.close()
-            return {"verdict": "UNABLE_TO_COMPARE", "reason": "SQLite has no tables"}
-        rows = conn.execute(f'SELECT * FROM "{target_table}"').fetchall()
-        conn.close()
-        return {
-            "verdict": "LOGICAL_MATCH",
-            "method": "sqlite_record_count",
-            "table": target_table,
-            "record_count": len(rows),
-            "note": (
-                f"Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. "
-                f"Logical record count ({len(rows)}) verified in table '{target_table}'."
-            ),
-        }
+        java = decode_sqlite_records(result_file, schema)
     except Exception as exc:
-        return {"verdict": "UNABLE_TO_COMPARE", "reason": str(exc)}
+        return {"verdict": "UNABLE_TO_COMPARE", "reason": f"sqlite decode: {exc}"}
+    if _base is None:
+        if not docker_available():
+            return {"verdict": "UNABLE_TO_COMPARE",
+                    "reason": "Docker unavailable for GnuCOBOL runtime dump"}
+        if not os.path.isdir(baseline_dir):
+            return {"verdict": "UNABLE_TO_COMPARE",
+                    "reason": f"baseline directory missing: {baseline_dir}"}
+        try:
+            base, err = dump_indexed_records(repo_dir, baseline_dir, image, rel_key, schema)
+        except Exception as exc:
+            base, err = None, str(exc)
+        if base is None:
+            return {"verdict": "UNABLE_TO_COMPARE",
+                    "reason": f"GnuCOBOL runtime dump failed: {err}"}
+    else:
+        base = _base
+    result = compare_logical_records(base, java, schema)
+    result["note"] = (
+        f"Physical formats differ (GnuCOBOL embedded-index vs COBOL 4J SQLite). "
+        f"Field-level decode of {schema['copybook']}: {len(result['layout'])} fields, "
+        f"{result['field_count']} compared per record.")
+    return result
+
+
+def decode_bcd(data, scale=2):
+    """Decode packed-decimal (COMP-3) bytes to Decimal honoring picture scale."""
+    if not data:
+        return Decimal("0")
+    digits = []
+    for byte in data:
+        digits.append(byte >> 4)
+        digits.append(byte & 0x0F)
+    sign = digits.pop()
+    for d in digits:
+        if d > 9:
+            raise ValueError("invalid packed-decimal digit")
+    s = "".join(str(d) for d in digits).lstrip("0") or "0"
+    value = Decimal(s).scaleb(-scale)
+    return -value if sign in (0x0B, 0x0D) else value
+
+
+def record_layout(fields):
+    """Compute contiguous byte offsets for a copybook field list."""
+    layout, offset = [], 0
+    for f in fields:
+        if f["is_comp3"]:
+            byte_len = (f["length"] + 2) // 2
+        else:
+            byte_len = f["length"]
+        layout.append({**f, "offset": offset, "byte_len": byte_len})
+        offset += byte_len
+    return layout, offset
+
+
+def find_indexed_layout(repo_dir, dis, rel_key):
+    """Locate the copybook schema backing an INDEXED file assign path.
+
+    Returns a schema dict, or None when the file is not an INDEXED assign or
+    its copybook cannot be resolved/parsed.
+    """
+    for src, assigns in dis.get("file_assigns", {}).items():
+        text = None
+        for a in assigns:
+            if posix(a.get("assign_path") or "") != rel_key:
+                continue
+            if str(a.get("organization", "")).upper() != "INDEXED":
+                continue
+            if text is None:
+                try:
+                    with open(os.path.join(repo_dir, src), encoding="utf-8",
+                              errors="replace") as fh:
+                        text = fh.read()
+                except OSError:
+                    text = ""
+            if not text:
+                continue
+            name = re.escape(a["logical_name"])
+            m = re.search(r'(?is)FD\s+' + name + r'\s*\.\s*\n?\s*COPY\s+["\']([^"\']+)["\']',
+                          text)
+            if not m:
+                m = re.search(r'(?i)COPY\s+["\']([^"\']+)["\']', text)
+            if not m:
+                continue
+            cpath = resolve_copybook(m.group(1), repo_dir,
+                                     dis.get("copybook_dirs") or ["copybooks"])
+            if not cpath:
+                continue
+            try:
+                with open(os.path.join(repo_dir, cpath), encoding="utf-8",
+                          errors="replace") as fh:
+                    ctext = fh.read()
+            except OSError:
+                continue
+            fields = parse_copybook_fields(ctext)
+            layout, total = record_layout(fields)
+            if not layout or not total:
+                continue
+            return {
+                "fields": fields,
+                "layout": layout,
+                "total": total,
+                "copybook": cpath,
+                "logical_name": a["logical_name"],
+                "key_field": fields[0]["raw_name"],
+            }
+    return None
+
+
+def decode_sqlite_records(path, schema):
+    """Decode COBOL 4J SQLite table0 key/value blobs by the record schema."""
+    import sqlite3
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = conn.execute('SELECT key, value FROM "table0"').fetchall()
+    finally:
+        conn.close()
+    total, layout = schema["total"], schema["layout"]
+    out = []
+    for key, val in rows:
+        if len(val) != total:
+            raise ValueError(f"record blob {len(val)} bytes != layout {total}")
+        fields = []
+        for f in layout:
+            seg = val[f["offset"]: f["offset"] + f["byte_len"]]
+            if f["is_comp3"]:
+                fields.append(decode_bcd(seg, f["scale"]))
+            elif f["type"] == "String":
+                fields.append(seg.decode("ascii", "replace").rstrip())
+            else:
+                s = seg.decode("ascii", "replace").strip()
+                fields.append(Decimal(s) if s else Decimal("0"))
+        out.append({"key": key.decode("ascii", "replace").strip(), "fields": fields})
+    return out
+
+
+def build_logical_dump_program(schema, rel_key):
+    """Emit a standalone COBOL program that dumps an indexed file field-by-field."""
+    name = schema["logical_name"]
+    layout = schema["layout"]
+    n = [
+        "       identification division.",
+        "       program-id. cclogicdmp.",
+        "       environment division.",
+        "       input-output section.",
+        "       file-control.",
+        f'           select {name} assign to "{rel_key}"',
+        "               organization is indexed access is dynamic",
+        f"               record key is {schema['key_field']}.",
+        "       data division.",
+        "       file section.",
+        f"       fd {name}.",
+        f"       01  {name}-record.",
+    ]
+    ws, emits, moves = [], [], []
+    for f in layout:
+        if f["is_comp3"]:
+            int_digits = f["length"] - f["scale"]
+            n.append(f"           05  {f['raw_name']} pic s9({int_digits})v9("
+                     f"{f['scale']}) comp-3.")
+            ws.append(f"       01  ws-{f['raw_name']} pic 9({int_digits})v9("
+                      f"{f['scale']}).")
+            emits.append(f"ws-{f['raw_name']}")
+            moves.append(f"move {f['raw_name']} to ws-{f['raw_name']}")
+        elif f["type"] == "String":
+            n.append(f"           05  {f['raw_name']} pic x({f['byte_len']}).")
+            emits.append(f["raw_name"])
+        else:
+            n.append(f"           05  {f['raw_name']} pic 9({f['byte_len']}).")
+            emits.append(f["raw_name"])
+    n.append("       working-storage section.")
+    n.append("       01  WS-EOF PIC X VALUE 'n'.")
+    n.extend(ws)
+    n.append("       procedure division.")
+    n.append("       MAIN.")
+    n.append(f"           OPEN INPUT {name}")
+    n.append("           PERFORM UNTIL WS-EOF = 'y'")
+    n.append(f"               READ {name} NEXT")
+    n.append("                   AT END MOVE 'y' TO WS-EOF")
+    n.append("                   NOT AT END")
+    for m in moves:
+        n.append(f"                       {m}")
+    n.append(f"                       DISPLAY {' ' + ' \"|\" '.join(emits)}")
+    n.append("               END-READ")
+    n.append("           END-PERFORM")
+    n.append(f"           CLOSE {name}")
+    n.append("           STOP RUN.")
+    return "\n".join(n)
+
+
+def parse_dump_records(text, layout):
+    """Parse a runtime dump into records keyed by the first (key) field."""
+    recs = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("|")
+        if len(parts) != len(layout):
+            raise ValueError(f"dump line has {len(parts)} fields, expected "
+                             f"{len(layout)}: {line[:80]!r}")
+        fields = []
+        for f, p in zip(layout, parts):
+            p = p.strip()
+            if f["is_comp3"] or f["type"] != "String":
+                fields.append(Decimal(p) if p else Decimal("0"))
+            else:
+                fields.append(p.rstrip())
+        recs.append({"key": fields[0] if isinstance(fields[0], str) else str(fields[0]),
+                     "fields": fields})
+    return recs
+
+
+def dump_indexed_records(repo_dir, baseline_dir, image, rel_key, schema):
+    """Dump baseline indexed records through the real GnuCOBOL runtime.
+
+    Compiles a generated dump program against the baseline data directory and
+    returns (records, None), or (None, error) on failure.
+    """
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="cc_logic_dump_")
+    try:
+        with open(os.path.join(tmp, "cclogicdmp.cob"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(build_logical_dump_program(schema, rel_key))
+        cmd = ("cobc -x -free /code/cclogicdmp.cob -o /code/cclogicdmp "
+               "&& /code/cclogicdmp")
+        r = docker_run(image, [(tmp, "/code"), (baseline_dir, "/repo")],
+                       "/repo", cmd, shell="sh")
+        if r.returncode != 0:
+            tail = (r.stdout or "") + (r.stderr or "")
+            return None, tail.strip()[-400:]
+        return parse_dump_records(r.stdout or "", schema["layout"]), None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def compare_logical_records(base, java, schema):
+    """Per-record, per-field comparison of two decoded record sets."""
+    names = [f["raw_name"] for f in schema["layout"]]
+    bf = {r["key"]: r["fields"] for r in base}
+    jf = {r["key"]: r["fields"] for r in java}
+    missing = sorted(set(bf) - set(jf))
+    extra = sorted(set(jf) - set(bf))
+    diffs, matched = [], 0
+    for key in sorted(set(bf) & set(jf)):
+        for idx, nm in enumerate(names):
+            if bf[key][idx] != jf[key][idx]:
+                diffs.append({"key": key, "field": nm,
+                              "baseline": str(bf[key][idx]),
+                              "java": str(jf[key][idx])})
+            else:
+                matched += 1
+    if diffs or missing or extra:
+        verdict = "LOGICAL_MISMATCH"
+    else:
+        verdict = "LOGICAL_MATCH"
+    return {
+        "verdict": verdict,
+        "method": "field_level",
+        "field_count": len(names),
+        "matched_fields": matched,
+        "record_count_baseline": len(base),
+        "record_count_java": len(java),
+        "missing_keys": missing,
+        "extra_keys": extra,
+        "diffs": diffs[:10],
+        "layout": names,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1286,14 +1544,26 @@ class Pipeline:
                 logical = None
                 if is_binary(b1) or is_binary(b2):
                     result_path = os.path.join(self.out, "results", "java", key)
-                    if os.path.isfile(result_path):
+                    baseline_path = os.path.join(self.out, "baseline", "legacy", key)
+                    if os.path.isfile(result_path) and os.path.isfile(baseline_path):
                         logical = logical_indexed_compare(
-                            os.path.join(self.out, "baseline", "legacy", key),
-                            result_path,
+                            baseline_path, result_path, key, self.repo,
+                            self.data("discover"),
+                            os.path.join(self.out, "baseline", "legacy"),
                         )
-                        if logical.get("verdict") == "LOGICAL_MATCH":
+                        lv = logical.get("verdict")
+                        if lv == "LOGICAL_MATCH":
                             self.log(f"    [{key}] physical DIFFER but LOGICAL_MATCH "
-                                     f"({logical['note']})")
+                                     f"({logical.get('field_count')} fields x "
+                                     f"{logical.get('record_count_java')} records, "
+                                     f"{logical.get('matched_fields')} fields matched)")
+                        elif lv == "LOGICAL_MISMATCH":
+                            self.log(f"    [{key}] physical DIFFER and LOGICAL_MISMATCH "
+                                     f"({len(logical.get('diffs', []))}+ field diffs, "
+                                     f"{len(logical.get('missing_keys', []))} missing keys)")
+                        else:
+                            self.log(f"    [{key}] physical DIFFER; logical UNABLE: "
+                                     f"{logical.get('reason')}")
 
             cmp_rows.append({
                 "file": key,
@@ -1391,7 +1661,14 @@ class Pipeline:
             write_jpa_entity(java_base, mname, fields)
             write_jpa_repository(java_base, mname)
         if "BCMAIN" not in d["entry"]:
+            # ClaimsCore native parity components: exception + audit persistence,
+            # the native CCREPT01 equivalent (EodReportService), the native
+            # CCLEGACYX equivalent (LegacyFeatureService) and JUnit parity tests.
             write_claim_exception_entity(java_base)
+            write_claim_audit_entity(java_base)
+            write_legacy_feature_service(java_base)
+            write_eod_report_service(java_base)
+            write_parity_tests(java_base)
 
         write_pom_xml(mod_dir)
         write_properties(resources_dir)
@@ -1496,32 +1773,55 @@ class Pipeline:
         exceptions_data = []
 
         try:
-            # Poll port 8082 up to 40 seconds
-            for _ in range(80):
-                time.sleep(0.5)
-                # Check if process exited early
+            def _fetch_json(url):
+                try:
+                    with urllib.request.urlopen(url, timeout=1.0) as resp:
+                        if resp.status == 200:
+                            return json.loads(resp.read().decode())
+                except Exception:
+                    pass
+                return None
+
+            def _log_has(needle):
+                try:
+                    with open(log_filepath, "r", encoding="utf-8", errors="replace") as lf:
+                        return needle in lf.read()
+                except OSError:
+                    return False
+
+            status_url = "http://localhost:8082/api/process/status"
+            job_name = "processTransactionsJob" if is_bank else "processClaimsJob"
+            terminal_states = {"COMPLETED", "FAILED", "STOPPED", "ABANDONED", "UNKNOWN"}
+
+            # Phase 1: wait deterministically for the Spring Batch job to reach a
+            # terminal state before touching outputs. No arbitrary sleeps that can
+            # race afterJob(). Primary signal: /api/process/status backed by
+            # JobExplorer; fallback evidence: the batch log's COMPLETED line.
+            # (Note the log line fires before afterJob() writes the report, so
+            # the report artifact itself is re-checked in Phase 2 below.)
+            job_completed = False
+            job_terminal = None
+            for _ in range(120):          # ~60 s hard ceiling
                 if proc.poll() is not None:
                     break
-                try:
-                    with urllib.request.urlopen(target_url, timeout=1.0) as resp:
-                        if resp.status == 200:
-                            data = json.loads(resp.read().decode())
-                            # Wait until batch job actually completes and inserts records
-                            if len(data) >= expected_min:
-                                claims_data = data
-                                success = True
-                                break
-                except Exception:
-                    pass
+                status = _fetch_json(status_url)
+                if status is not None and status.get("job") == job_name:
+                    cur = status.get("status")
+                    if cur in terminal_states:
+                        job_terminal = cur
+                        job_completed = (cur == "COMPLETED")
+                        break
+                if _log_has("and the following status: [COMPLETED]"):
+                    job_completed = True
+                    job_terminal = "COMPLETED"
+                    break
+                time.sleep(0.5)
 
-            if success:
-                # Query exceptions
-                try:
-                    with urllib.request.urlopen(exceptions_url, timeout=1.0) as resp:
-                        if resp.status == 200:
-                            exceptions_data = json.loads(resp.read().decode())
-                except Exception:
-                    pass
+            if job_completed:
+                success = True
+                # Job finished: all records are committed. Gather REST data now.
+                claims_data = _fetch_json(target_url) or []
+                exceptions_data = _fetch_json(exceptions_url) or []
 
                 # Gate 2 parity check: compare the modernized app's DB output
                 # against the GnuCOBOL golden baseline (audit amounts/statuses,
@@ -1577,6 +1877,70 @@ class Pipeline:
                 review = sum(1 for c in processed if c.get("status") == "MANUAL_REVIEW")
                 exc_count = len(exceptions_data)
 
+                # Native CCREPT01 equivalent parity: the Spring Batch job's
+                # afterJob listener regenerates data/out/eod-claims-report.txt
+                # from the persisted audit/exception tables. Compare it against
+                # the GnuCOBOL golden baseline report (4/3/2 for ClaimsCore)
+                # both semantically (counts) and byte-for-byte.
+                if not is_bank:
+                    def _parse_eod_counts(path):
+                        counts = {}
+                        for key, regex in (
+                                ("audit", r"^AUDIT RECORDS\s*:\s*(\d+)"),
+                                ("exceptions", r"^EXCEPTIONS\s*:\s*(\d+)"),
+                                ("reviews", r"^MANUAL REVIEWS\s*:\s*(\d+)")):
+                            m = re.search(regex, open(path, "r", encoding="utf-8",
+                                                      errors="replace").read(), re.MULTILINE)
+                            counts[key] = int(m.group(1)) if m else None
+                        return counts
+
+                    report_path = os.path.join(mod_dir, "data", "out", "eod-claims-report.txt")
+                    baseline_report = os.path.join(
+                        self.out, "baseline", "legacy", "data", "out", "eod-claims-report.txt")
+
+                    # Phase 2: afterJob() must have finished writing the report.
+                    # Poll until the file exists and is readable + non-empty
+                    # (bounded, so the JVM is never torn down before the write).
+                    report_bytes = None
+                    for _ in range(20):   # up to 10s after job completion
+                        if os.path.isfile(report_path):
+                            try:
+                                with open(report_path, "rb") as fh:
+                                    report_bytes = fh.read()
+                                if report_bytes and len(report_bytes) > 0:
+                                    break
+                            except OSError:
+                                pass
+                        time.sleep(0.5)
+
+                    if report_bytes is None:
+                        parity_issues.append(
+                            "native EOD report not generated by the batch run "
+                            f"(afterJob listener did not write {report_path})")
+                    elif not os.path.isfile(baseline_report):
+                        parity_issues.append("no baseline EOD report to compare against")
+                    else:
+                        with open(baseline_report, "rb") as fh:
+                            baseline_bytes = fh.read()
+                        eod_semantic = True
+                        got = _parse_eod_counts(report_path)
+                        exp = _parse_eod_counts(baseline_report)
+                        for k in ("audit", "exceptions", "reviews"):
+                            if got.get(k) != exp.get(k):
+                                eod_semantic = False
+                                parity_issues.append(
+                                    f"EOD report {k} {got.get(k)} != baseline {exp.get(k)}")
+                        eod_byte = (report_bytes == baseline_bytes)
+                        if not eod_byte:
+                            d = line_diff(baseline_bytes, report_bytes)
+                            parity_issues.append(
+                                "EOD report byte parity mismatch: " + "; ".join(d[:3]))
+                        self.log(f"    [GATE 2] EOD semantic parity: {'PASS' if eod_semantic else 'FAIL'}")
+                        self.log(f"    [GATE 2] EOD byte parity: {'PASS' if eod_byte else 'FAIL'} "
+                                 f"(native {len(report_bytes)}B vs baseline {len(baseline_bytes)}B)")
+                        marker_seen = _log_has("EOD report generated:")
+                        self.log(f"    [GATE 2] EOD report marker in app log: {'yes' if marker_seen else 'no'}")
+
                 self.log(f"    [GATE 2] {item_name.capitalize()} processed: {len(processed)} (Approved: {approved}, Review: {review})")
                 self.log(f"    [GATE 2] Exceptions caught: {exc_count}")
 
@@ -1610,7 +1974,11 @@ class Pipeline:
                         log_content = lf.read()
                 else:
                     log_content = ""
-                detail = f"Spring Boot application failed to start or complete batch run. Log tail:\n{log_content[-1500:]}"
+                if job_terminal:
+                    detail = (f"Spring Boot batch job ended with terminal status [{job_terminal}] "
+                              f"and did not complete. Log tail:\n{log_content[-1500:]}")
+                else:
+                    detail = f"Spring Boot application failed to start or complete batch run. Log tail:\n{log_content[-1500:]}"
                 self.log(f"    [FAIL] {detail}")
 
         finally:
@@ -1685,6 +2053,13 @@ class Pipeline:
         if not cmp.get("rows"):
             return "PARTIAL"
         gate1_ok = all(c["ok"] for c in checks)
+        # A field-level LOGICAL_MISMATCH on any compared artifact is a hard
+        # Gate 1 failure: physical parity may differ by engine, but the
+        # migrated record content does not match the baseline.
+        gate1_ok = gate1_ok and not any(
+            (r.get("logical") or {}).get("verdict") == "LOGICAL_MISMATCH"
+            for r in cmp.get("rows", [])
+        )
         
         # Gate 2 validate checks (if not skipped)
         gate2_ok = True
@@ -2056,6 +2431,581 @@ public interface ClaimExceptionRepository extends JpaRepository<ClaimException, 
         fh.write(repo_code)
 
 
+def write_claim_audit_entity(java_base):
+    """Native CCREPT01/CCPROC01 audit persistence (INS_CLAIM_AUDIT equivalent).
+
+    CCPROC01 WRITE-AUDIT emits a claim-audit.dat record for every processed
+    (approved or manual-review) claim. The modernized app persists the same
+    logical record (claimId, policyId, status, approvedAmount, description)
+    so a native report service (EodReportService) can reproduce CCREPT01's
+    EOD counts without the COBOL runtime.
+    """
+    entity_path = os.path.join(java_base, "domain", "ClaimAudit.java")
+    entity_code = """package com.systema.modernized.domain;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Table;
+import java.math.BigDecimal;
+
+@Entity
+@Table(name = "ins_claim_audit")
+public class ClaimAudit {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String claimId;
+    private String policyId;
+    private String status;
+    private BigDecimal approvedAmount;
+    private String description;
+
+    public ClaimAudit() {}
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public String getClaimId() { return claimId; }
+    public void setClaimId(String claimId) { this.claimId = claimId; }
+    public String getPolicyId() { return policyId; }
+    public void setPolicyId(String policyId) { this.policyId = policyId; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public BigDecimal getApprovedAmount() { return approvedAmount; }
+    public void setApprovedAmount(BigDecimal approvedAmount) { this.approvedAmount = approvedAmount; }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+}
+"""
+    repo_path = os.path.join(java_base, "repository", "ClaimAuditRepository.java")
+    repo_code = """package com.systema.modernized.repository;
+
+import com.systema.modernized.domain.ClaimAudit;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface ClaimAuditRepository extends JpaRepository<ClaimAudit, Long> {
+    long countByStatus(String status);
+}
+"""
+    with open(entity_path, "w", encoding="utf-8") as fh:
+        fh.write(entity_code)
+    with open(repo_path, "w", encoding="utf-8") as fh:
+        fh.write(repo_code)
+
+
+def write_legacy_feature_service(java_base):
+    """Native CCLEGACYX equivalent: EVALUATE code mapping + PERFORM VARYING
+    flag table (REDEFINES/OCCURS translated to a String[]).
+    """
+    path = os.path.join(java_base, "service", "LegacyFeatureService.java")
+    code = """package com.systema.modernized.service;
+
+import org.springframework.stereotype.Service;
+
+@Service
+public class LegacyFeatureService {
+
+    // Faithful port of CCLEGACYX 1000-VALIDATE EVALUATE:
+    //   WHEN "MV" MOVE "MOTOR"  TO WS-CODE
+    //   WHEN "HE" MOVE "HEALTH" TO WS-CODE
+    //   WHEN OTHER MOVE "XX"    TO WS-CODE
+    public String validateCode(String code) {
+        if ("MV".equals(code)) {
+            return "MOTOR";
+        }
+        if ("HE".equals(code)) {
+            return "HEALTH";
+        }
+        return "XX";
+    }
+
+    // Faithful port of CCLEGACYX PERFORM VARYING WS-INDEX 1..10:
+    //   MOVE "Y" TO WS-FLAG(WS-INDEX)
+    // WS-FLAG-TABLE REDEFINES WS-FLAGS (PIC X(10)) with OCCURS 10 -> String[].
+    public String[] buildFlagTable() {
+        String[] flags = new String[10];
+        for (int i = 0; i < 10; i++) {
+            flags[i] = "Y";
+        }
+        return flags;
+    }
+}
+"""
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(code)
+
+
+def write_eod_report_service(java_base):
+    """Native CCREPT01 equivalent: EOD report generator.
+
+    CCREPT01 reads claim-audit.dat and claim-exceptions.dat, counts audit
+    records, exceptions and manual reviews, and writes eod-claims-report.txt.
+    The modernized app derives the same counts from the persisted audit and
+    exception tables (spec #10: DB representation preserving logical info)
+    and regenerates the identical report layout / zero-padded PIC 9(7) counts.
+    """
+    path = os.path.join(java_base, "service", "EodReportService.java")
+    code = """package com.systema.modernized.service;
+
+import com.systema.modernized.repository.ClaimAuditRepository;
+import com.systema.modernized.repository.ClaimExceptionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Arrays;
+
+@Service
+public class EodReportService {
+
+    private static final Logger log = LoggerFactory.getLogger(EodReportService.class);
+
+    // CCREPT01 FD REPORT-OUT: 01 REPORT-LINE PIC X(160).
+    private static final int RECORD_LENGTH = 160;
+
+    @Autowired
+    private ClaimAuditRepository claimAuditRepository;
+
+    @Autowired
+    private ClaimExceptionRepository claimExceptionRepository;
+
+    @Value("${app.report.output:data/out/eod-claims-report.txt}")
+    private String reportOutput;
+
+    // CCREPT01 WS-AUDIT-COUNT = number of audit lines
+    public long countAuditRecords() {
+        return claimAuditRepository.count();
+    }
+
+    // CCREPT01 WS-EXCEPTION-COUNT = number of exception lines
+    public long countExceptions() {
+        return claimExceptionRepository.count();
+    }
+
+    // CCREPT01 WS-REVIEW-COUNT = audit lines whose status text is MANUAL_REVIEW
+    public long countManualReviews() {
+        return claimAuditRepository.countByStatus("MANUAL_REVIEW");
+    }
+
+    // Native CCREPT01 WRITE-REPORT. Reproduces the COBOL record semantics for
+    // the shared fixed-width REPORT-LINE buffer (PIC X(160)):
+    //   * MOVE ... TO REPORT-LINE copies the literal and space-pads the rest
+    //     of the fixed-width buffer.
+    //   * STRING ... DELIMITED BY SIZE overlays only the leading bytes; the
+    //     remainder of the buffer is left untouched. This is why the trailing
+    //     "REPORT" fragment of the title line survives in the subsequent count
+    //     lines (byte-for-byte identical to the COBOL golden baseline).
+    //   * LINE SEQUENTIAL output trims trailing spaces before the newline.
+    public String buildReport(long auditCount, long exceptionCount, long reviewCount) {
+        char[] buf = new char[RECORD_LENGTH];
+        StringBuilder sb = new StringBuilder();
+        // MOVE ALL "=" TO REPORT-LINE / WRITE REPORT-LINE
+        Arrays.fill(buf, '=');
+        writeLine(sb, buf);
+        // MOVE "CLAIMSCORE - END OF DAY CLAIMS REPORT" TO REPORT-LINE
+        moveInto(buf, "CLAIMSCORE - END OF DAY CLAIMS REPORT");
+        writeLine(sb, buf);
+        // STRING "AUDIT RECORDS         : " WS-AUDIT-COUNT DELIMITED BY SIZE INTO REPORT-LINE
+        stringInto(buf, "AUDIT RECORDS         : ", auditCount);
+        writeLine(sb, buf);
+        // STRING "EXCEPTIONS            : " WS-EXCEPTION-COUNT DELIMITED BY SIZE INTO REPORT-LINE
+        stringInto(buf, "EXCEPTIONS            : ", exceptionCount);
+        writeLine(sb, buf);
+        // STRING "MANUAL REVIEWS        : " WS-REVIEW-COUNT DELIMITED BY SIZE INTO REPORT-LINE
+        stringInto(buf, "MANUAL REVIEWS        : ", reviewCount);
+        writeLine(sb, buf);
+        // MOVE "STATUS: CLAIMS BATCH COMPLETED" TO REPORT-LINE
+        moveInto(buf, "STATUS: CLAIMS BATCH COMPLETED");
+        writeLine(sb, buf);
+        return sb.toString();
+    }
+
+    // COBOL MOVE: copy the literal over the leading bytes of the record buffer
+    // and space-pad the remainder.
+    private static void moveInto(char[] buf, String value) {
+        Arrays.fill(buf, ' ');
+        int n = Math.min(value.length(), buf.length);
+        for (int i = 0; i < n; i++) {
+            buf[i] = value.charAt(i);
+        }
+    }
+
+    // COBOL STRING ... DELIMITED BY SIZE: overlay the literal and the display
+    // PIC 9(7) count over the leading bytes, leaving the tail untouched.
+    private static void stringInto(char[] buf, String label, long count) {
+        int off = 0;
+        for (int i = 0; i < label.length() && off < buf.length; i++) {
+            buf[off++] = label.charAt(i);
+        }
+        String digits = String.format("%07d", count);
+        for (int i = 0; i < digits.length() && off < buf.length; i++) {
+            buf[off++] = digits.charAt(i);
+        }
+    }
+
+    // LINE SEQUENTIAL WRITE: emit the record up to its last non-space byte,
+    // followed by a line feed (trailing spaces are trimmed).
+    private static void writeLine(StringBuilder sb, char[] buf) {
+        int end = buf.length;
+        while (end > 0 && buf[end - 1] == ' ') {
+            end--;
+        }
+        sb.append(buf, 0, end);
+        sb.append('\\n');
+    }
+
+    public String generate() throws IOException {
+        String report = buildReport(countAuditRecords(), countExceptions(), countManualReviews());
+        Path output = Paths.get(reportOutput);
+        Files.createDirectories(output.getParent());
+        Files.write(output, report.getBytes(StandardCharsets.UTF_8));
+        log.info("EOD report generated: {}", output.toAbsolutePath().normalize());
+        return report;
+    }
+}
+"""
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(code)
+
+
+def write_parity_tests(java_base):
+    """JUnit parity tests for the ClaimsCore modernized app (Gate 4).
+
+    Tests mirror COBOL boundary semantics from CCPROC01 CALCULATE-SETTLEMENT,
+    CCREPT01 counts, CCLEGACYX evaluation, audit persistence and EOD report
+    layout. Mockito mocks stand in for the Spring Data JPA repositories so the
+    tests run without a database.
+    """
+    # java_base = <mod>/src/main/java/com/systema/modernized
+    test_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(java_base))))), "test", "java")
+    os.makedirs(test_root, exist_ok=True)
+    pkg_dir = os.path.join(test_root, "com", "systema", "modernized", "service")
+    os.makedirs(pkg_dir, exist_ok=True)
+
+    processing_test = """package com.systema.modernized.service;
+
+import com.systema.modernized.domain.Claim;
+import com.systema.modernized.domain.Policy;
+import com.systema.modernized.domain.ClaimAudit;
+import com.systema.modernized.domain.ClaimException;
+import com.systema.modernized.repository.PolicyRepository;
+import com.systema.modernized.repository.ClaimRepository;
+import com.systema.modernized.repository.ClaimExceptionRepository;
+import com.systema.modernized.repository.ClaimAuditRepository;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.math.BigDecimal;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+
+class BusinessProcessingServiceTest {
+
+    private static Policy policy(String id, String type, String status,
+                                 String cover, String deductible) {
+        Policy p = new Policy();
+        p.setPolicyId(id);
+        p.setType(type);
+        p.setStatus(status);
+        p.setCoverLimit(new BigDecimal(cover));
+        p.setDeductible(new BigDecimal(deductible));
+        return p;
+    }
+
+    private static Claim claim(String id, String policyId, String type, String amount) {
+        Claim c = new Claim();
+        c.setClaimId(id);
+        c.setPolicyId(policyId);
+        c.setType(type);
+        c.setAmount(new BigDecimal(amount));
+        return c;
+    }
+
+    private BusinessProcessingService service(PolicyRepository policyRepo,
+                                              ClaimRepository claimRepo,
+                                              ClaimExceptionRepository excRepo,
+                                              ClaimAuditRepository auditRepo) {
+        BusinessProcessingService s = new BusinessProcessingService();
+        try {
+            java.lang.reflect.Field f = BusinessProcessingService.class
+                    .getDeclaredField("policyRepository");
+            f.setAccessible(true);
+            f.set(s, policyRepo);
+            f = BusinessProcessingService.class.getDeclaredField("claimRepository");
+            f.setAccessible(true);
+            f.set(s, claimRepo);
+            f = BusinessProcessingService.class.getDeclaredField("claimExceptionRepository");
+            f.setAccessible(true);
+            f.set(s, excRepo);
+            f = BusinessProcessingService.class.getDeclaredField("claimAuditRepository");
+            f.setAccessible(true);
+            f.set(s, auditRepo);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return s;
+    }
+
+    private static PolicyRepository repoOf(Policy policy) {
+        PolicyRepository repo = mock(PolicyRepository.class);
+        if (policy == null) {
+            when(repo.findById(any())).thenReturn(Optional.empty());
+        } else {
+            when(repo.findById(eq(policy.getPolicyId()))).thenReturn(Optional.of(policy));
+        }
+        return repo;
+    }
+
+    @Test
+    void approvedAmountIsClaimMinusDeductible() {
+        PolicyRepository policyRepo = repoOf(policy("PL00000001", "MV", "A", "500000.00", "25000.00"));
+        ClaimRepository claimRepo = mock(ClaimRepository.class);
+        ClaimAuditRepository auditRepo = mock(ClaimAuditRepository.class);
+        BusinessProcessingService s = service(policyRepo, claimRepo,
+                mock(ClaimExceptionRepository.class), auditRepo);
+        Claim c = claim("CLM000000001", "PL00000001", "MV", "120000.00");
+        s.processClaim(c);
+        // 120000 - 25000 = 95000, below cover limit and threshold -> APPROVED
+        assertEquals("APPROVED", c.getStatus());
+        assertEquals(0, new BigDecimal("95000.00").compareTo(c.getAmount()));
+        assertEquals(1L, s.getApprovedCount());
+        assertEquals(0L, s.getReviewCount());
+        assertEquals(1L, s.getTotalClaimCount());
+    }
+
+    @Test
+    void approvedAuditRowIsPersisted() {
+        ClaimAuditRepository auditRepo = mock(ClaimAuditRepository.class);
+        BusinessProcessingService s = service(
+                repoOf(policy("PL00000001", "MV", "A", "500000.00", "25000.00")),
+                mock(ClaimRepository.class), mock(ClaimExceptionRepository.class), auditRepo);
+        s.processClaim(claim("CLM000000001", "PL00000001", "MV", "120000.00"));
+        ArgumentCaptor<ClaimAudit> cap = ArgumentCaptor.forClass(ClaimAudit.class);
+        verify(auditRepo).save(cap.capture());
+        assertEquals("APPROVED", cap.getValue().getStatus());
+        assertEquals(0, new BigDecimal("95000.00").compareTo(cap.getValue().getApprovedAmount()));
+    }
+
+    @Test
+    void approvedAmountFloorsAtZeroWhenDeductibleExceedsClaim() {
+        BusinessProcessingService s = service(
+                repoOf(policy("PL00000002", "HE", "A", "300000.00", "10000.00")),
+                mock(ClaimRepository.class), mock(ClaimExceptionRepository.class),
+                mock(ClaimAuditRepository.class));
+        Claim c = claim("CLM000000010", "PL00000002", "HE", "8000.00");
+        s.processClaim(c);
+        // 8000 - 10000 < 0 -> floored to 0
+        assertEquals("APPROVED", c.getStatus());
+        assertEquals(0, BigDecimal.ZERO.compareTo(c.getAmount()));
+    }
+
+    @Test
+    void approvedAmountCappedAtCoverLimit() {
+        BusinessProcessingService s = service(
+                repoOf(policy("PL00000001", "MV", "A", "500000.00", "25000.00")),
+                mock(ClaimRepository.class), mock(ClaimExceptionRepository.class),
+                mock(ClaimAuditRepository.class));
+        Claim c = claim("CLM000000011", "PL00000001", "MV", "2000000.00");
+        s.processClaim(c);
+        // 2000000 - 25000 capped at 500000 cover limit, above review threshold
+        assertEquals("MANUAL_REVIEW", c.getStatus());
+        assertEquals(0, new BigDecimal("500000.00").compareTo(c.getAmount()));
+        assertEquals(1L, s.getReviewCount());
+    }
+
+    @Test
+    void approvedAmountEqual200kIsApprovedNotReview() {
+        BusinessProcessingService s = service(
+                repoOf(policy("PL00000002", "HE", "A", "300000.00", "10000.00")),
+                mock(ClaimRepository.class), mock(ClaimExceptionRepository.class),
+                mock(ClaimAuditRepository.class));
+        // 210000 - 10000 = 200000 -> not > 200000 -> APPROVED
+        Claim c = claim("CLM000000012", "PL00000002", "HE", "210000.00");
+        s.processClaim(c);
+        assertEquals("APPROVED", c.getStatus());
+    }
+
+    @Test
+    void policyNotFoundRejectsP001() {
+        ClaimExceptionRepository excRepo = mock(ClaimExceptionRepository.class);
+        BusinessProcessingService s = service(
+                repoOf(null), mock(ClaimRepository.class), excRepo, mock(ClaimAuditRepository.class));
+        s.processClaim(claim("CLM000000005", "PL99999999", "MV", "25000.00"));
+        ArgumentCaptor<ClaimException> cap = ArgumentCaptor.forClass(ClaimException.class);
+        verify(excRepo).save(cap.capture());
+        assertEquals("P001", cap.getValue().getCode());
+        assertEquals("POLICY NOT FOUND", cap.getValue().getReasonText());
+        assertEquals(1L, s.getRejectedCount());
+    }
+
+    @Test
+    void inactivePolicyRejectsP002() {
+        ClaimExceptionRepository excRepo = mock(ClaimExceptionRepository.class);
+        BusinessProcessingService s = service(
+                repoOf(policy("PL00000003", "PR", "E", "150000.00", "15000.00")),
+                mock(ClaimRepository.class), excRepo, mock(ClaimAuditRepository.class));
+        s.processClaim(claim("CLM000000004", "PL00000003", "PR", "60000.00"));
+        ArgumentCaptor<ClaimException> cap = ArgumentCaptor.forClass(ClaimException.class);
+        verify(excRepo).save(cap.capture());
+        assertEquals("P002", cap.getValue().getCode());
+        assertEquals("POLICY INACTIVE OR EXPIRED", cap.getValue().getReasonText());
+    }
+
+    @Test
+    void typeMismatchRejectsP003() {
+        ClaimExceptionRepository excRepo = mock(ClaimExceptionRepository.class);
+        BusinessProcessingService s = service(
+                repoOf(policy("PL00000002", "HE", "A", "300000.00", "10000.00")),
+                mock(ClaimRepository.class), excRepo, mock(ClaimAuditRepository.class));
+        s.processClaim(claim("CLM000000006", "PL00000002", "MV", "50000.00"));
+        ArgumentCaptor<ClaimException> cap = ArgumentCaptor.forClass(ClaimException.class);
+        verify(excRepo).save(cap.capture());
+        assertEquals("P003", cap.getValue().getCode());
+        assertEquals("CLAIM TYPE NOT COVERED BY POLICY", cap.getValue().getReasonText());
+    }
+
+    @Test
+    void auditPersistedForProcessedClaims() {
+        ClaimAuditRepository auditRepo = mock(ClaimAuditRepository.class);
+        BusinessProcessingService s = service(
+                repoOf(policy("PL00000002", "HE", "A", "300000.00", "10000.00")),
+                mock(ClaimRepository.class), mock(ClaimExceptionRepository.class), auditRepo);
+        Claim c = claim("CLM000000007", "PL00000002", "HE", "350000.00");
+        s.processClaim(c);
+        // 340000 > 300000 cap -> 300000, > 200000 -> MANUAL_REVIEW
+        assertEquals("MANUAL_REVIEW", c.getStatus());
+        ArgumentCaptor<ClaimAudit> cap = ArgumentCaptor.forClass(ClaimAudit.class);
+        verify(auditRepo).save(cap.capture());
+        assertEquals("MANUAL_REVIEW", cap.getValue().getStatus());
+        assertEquals(0, new BigDecimal("300000.00").compareTo(cap.getValue().getApprovedAmount()));
+        assertEquals(1L, s.getReviewCount());
+    }
+}
+"""
+    with open(os.path.join(pkg_dir, "BusinessProcessingServiceTest.java"), "w", encoding="utf-8") as fh:
+        fh.write(processing_test)
+
+    report_test = """package com.systema.modernized.service;
+
+import com.systema.modernized.repository.ClaimAuditRepository;
+import com.systema.modernized.repository.ClaimExceptionRepository;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class EodReportServiceTest {
+
+    private EodReportService service(long auditCount, long excCount, long reviewCount) {
+        ClaimAuditRepository auditRepo = mock(ClaimAuditRepository.class);
+        when(auditRepo.count()).thenReturn(auditCount);
+        when(auditRepo.countByStatus("MANUAL_REVIEW")).thenReturn(reviewCount);
+        ClaimExceptionRepository excRepo = mock(ClaimExceptionRepository.class);
+        when(excRepo.count()).thenReturn(excCount);
+        EodReportService s = new EodReportService();
+        try {
+            java.lang.reflect.Field f = EodReportService.class.getDeclaredField("claimAuditRepository");
+            f.setAccessible(true);
+            f.set(s, auditRepo);
+            f = EodReportService.class.getDeclaredField("claimExceptionRepository");
+            f.setAccessible(true);
+            f.set(s, excRepo);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return s;
+    }
+
+    @Test
+    void reportMatchesCobolBaselineCounts() {
+        EodReportService s = service(4L, 3L, 2L);
+        assertEquals(4L, s.countAuditRecords());
+        assertEquals(3L, s.countExceptions());
+        assertEquals(2L, s.countManualReviews());
+        String report = s.buildReport(4L, 3L, 2L);
+        assertTrue(report.contains("CLAIMSCORE - END OF DAY CLAIMS REPORT"));
+        assertTrue(report.contains("AUDIT RECORDS         : 0000004"));
+        assertTrue(report.contains("EXCEPTIONS            : 0000003"));
+        assertTrue(report.contains("MANUAL REVIEWS        : 0000002"));
+        assertTrue(report.contains("STATUS: CLAIMS BATCH COMPLETED"));
+    }
+
+    @Test
+    void reportReproducesCobolGoldenBytes() {
+        // Golden output of CCREPT01 (PIC X(160) buffer: STRING leaves the tail
+        // of the previous title line — "REPORT" — in the count lines, and the
+        // LINE SEQUENTIAL writer trims trailing spaces). Byte-for-byte match is
+        // the Gate 2 requirement.
+        String report = new EodReportService().buildReport(4L, 3L, 2L);
+        String expected = "=".repeat(160) + "\\n"
+                + "CLAIMSCORE - END OF DAY CLAIMS REPORT\\n"
+                + "AUDIT RECORDS         : 0000004REPORT\\n"
+                + "EXCEPTIONS            : 0000003REPORT\\n"
+                + "MANUAL REVIEWS        : 0000002REPORT\\n"
+                + "STATUS: CLAIMS BATCH COMPLETED\\n";
+        assertEquals(expected, report);
+    }
+
+    @Test
+    void emptyRunProducesZeroCounts() {
+        EodReportService s = service(0L, 0L, 0L);
+        String report = s.buildReport(s.countAuditRecords(), s.countExceptions(), s.countManualReviews());
+        assertTrue(report.contains("AUDIT RECORDS         : 0000000"));
+        assertTrue(report.contains("EXCEPTIONS            : 0000000"));
+        assertTrue(report.contains("MANUAL REVIEWS        : 0000000"));
+    }
+}
+"""
+    with open(os.path.join(pkg_dir, "EodReportServiceTest.java"), "w", encoding="utf-8") as fh:
+        fh.write(report_test)
+
+    legacy_test = """package com.systema.modernized.service;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class LegacyFeatureServiceTest {
+
+    private final LegacyFeatureService service = new LegacyFeatureService();
+
+    @Test
+    void evaluatesCobolCodeMapping() {
+        assertEquals("MOTOR", service.validateCode("MV"));
+        assertEquals("HEALTH", service.validateCode("HE"));
+        assertEquals("XX", service.validateCode("PR"));
+        assertEquals("XX", service.validateCode(""));
+        assertEquals("XX", service.validateCode(null));
+    }
+
+    @Test
+    void buildsTenElementFlagTableAllY() {
+        String[] flags = service.buildFlagTable();
+        assertEquals(10, flags.length);
+        for (String flag : flags) {
+            assertEquals("Y", flag);
+        }
+    }
+}
+"""
+    with open(os.path.join(pkg_dir, "LegacyFeatureServiceTest.java"), "w", encoding="utf-8") as fh:
+        fh.write(legacy_test)
+
 def write_pom_xml(dest):
     path = os.path.join(dest, "pom.xml")
     code = """<?xml version="1.0" encoding="UTF-8"?>
@@ -2095,6 +3045,11 @@ def write_pom_xml(dest):
             <artifactId>h2</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
@@ -2121,6 +3076,7 @@ spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
 spring.jpa.hibernate.ddl-auto=update
 spring.batch.jdbc.initialize-schema=always
 app.batch.input=data/in/claims.dat
+app.report.output=data/out/eod-claims-report.txt
 """
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(code)
@@ -2416,9 +3372,11 @@ public class SpringBatchConfig {
 
 import com.systema.modernized.domain.Claim;
 import com.systema.modernized.domain.Policy;
+import com.systema.modernized.domain.ClaimAudit;
 import com.systema.modernized.domain.ClaimException;
 import com.systema.modernized.repository.PolicyRepository;
 import com.systema.modernized.repository.ClaimRepository;
+import com.systema.modernized.repository.ClaimAuditRepository;
 import com.systema.modernized.repository.ClaimExceptionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -2430,33 +3388,49 @@ public class BusinessProcessingService {
 
     @Autowired
     private PolicyRepository policyRepository;
-    
+
     @Autowired
     private ClaimRepository claimRepository;
-    
+
+    @Autowired
+    private ClaimAuditRepository claimAuditRepository;
+
     @Autowired
     private ClaimExceptionRepository claimExceptionRepository;
 
     private static final BigDecimal REVIEW_THRESHOLD = new BigDecimal("200000");
+    private static final String APPROVED_STATUS = "APPROVED";
+    private static final String REVIEW_STATUS = "MANUAL_REVIEW";
+
+    // Native equivalents of CCPROC01 WS-* run counters. They are derived from
+    // the authoritative persisted audit/exception rows produced by this run,
+    // which is the logical meaning the COBOL working-storage counters carried:
+    //   WS-CLAIM-COUNT   -> totalClaimCount
+    //   WS-APPROVED-COUNT-> approvedCount
+    //   WS-REJECTED-COUNT-> rejectedCount
+    //   WS-REVIEW-COUNT  -> reviewCount
+    private long totalClaimCount = 0;
+    private long approvedCount = 0;
+    private long rejectedCount = 0;
+    private long reviewCount = 0;
 
     public void processClaim(Claim claim) {
+        // MAP-CLAIM + WS-CLAIM-COUNT increment (one claim parsed -> counted)
+        totalClaimCount++;
         Optional<Policy> policyOpt = policyRepository.findById(claim.getPolicyId());
         if (!policyOpt.isPresent()) {
-            saveException(claim.getClaimId(), claim.getPolicyId(), "P001", "POLICY NOT FOUND");
+            saveException(claim, "P001", "POLICY NOT FOUND");
             return;
         }
-        
         Policy policy = policyOpt.get();
         if (!"A".equals(policy.getStatus())) {
-            saveException(claim.getClaimId(), claim.getPolicyId(), "P002", "POLICY INACTIVE OR EXPIRED");
+            saveException(claim, "P002", "POLICY INACTIVE OR EXPIRED");
             return;
         }
-        
         if (!claim.getType().equals(policy.getType())) {
-            saveException(claim.getClaimId(), claim.getPolicyId(), "P003", "CLAIM TYPE NOT COVERED BY POLICY");
+            saveException(claim, "P003", "CLAIM TYPE NOT COVERED BY POLICY");
             return;
         }
-        
         // Faithful port of CCPROC01 CALCULATE-SETTLEMENT:
         //   approved = max(0, amount - deductible) capped at the cover limit
         //   status   = MANUAL_REVIEW when approved > 200000, else APPROVED
@@ -2468,30 +3442,55 @@ public class BusinessProcessingService {
             approvedAmount = policy.getCoverLimit();
         }
         claim.setAmount(approvedAmount);
-        if (approvedAmount.compareTo(REVIEW_THRESHOLD) > 0) {
-            claim.setStatus("MANUAL_REVIEW");
-        } else {
-            claim.setStatus("APPROVED");
-        }
+        String status = approvedAmount.compareTo(REVIEW_THRESHOLD) > 0
+                ? REVIEW_STATUS : APPROVED_STATUS;
+        claim.setStatus(status);
         claimRepository.save(claim);
+        saveAudit(claim, status, approvedAmount);
     }
-    
-    private void saveException(String claimId, String policyId, String code, String text) {
+
+    // CCPROC01 WRITE-AUDIT: one audit row per processed (approved/review) claim.
+    private void saveAudit(Claim claim, String status, BigDecimal approvedAmount) {
+        ClaimAudit audit = new ClaimAudit();
+        audit.setClaimId(claim.getClaimId());
+        audit.setPolicyId(claim.getPolicyId());
+        audit.setStatus(status);
+        audit.setApprovedAmount(approvedAmount);
+        audit.setDescription(claim.getDescription());
+        claimAuditRepository.save(audit);
+        if (REVIEW_STATUS.equals(status)) {
+            reviewCount++;
+        } else {
+            approvedCount++;
+        }
+    }
+
+    // CCPROC01 WRITE-REJECTION: exception row + WS-REJECTED-COUNT increment.
+    private void saveException(Claim claim, String code, String text) {
+        rejectedCount++;
         ClaimException exc = new ClaimException();
-        exc.setClaimId(claimId);
-        exc.setPolicyId(policyId);
+        exc.setClaimId(claim.getClaimId());
+        exc.setPolicyId(claim.getPolicyId());
         exc.setCode(code);
         exc.setReasonText(text);
         claimExceptionRepository.save(exc);
     }
+
+    public long getTotalClaimCount() { return totalClaimCount; }
+    public long getApprovedCount() { return approvedCount; }
+    public long getRejectedCount() { return rejectedCount; }
+    public long getReviewCount() { return reviewCount; }
 }
 """
         batch_code = """package com.systema.modernized.batch;
 
 import com.systema.modernized.domain.Claim;
 import com.systema.modernized.service.BusinessProcessingService;
+import com.systema.modernized.service.EodReportService;
 import com.systema.modernized.repository.ClaimRepository;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobExecutionListener;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
@@ -2518,6 +3517,9 @@ public class SpringBatchConfig {
 
     @Autowired
     private ClaimRepository claimRepository;
+
+    @Autowired
+    private EodReportService eodReportService;
 
     @Value("${app.batch.input:data/in/claims.dat}")
     private String inputPath;
@@ -2564,9 +3566,28 @@ public class SpringBatchConfig {
                 .build();
     }
 
+    // Native CCREPT01 equivalent: regenerate the deterministic EOD report
+    // (eod-claims-report.txt) from persisted audit/exception records right
+    // after the claims batch completes.
     @Bean
-    public Job processClaimsJob(JobRepository jobRepository, Step step1) {
+    public JobExecutionListener eodReportListener() {
+        return new JobExecutionListener() {
+            @Override
+            public void afterJob(JobExecution jobExecution) {
+                try {
+                    eodReportService.generate();
+                } catch (Exception e) {
+                    throw new RuntimeException("EOD report generation failed", e);
+                }
+            }
+        };
+    }
+
+    @Bean
+    public Job processClaimsJob(JobRepository jobRepository, Step step1,
+                                JobExecutionListener eodReportListener) {
         return new JobBuilder("processClaimsJob", jobRepository)
+                .listener(eodReportListener)
                 .flow(step1)
                 .end()
                 .build();
@@ -2588,15 +3609,20 @@ def write_rest_controller(java_base, entry):
 import com.systema.modernized.domain.Transaction;
 import com.systema.modernized.repository.TransactionRepository;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobInstance;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/process")
@@ -2611,6 +3637,9 @@ public class ProcessController {
     @Autowired
     private TransactionRepository transactionRepository;
 
+    @Autowired
+    private JobExplorer jobExplorer;
+
     @PostMapping("/run")
     public String runJob() throws Exception {
         JobParameters params = new JobParametersBuilder()
@@ -2624,6 +3653,21 @@ public class ProcessController {
     public List<Transaction> getTransactions() {
         return transactionRepository.findAll();
     }
+
+    @GetMapping("/status")
+    public Map<String, Object> getJobStatus() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        JobInstance last = jobExplorer.getLastJobInstance("processTransactionsJob");
+        result.put("job", "processTransactionsJob");
+        if (last == null) {
+            result.put("status", "NO_RUN");
+            return result;
+        }
+        JobExecution exec = jobExplorer.getLastJobExecution(last);
+        result.put("status", exec.getStatus().name());
+        result.put("exit", String.valueOf(exec.getExitStatus().getExitCode()));
+        return result;
+    }
 }
 """
     else:
@@ -2634,15 +3678,20 @@ import com.systema.modernized.domain.ClaimException;
 import com.systema.modernized.repository.ClaimRepository;
 import com.systema.modernized.repository.ClaimExceptionRepository;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobInstance;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/process")
@@ -2659,6 +3708,9 @@ public class ProcessController {
 
     @Autowired
     private ClaimExceptionRepository claimExceptionRepository;
+
+    @Autowired
+    private JobExplorer jobExplorer;
 
     @PostMapping("/run")
     public String runJob() throws Exception {
@@ -2677,6 +3729,21 @@ public class ProcessController {
     @GetMapping("/exceptions")
     public List<ClaimException> getExceptions() {
         return claimExceptionRepository.findAll();
+    }
+
+    @GetMapping("/status")
+    public Map<String, Object> getJobStatus() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        JobInstance last = jobExplorer.getLastJobInstance("processClaimsJob");
+        result.put("job", "processClaimsJob");
+        if (last == null) {
+            result.put("status", "NO_RUN");
+            return result;
+        }
+        JobExecution exec = jobExplorer.getLastJobExecution(last);
+        result.put("status", exec.getStatus().name());
+        result.put("exit", String.valueOf(exec.getExitStatus().getExitCode()));
+        return result;
     }
 }
 """
