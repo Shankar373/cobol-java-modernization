@@ -54,7 +54,7 @@ AUTO_MANUAL_MATRIX = [
     ("Partial failure detection",                "AUTOMATIC", "_compute_verdict() checks n_ok < n_total"),
     ("Checkpoint / resume",                      "AUTOMATIC", "stage_done() gate + state.json per stage"),
     ("Migration report generation",              "AUTOMATIC", "write_report() produces .md + .json"),
-    ("Archive",                                  "AUTOMATIC", "stage_checkpoint() zips target/"),
+    ("Archive",                                  "AUTOMATIC", "stage_package() creates modernized-package.zip"),
     ("Unsupported mainframe utility (SORT etc)", "MANUAL",    "cobj may not support all JCL/utility calls"),
     ("Source refactoring (bug fixes)",           "MANUAL",    "Never automatic; must be declared in manual_source_modifications"),
 ]
@@ -325,7 +325,7 @@ def run_synthetic_test(repo_path, repo_name, skip_docker=False):
                 result["transpile"] = {"ok": None, "detail": "SKIPPED — DOCKER UNAVAILABLE"}
             else:
                 ok3, detail3, _ = p.stage_transpile()
-                p.mark(2, "done" if ok3 else "error", detail3)
+                p.mark(4, "done" if ok3 else "error", detail3)
                 tr = p.data("transpile", {})
                 result["transpile"] = {
                     "ok": ok3,
@@ -334,6 +334,20 @@ def run_synthetic_test(repo_path, repo_name, skip_docker=False):
                     "n_total": tr.get("n_total", 0),
                     "status": tr.get("status", {}),
                 }
+                # If something transpiled and the runtime was vendored, run it too,
+                # so the flag reflects runnability — not just compilation.
+                runtime_scaffold = (os.path.isdir(os.path.join(out_path, "generated"))
+                                    and os.path.isfile(os.path.join(out_path, "libcobj.jar")))
+                if ok3 and tr.get("n_ok", 0) > 0 and runtime_scaffold:
+                    try:
+                        ok5, detail5, _ = p.stage_execute()
+                        p.mark(7, "done" if ok5 else "error", detail5)
+                        result["execute"] = {"ok": ok5, "detail": detail5}
+                    except Exception as exc:
+                        result["execute"] = {"ok": False, "detail": str(exc)}
+                elif ok3 and tr.get("n_ok", 0) > 0:
+                    result["execute"] = {"ok": None,
+                                         "detail": "skipped — runtime vendoring (libcobj.jar) not built for synthetic repo"}
     except Exception as exc:
         result["error"] = str(exc)
 
@@ -513,8 +527,8 @@ def write_audit_report(out_dir, audit_data):
     md.append("## M. Synthetic Repository Results\n")
     synth = j.get("synthetic_results", [])
     if synth:
-        md.append("| repo | programs | entry | format | missing copybooks | transpile | result |")
-        md.append("|---|---|---|---|---|---|---|")
+        md.append("| repo | programs | entry | format | missing copybooks | transpile | execute | result |")
+        md.append("|---|---|---|---|---|---|---|---|")
         for r in synth:
             tr = r.get("transpile", {})
             n_ok = tr.get("n_ok", "—")
@@ -522,10 +536,20 @@ def write_audit_report(out_dir, audit_data):
             tr_str = f"{n_ok}/{n_tot}" if tr.get("ok") is not None else tr.get("detail","?")
             missing = len(r.get("missing_copybooks", []))
             disc_ok = r.get("stages", {}).get("discover", {}).get("ok", False)
-            result_icon = "✅" if disc_ok else "❌"
+            ex = r.get("execute", {})
+            exec_ok = ex.get("ok")
+            # PASS reflects discovery AND (when attempted) transpile + execute.
+            ok_flags = [disc_ok]
+            if tr.get("ok") is not None:
+                ok_flags.append(bool(tr.get("ok"))
+                                and (not tr.get("n_ok") or tr.get("n_ok", 0) > 0))
+            if exec_ok is not None:
+                ok_flags.append(bool(exec_ok))
+            result_icon = "✅" if all(ok_flags) else "❌"
+            ex_label = "✅" if exec_ok is True else ("—" if exec_ok is None else "❌")
             md.append(f"| {r['repo']} | {r.get('programs','?')} | "
                       f"`{r.get('entry','?')}` | {r.get('format','?')} | "
-                      f"{missing} | {tr_str} | {result_icon} |")
+                      f"{missing} | {tr_str} | {ex_label} | {result_icon} |")
     else:
         md.append("_Synthetic tests not run. Use `--run-synthetic` flag._")
     md.append("")
@@ -601,7 +625,14 @@ def main():
                     print(f"  synthetic: {repo_name} ...")
                     r = run_synthetic_test(repo_path, repo_name, args.skip_docker)
                     synth_results.append(r)
-                    verdict_icon = "PASS" if r.get("stages", {}).get("discover", {}).get("ok") else "FAIL"
+                    ok_flags = [r.get("stages", {}).get("discover", {}).get("ok")]
+                    tr_ok = r.get("transpile", {}).get("ok")
+                    if tr_ok is not None:
+                        ok_flags.append(bool(tr_ok))
+                    ex_ok = r.get("execute", {}).get("ok")
+                    if ex_ok is not None:
+                        ok_flags.append(bool(ex_ok))
+                    verdict_icon = "PASS" if all(ok_flags) else "FAIL"
                     print(f"    -> {verdict_icon}: {r.get('stages',{}).get('discover',{}).get('detail','?')}")
 
     audit_data = {

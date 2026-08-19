@@ -42,17 +42,19 @@ RUNS = {}               # run_id -> dict
 LOCK = threading.Lock()  # guards starting runs (one active run at a time)
 
 STEP_LABELS = [
-    ("Ingest",      "fingerprint repo; SHA-256 source immutability baseline"),
-    ("Discover",    "find programs, copybooks, COPY/CALL/FILE dependency graphs"),
-    ("Transpile",   "real cobj (COBOL 4J) in Docker — NOT Java stubs"),
-    ("Collect",     "gather generated Java sources + stub detection"),
-    ("Preserve",    "vendor libcobj.jar runtime dependency"),
-    ("Generate",    "assemble target project + artifact provenance manifest"),
-    ("Baseline",    "run original COBOL (GnuCOBOL) → baseline snapshot"),
-    ("Execute",     "run the transpiled Java"),
-    ("Compare",     "exact / normalized / logical / semantic diff"),
-    ("Report",      "write migration-report.md/json with full audit"),
-    ("Checkpoint",  "archive everything into checkpoint-archive.zip"),
+    ("Ingest",      "Upload repository • fingerprint source • establish baseline"),
+    ("Discover",    "Detect technologies • programs • copybooks • dependencies"),
+    ("Analyze",     "Build architecture • call graph • data model • business rules"),
+    ("Baseline",    "Execute legacy application • capture golden-master behavior"),
+    ("Transpile",   "COBOL → Java using real cobj"),
+    ("Collect",     "Gather generated Java • detect stubs and gaps"),
+    ("Generate",    "Assemble executable transpiled Java target"),
+    ("Execute",     "Run transpiled Java • capture outputs"),
+    ("Compare",     "Legacy baseline vs transpiled Java • behavioral parity"),
+    ("Refactor",    "Native Spring Boot • Spring Batch • JPA • REST"),
+    ("Validate",    "Build • tests • native Java vs legacy validation"),
+    ("Report",      "Migration results • traceability • risks • audit"),
+    ("Package",     "Create final deployable modernized application"),
 ]
 
 
@@ -74,13 +76,17 @@ def restore_workspaces():
             status = st.get(sname, {}).get("status")
             if status == "done":
                 last = idx
-        if not last:
+        if last is None:
             continue
-        status = "done" if st.get("report", {}).get("status") == "done" else "interrupted"
+        status = "done" if st.get("package", {}).get("status") == "done" else "interrupted"
+        # Restore name/source from persisted meta.json if available
+        meta = engine.load_json(os.path.join(ws, "meta.json"), {})
         RUNS[name] = {
             "run_id": name, "status": status,
             "repo": os.path.join(ws, "repo"), "out": os.path.join(ws, "target"),
             "last_stage": last, "log": [],
+            "source": meta.get("source"),
+            "name": meta.get("name", name),
         }
 
 
@@ -104,8 +110,8 @@ def start_run(run_id, restart_from):
                 p = engine.Pipeline(run["repo"], run["out"], cfg=CFG, pull=True)
                 p.run(restart_from=restart_from)
                 state = engine.load_json(os.path.join(run["out"], "state.json"), {})
-                run["last_stage"] = 10 if state.get("stages", {}).get("checkpoint", {}).get("status") == "done" else 9
-                run["verdict"] = state.get("stages", {}).get("report", {}).get("status")
+                run["last_stage"] = 12 if state.get("stages", {}).get("package", {}).get("status") == "done" else 11
+                run["verdict"] = state.get("stages", {}).get("report", {}).get("detail", "done")
                 run["status"] = "done"
             except Exception as e:  # noqa: BLE001
                 run["error"] = f"{type(e).__name__}: {e}"
@@ -201,6 +207,11 @@ def ingest(payload):
                     "repo": repo, "out": os.path.join(ws, "target"),
                     "last_stage": -1, "log": [], "source": source,
                     "name": payload.get("name") or ("git: " + url if source == "git" else "zip-package")}
+    # Persist source + name so they survive server restarts
+    engine.write_json(os.path.join(ws, "meta.json"), {
+        "source": RUNS[run_id]["source"],
+        "name": RUNS[run_id]["name"],
+    })
     return True, run_id
 
 
@@ -242,51 +253,61 @@ class Handler(BaseHTTPRequestHandler):
             with open(path, "rb") as fh:
                 self._send(200, fh.read(), "text/markdown; charset=utf-8")
             return
-        if u.path == "/checkpoint":
+        if u.path == "/api/modernized":
             q = urllib.parse.parse_qs(u.query)
             rid = q.get("run_id", [""])[0]
             run = RUNS.get(rid)
-            path = os.path.join(run["out"], "checkpoint-archive.zip") if run else ""
+            if not run:
+                self._json({"ok": False, "error": "unknown run"})
+                return
+            mod_path = os.path.join(run["out"], "modernized")
+            if not os.path.exists(mod_path):
+                self._json({"ok": True, "files": []})
+                return
+            files = []
+            for root, _, filenames in os.walk(mod_path):
+                for f in filenames:
+                    fullpath = os.path.join(root, f)
+                    rel = os.path.relpath(fullpath, mod_path).replace("\\", "/")
+                    if not f.endswith(".class"):
+                        files.append({"name": f, "path": rel})
+            self._json({"ok": True, "files": sorted(files, key=lambda x: x["path"])})
+            return
+        if u.path == "/api/modernized-file":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            rpath = q.get("path", [""])[0]
+            run = RUNS.get(rid)
+            if not run or not rpath:
+                self._json({"ok": False, "error": "bad query"})
+                return
+            clean_path = rpath.replace("\\", "/").strip("/")
+            fullpath = os.path.realpath(os.path.join(run["out"], "modernized", clean_path))
+            base = os.path.realpath(os.path.join(run["out"], "modernized"))
+            if not fullpath.startswith(base + os.sep):
+                self._json({"ok": False, "error": "invalid path"})
+                return
+            if not os.path.exists(fullpath) or os.path.isdir(fullpath):
+                self._json({"ok": False, "error": "file not found"})
+                return
+            with open(fullpath, "r", encoding="utf-8", errors="replace") as fh:
+                self._json({"ok": True, "content": fh.read()})
+            return
+        if u.path == "/package":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            run = RUNS.get(rid)
+            path = os.path.join(run["out"], "modernized-package.zip") if run else ""
             if not path or not os.path.exists(path):
-                self._send(404, b"no checkpoint yet")
+                self._send(404, b"no package archive found")
                 return
             with open(path, "rb") as fh:
-                self._send(200, fh.read(), "application/zip")
-            return
-        self._send(404, b"not found")
-
-    def do_POST(self):
-        u = urllib.parse.urlparse(self.path)
-        length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(length)
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._json({"ok": False, "error": "bad json"}, 400)
-            return
-        if u.path == "/api/ingest":
-            ok, result = ingest(payload)
-            self._json({"ok": ok, "run_id": result if ok else None, "error": None if ok else result})
-            return
-        if u.path == "/api/run":
-            run_id = payload.get("run_id")
-            restart = payload.get("restart_from", 0)
-            if restart is None or restart >= len(engine.STAGES):
-                restart = 0
-            with LOCK:
-                active = [r for r in RUNS.values() if r.get("status") == "running"]
-            if active:
-                self._json({"ok": False, "error": "another run is in progress"})
-                return
-            ok, msg = start_run(run_id, restart)
-            self._json({"ok": ok, "error": None if ok else msg})
-            return
-        if u.path == "/api/reset":
-            run_id = payload.get("run_id")
-            run = RUNS.pop(run_id, None)
-            ws = os.path.join(WORKSPACE, run_id)
-            shutil.rmtree(ws, ignore_errors=True)
-            self._json({"ok": True})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f"attachment; filename=modernized-package.zip")
+                self.send_header("Content-Length", str(os.path.getsize(path)))
+                self.end_headers()
+                self.wfile.write(fh.read())
             return
         if u.path == "/api/deps":
             q = urllib.parse.parse_qs(u.query)
@@ -307,12 +328,14 @@ class Handler(BaseHTTPRequestHandler):
                 "missing_copybooks": disc.get("missing_copybooks", []),
                 "call_graph": disc.get("call_graph", {}),
                 "file_assigns": disc.get("file_assigns", {}),
+                "analyze": state.get("data", {}).get("analyze", {}),
                 "immutability": imm,
                 "transpile_status": tr.get("status", {}),
                 "provenance": manifest.get("programs", []),
                 "stub_flags": state.get("data", {}).get("collect", {}).get("stub_flags", {}),
                 "verdict": state.get("data", {}).get("manifest", {}) and
                            state.get("stages", {}).get("report", {}).get("detail", ""),
+                "validate": state.get("data", {}).get("validate", {}),
             })
             return
         if u.path == "/api/report-json":
@@ -325,6 +348,42 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with open(path, "rb") as fh:
                 self._send(200, fh.read(), "application/json; charset=utf-8")
+            return
+        self._send(404, b"not found")
+
+    def do_POST(self):
+        u = urllib.parse.urlparse(self.path)
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._json({"ok": False, "error": "bad json"}, 400)
+            return
+        if u.path == "/api/ingest":
+            ok, result = ingest(payload)
+            self._json({"ok": ok, "run_id": result if ok else None, "error": None if ok else result})
+            return
+        if u.path == "/api/run":
+            run_id = payload.get("run_id")
+            restart = payload.get("restart_from", 0)
+            if not isinstance(restart, int) or isinstance(restart, bool) \
+                    or restart < 0 or restart >= len(engine.STAGES):
+                restart = 0
+            with LOCK:
+                active = [r for r in RUNS.values() if r.get("status") == "running"]
+            if active:
+                self._json({"ok": False, "error": "another run is in progress"})
+                return
+            ok, msg = start_run(run_id, restart)
+            self._json({"ok": ok, "error": None if ok else msg})
+            return
+        if u.path == "/api/reset":
+            run_id = payload.get("run_id")
+            run = RUNS.pop(run_id, None)
+            ws = os.path.join(WORKSPACE, run_id)
+            shutil.rmtree(ws, ignore_errors=True)
+            self._json({"ok": True})
             return
         self._json({"ok": False, "error": "unknown route"}, 404)
 
@@ -358,8 +417,8 @@ def build_state():
             "log": run["log"][-150:],
             "stages": stages,
             "compare_data": state.get("data", {}).get("compare", {}),
-            "checkpoint_size": os.path.getsize(os.path.join(run["out"], "checkpoint-archive.zip"))
-            if os.path.exists(os.path.join(run["out"], "checkpoint-archive.zip")) else None,
+            "package_size": os.path.getsize(os.path.join(run["out"], "modernized-package.zip"))
+            if os.path.exists(os.path.join(run["out"], "modernized-package.zip")) else None,
         })
     active = [r for r in RUNS.values() if r.get("status") == "running"]
     return {"runs": runs, "active": bool(active), "git_available": bool(GIT)}

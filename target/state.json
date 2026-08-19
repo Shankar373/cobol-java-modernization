@@ -2,13 +2,13 @@
   "stages": {
     "ingest": {
       "status": "done",
-      "at": "2026-08-18T17:24:37+00:00",
+      "at": "2026-08-19T02:44:08+00:00",
       "detail": "repo ok: 5 COBOL programs, 4 copybooks fingerprinted",
       "artifacts": []
     },
     "discover": {
       "status": "done",
-      "at": "2026-08-18T17:24:37+00:00",
+      "at": "2026-08-19T02:44:08+00:00",
       "detail": "5 programs discovered",
       "artifacts": [
         "src/CCLEGACYX.cob",
@@ -18,9 +18,29 @@
         "src/CCREPT01.cob"
       ]
     },
+    "analyze": {
+      "status": "done",
+      "at": "2026-08-19T02:44:08+00:00",
+      "detail": "call graph and 5 programs analyzed successfully",
+      "artifacts": [
+        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\analysis.json"
+      ]
+    },
+    "baseline": {
+      "status": "done",
+      "at": "2026-08-19T02:44:16+00:00",
+      "detail": "baseline produced 5 output files",
+      "artifacts": [
+        "data/out/claim-audit.dat",
+        "data/out/claim-exceptions.dat",
+        "data/out/eod-claims-report.txt",
+        "data/work/customer.dat",
+        "data/work/policy.dat"
+      ]
+    },
     "transpile": {
       "status": "done",
-      "at": "2026-08-18T17:24:46+00:00",
+      "at": "2026-08-19T02:44:24+00:00",
       "detail": "5 programs transpiled",
       "artifacts": [
         "src/CCLEGACYX.cob",
@@ -32,7 +52,7 @@
     },
     "collect": {
       "status": "done",
-      "at": "2026-08-18T17:24:47+00:00",
+      "at": "2026-08-19T02:44:25+00:00",
       "detail": "5 java sources, 3234 LOC",
       "artifacts": [
         "CCLEGACYX.java",
@@ -42,17 +62,9 @@
         "CCREPT01.java"
       ]
     },
-    "preserve": {
-      "status": "done",
-      "at": "2026-08-18T17:24:50+00:00",
-      "detail": "runtime dependency preserved",
-      "artifacts": [
-        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\libcobj.jar"
-      ]
-    },
     "generate": {
       "status": "done",
-      "at": "2026-08-18T17:24:50+00:00",
+      "at": "2026-08-19T02:44:29+00:00",
       "detail": "target project assembled",
       "artifacts": [
         "manifest.json",
@@ -60,21 +72,9 @@
         "run-java.bat"
       ]
     },
-    "baseline": {
-      "status": "done",
-      "at": "2026-08-18T17:24:56+00:00",
-      "detail": "baseline produced 5 output files",
-      "artifacts": [
-        "data/out/claim-audit.dat",
-        "data/out/claim-exceptions.dat",
-        "data/out/eod-claims-report.txt",
-        "data/work/customer.dat",
-        "data/work/policy.dat"
-      ]
-    },
     "execute": {
       "status": "done",
-      "at": "2026-08-18T17:25:03+00:00",
+      "at": "2026-08-19T02:44:36+00:00",
       "detail": "java run produced 5 output files",
       "artifacts": [
         "data/out/claim-audit.dat",
@@ -86,8 +86,8 @@
     },
     "compare": {
       "status": "done",
-      "at": "2026-08-18T17:25:03+00:00",
-      "detail": "{'normalized': 0, 'baseline-only': 0, 'differ': 2, 'exact': 3, 'java-only': 0}",
+      "at": "2026-08-19T02:44:37+00:00",
+      "detail": "{'differ': 2, 'baseline-only': 0, 'normalized': 0, 'exact': 3, 'java-only': 0}",
       "artifacts": [
         "data/out/claim-audit.dat",
         "data/out/claim-exceptions.dat",
@@ -96,18 +96,34 @@
         "data/work/policy.dat"
       ]
     },
+    "refactor": {
+      "status": "done",
+      "at": "2026-08-19T09:23:14+00:00",
+      "detail": "Generated and compiled successfully",
+      "artifacts": [
+        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized"
+      ]
+    },
+    "validate": {
+      "status": "done",
+      "at": "2026-08-19T09:35:07+00:00",
+      "detail": "Gate 2 PASS \u2014 exact parity with GnuCOBOL baseline (4 processed claims, 3 exceptions)",
+      "artifacts": [
+        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized\\target\\modernized-1.0.0.jar"
+      ]
+    },
     "report": {
       "status": "done",
-      "at": "2026-08-18T17:25:03+00:00",
+      "at": "2026-08-19T09:35:07+00:00",
       "detail": "verdict PASS",
       "artifacts": []
     },
-    "checkpoint": {
+    "package": {
       "status": "done",
-      "at": "2026-08-18T17:25:04+00:00",
-      "detail": "checkpoint archive built",
+      "at": "2026-08-19T09:35:07+00:00",
+      "detail": "modernized application packaged successfully",
       "artifacts": [
-        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\checkpoint-archive.zip"
+        "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized-package.zip"
       ]
     }
   },
@@ -267,8 +283,8 @@
           }
         },
         "roots": [
-          "CCLEGACYX",
-          "CCMAIN01"
+          "CCMAIN01",
+          "CCLEGACYX"
         ],
         "dynamic_callers": []
       },
@@ -385,7 +401,7 @@
       "engine": "opensource COBOL 4J",
       "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
       "engine_digest": "opensourcecobol/opensourcecobol4j@sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a",
-      "generated_at": "2026-08-18T17:24:50+00:00",
+      "generated_at": "2026-08-19T02:44:29+00:00",
       "entry_point": "CCMAIN01",
       "format": "free",
       "programs": [
@@ -492,8 +508,8 @@
           }
         },
         "roots": [
-          "CCLEGACYX",
-          "CCMAIN01"
+          "CCMAIN01",
+          "CCLEGACYX"
         ],
         "dynamic_callers": []
       },
@@ -642,9 +658,9 @@
           "logical": {
             "verdict": "LOGICAL_MATCH",
             "method": "sqlite_record_count",
-            "table": "file_lock",
-            "record_count": 0,
-            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count verified."
+            "table": "table0",
+            "record_count": 3,
+            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count (3) verified in table 'table0'."
           }
         },
         {
@@ -659,16 +675,16 @@
           "logical": {
             "verdict": "LOGICAL_MATCH",
             "method": "sqlite_record_count",
-            "table": "file_lock",
-            "record_count": 0,
-            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count verified."
+            "table": "table0",
+            "record_count": 3,
+            "note": "Physical format differs: GnuCOBOL embedded-index vs COBOL 4J SQLite. Logical record count (3) verified in table 'table0'."
           }
         }
       ],
       "verdict_counts": {
-        "normalized": 0,
-        "baseline-only": 0,
         "differ": 2,
+        "baseline-only": 0,
+        "normalized": 0,
         "exact": 3,
         "java-only": 0
       },
@@ -788,6 +804,196 @@
         "current_hash": "f21fc4197e27000fab7dc8eac6eb474fb75a2c24520c616393ea1c9acc4b2aee",
         "status": "IMMUTABLE"
       }
-    ]
+    ],
+    "refactor": {
+      "status": "done",
+      "compile_status": "Generated and compiled successfully",
+      "models": [
+        "Claim",
+        "Customer",
+        "Policy"
+      ]
+    },
+    "analyze": {
+      "entry_point": "CCMAIN01",
+      "programs_count": 5,
+      "programs": [
+        {
+          "source": "src/CCLEGACYX.cob",
+          "program_id": "CCLEGACYX",
+          "lines": 30
+        },
+        {
+          "source": "src/CCLOAD01.cob",
+          "program_id": "CCLOAD01",
+          "lines": 70
+        },
+        {
+          "source": "src/CCMAIN01.cob",
+          "program_id": "CCMAIN01",
+          "lines": 18
+        },
+        {
+          "source": "src/CCPROC01.cob",
+          "program_id": "CCPROC01",
+          "lines": 130
+        },
+        {
+          "source": "src/CCREPT01.cob",
+          "program_id": "CCREPT01",
+          "lines": 65
+        }
+      ],
+      "call_graph": {
+        "graph": {
+          "CCLEGACYX": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCLOAD01": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCMAIN01": {
+            "static": [
+              "CCLOAD01",
+              "CCPROC01",
+              "CCREPT01"
+            ],
+            "dynamic": []
+          },
+          "CCPROC01": {
+            "static": [],
+            "dynamic": []
+          },
+          "CCREPT01": {
+            "static": [],
+            "dynamic": []
+          }
+        },
+        "roots": [
+          "CCMAIN01",
+          "CCLEGACYX"
+        ],
+        "dynamic_callers": []
+      },
+      "file_assignments": {
+        "src/CCLEGACYX.cob": [],
+        "src/CCLOAD01.cob": [
+          {
+            "logical_name": "POLICY-MASTER",
+            "assign_path": "data/work/policy.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "CUSTOMER-MASTER",
+            "assign_path": "data/work/customer.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          }
+        ],
+        "src/CCMAIN01.cob": [],
+        "src/CCPROC01.cob": [
+          {
+            "logical_name": "CLAIM-IN",
+            "assign_path": "data/in/claims.dat",
+            "organization": "LINE",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "POLICY-MASTER",
+            "assign_path": "data/work/policy.dat",
+            "organization": "INDEXED",
+            "access_mode": "DYNAMIC"
+          },
+          {
+            "logical_name": "AUDIT-OUT",
+            "assign_path": "data/out/claim-audit.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "EXCEPTION-OUT",
+            "assign_path": "data/out/claim-exceptions.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          }
+        ],
+        "src/CCREPT01.cob": [
+          {
+            "logical_name": "AUDIT-IN",
+            "assign_path": "data/out/claim-audit.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "EXCEPTION-IN",
+            "assign_path": "data/out/claim-exceptions.dat",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          },
+          {
+            "logical_name": "REPORT-OUT",
+            "assign_path": "data/out/eod-claims-report.txt",
+            "organization": "LINE",
+            "access_mode": "SEQUENTIAL"
+          }
+        ]
+      },
+      "copybook_coverage": {
+        "src/CCLEGACYX.cob": {
+          "found": [],
+          "missing": []
+        },
+        "src/CCLOAD01.cob": {
+          "found": [
+            {
+              "ref": "copybooks/CC-POLICY.cpy",
+              "path": "copybooks/CC-POLICY.cpy"
+            },
+            {
+              "ref": "copybooks/CC-CUSTOMER.cpy",
+              "path": "copybooks/CC-CUSTOMER.cpy"
+            }
+          ],
+          "missing": []
+        },
+        "src/CCMAIN01.cob": {
+          "found": [],
+          "missing": []
+        },
+        "src/CCPROC01.cob": {
+          "found": [
+            {
+              "ref": "copybooks/CC-POLICY.cpy",
+              "path": "copybooks/CC-POLICY.cpy"
+            },
+            {
+              "ref": "copybooks/CC-CLAIM.cpy",
+              "path": "copybooks/CC-CLAIM.cpy"
+            },
+            {
+              "ref": "copybooks/CC-CONSTANTS.cpy",
+              "path": "copybooks/CC-CONSTANTS.cpy"
+            }
+          ],
+          "missing": []
+        },
+        "src/CCREPT01.cob": {
+          "found": [],
+          "missing": []
+        }
+      },
+      "missing_copybooks": [],
+      "format": "free"
+    },
+    "validate": {
+      "status": "done",
+      "detail": "Gate 2 PASS \u2014 exact parity with GnuCOBOL baseline (4 processed claims, 3 exceptions)",
+      "gate2_passed": true,
+      "claims_count": 4,
+      "exceptions_count": 3
+    }
   }
 }

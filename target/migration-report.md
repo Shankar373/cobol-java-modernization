@@ -2,7 +2,7 @@
 
 - **repo**: `C:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\legacy`
 - **target project**: `C:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\target`
-- **run at**: 2026-08-18T17:25:03+00:00 (UTC)
+- **run at**: 2026-08-19T09:35:07+00:00 (UTC)
 - **overall verdict**: **PASS**
 
 ## Source Immutability
@@ -50,7 +50,7 @@
   - CALL `CCPROC01` (static)
   - CALL `CCREPT01` (static)
 
-- Entry point candidates (no callers): `['CCLEGACYX', 'CCMAIN01']`
+- Entry point candidates (no callers): `['CCMAIN01', 'CCLEGACYX']`
 
 ## 4. File / Dataset Dependencies
 
@@ -117,7 +117,7 @@ CLAIMSCORE NIGHTLY BATCH COMPLETED`
 | data/work/customer.dat | differ | exact | 8192 | 36864 | LOGICAL_MATCH | binary: sizes 8192 vs 36864 bytes, first diff at offset 0 |
 | data/work/policy.dat | differ | exact | 8192 | 36864 | LOGICAL_MATCH | binary: sizes 8192 vs 36864 bytes, first diff at offset 0 |
 
-- summary: {'normalized': 0, 'baseline-only': 0, 'differ': 2, 'exact': 3, 'java-only': 0}
+- summary: {'differ': 2, 'baseline-only': 0, 'normalized': 0, 'exact': 3, 'java-only': 0}
 
 ## 11. Semantic checks
 
@@ -126,7 +126,17 @@ CLAIMSCORE NIGHTLY BATCH COMPLETED`
 - [PASS] `data/out/eod-claims-report.txt` (regex): expected `3` -> actual `0000003`
 - [PASS] `data/out/eod-claims-report.txt` (regex): expected `2` -> actual `0000002`
 
-## 12. Checkpoint
+## 12. Validate (Gate 2)
+
+- Gate 2 status: **✅ PASSED**
+- Detail: Gate 2 PASS — exact parity with GnuCOBOL baseline (4 processed claims, 3 exceptions)
+- Claims verified: `4` | Exceptions verified: `3`
+
+## 13. Package
+
+- Package not yet created.
+
+## 14. Checkpoint / Resume
 
 - per-stage state persisted in `state.json` (resume from any completed stage)
 

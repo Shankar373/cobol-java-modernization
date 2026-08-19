@@ -2,7 +2,7 @@
   "engine": "opensource COBOL 4J",
   "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
   "engine_digest": "opensourcecobol/opensourcecobol4j@sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a",
-  "generated_at": "2026-08-18T17:24:50+00:00",
+  "generated_at": "2026-08-19T02:44:29+00:00",
   "entry_point": "CCMAIN01",
   "format": "free",
   "programs": [
@@ -109,8 +109,8 @@
       }
     },
     "roots": [
-      "CCLEGACYX",
-      "CCMAIN01"
+      "CCMAIN01",
+      "CCLEGACYX"
     ],
     "dynamic_callers": []
   },
