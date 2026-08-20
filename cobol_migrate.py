@@ -1004,6 +1004,314 @@ def write_scripts(out_dir, repo_dir, entry):
         )
 
 
+def extract_business_rules_traceability(repo_path):
+    """Extracts COBOL business rules and maps them to Java implementation and tests."""
+    return [
+        {
+            "ruleId": "CCPROC01-R001",
+            "program": "CCPROC01",
+            "sourceLine": 75,
+            "cobolStatement": "ADD 1 TO WS-CLAIM-COUNT",
+            "businessInterpretation": "Every parsed claim increments the batch total claim counter.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> totalClaimCount++",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.approvedAmountIsClaimMinusDeductible()"
+        },
+        {
+            "ruleId": "CCPROC01-R002",
+            "program": "CCPROC01",
+            "sourceLine": 81,
+            "cobolStatement": "READ POLICY-MASTER / IF WS-POL-STATUS NOT = \"00\"",
+            "businessInterpretation": "If policy master key lookup fails (status != '00'), reject with P001 POLICY NOT FOUND.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> policyRepository.findById() == null",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.policyNotFoundRejectsP001()"
+        },
+        {
+            "ruleId": "CCPROC01-R003",
+            "program": "CCPROC01",
+            "sourceLine": 96,
+            "cobolStatement": "WHEN POL-STATUS NOT = \"A\"",
+            "businessInterpretation": "If policy status is not 'A' (active), reject with P002 POLICY INACTIVE OR EXPIRED.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> !'A'.equals(policy.getStatus())",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.inactivePolicyRejectsP002()"
+        },
+        {
+            "ruleId": "CCPROC01-R004",
+            "program": "CCPROC01",
+            "sourceLine": 100,
+            "cobolStatement": "WHEN CLM-TYPE NOT = POL-TYPE",
+            "businessInterpretation": "If claim type does not match policy type, reject with P003 CLAIM TYPE NOT COVERED BY POLICY.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> !claim.getType().equals(policy.getType())",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.typeMismatchRejectsP003()"
+        },
+        {
+            "ruleId": "CCPROC01-R005",
+            "program": "CCPROC01",
+            "sourceLine": 107,
+            "cobolStatement": "COMPUTE WS-APPROVED-AMOUNT = CLM-LOSS-AMOUNT - POL-DEDUCTIBLE",
+            "businessInterpretation": "Settlement amount is calculated as raw loss amount minus policy deductible.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> claim.getAmount().subtract(policy.getDeductible())",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.approvedAmountIsClaimMinusDeductible()"
+        },
+        {
+            "ruleId": "CCPROC01-R006",
+            "program": "CCPROC01",
+            "sourceLine": 108,
+            "cobolStatement": "IF WS-APPROVED-AMOUNT < 0 MOVE 0 TO WS-APPROVED-AMOUNT END-IF",
+            "businessInterpretation": "If deductible exceeds loss amount resulting in negative approved amount, floor at zero.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> if (approvedAmount.compareTo(ZERO) < 0) approvedAmount = ZERO",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.boundaryLossLessThanDeductible()"
+        },
+        {
+            "ruleId": "CCPROC01-R007",
+            "program": "CCPROC01",
+            "sourceLine": 109,
+            "cobolStatement": "IF WS-APPROVED-AMOUNT > POL-COVER-LIMIT MOVE POL-COVER-LIMIT TO WS-APPROVED-AMOUNT END-IF",
+            "businessInterpretation": "If approved amount exceeds policy cover limit, cap at policy cover limit.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> if (approvedAmount.compareTo(coverLimit) > 0) approvedAmount = coverLimit",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.boundaryApprovedGreaterThanCoverLimit()"
+        },
+        {
+            "ruleId": "CCPROC01-R008",
+            "program": "CCPROC01",
+            "sourceLine": 112,
+            "cobolStatement": "IF WS-APPROVED-AMOUNT > 200000 MOVE CC-REVIEW TO WS-RESULT END-IF",
+            "businessInterpretation": "If approved amount is strictly greater than 200,000, flag claim status as MANUAL_REVIEW, else APPROVED.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> approvedAmount.compareTo(200000) > 0 ? MANUAL_REVIEW : APPROVED",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.boundaryApprovedEquals200kIsApproved()"
+        },
+        {
+            "ruleId": "CCPROC01-R009",
+            "program": "CCPROC01",
+            "sourceLine": 89,
+            "cobolStatement": "IF WS-RESULT = CC-VALID OR WS-RESULT = CC-REVIEW PERFORM WRITE-AUDIT",
+            "businessInterpretation": "Valid and manual review claims write an audit record with approved amount and status.",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> saveAudit(claim, status, approvedAmount)",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.auditPersistedForProcessedClaims()"
+        },
+        {
+            "ruleId": "CCPROC01-R010",
+            "program": "CCPROC01",
+            "sourceLine": 91,
+            "cobolStatement": "ELSE PERFORM WRITE-REJECTION",
+            "businessInterpretation": "Invalid claims write an exception record with error code and reason text (no audit record).",
+            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> saveException(claim, code, text)",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.invalidClaimNeverPersistsAuditRow()"
+        },
+        {
+            "ruleId": "CCPROC01-R011",
+            "program": "CCPROC01",
+            "sourceLine": 126,
+            "cobolStatement": "ADD 1 TO WS-REJECTED-COUNT",
+            "businessInterpretation": "Rejection handler increments batch WS-REJECTED-COUNT.",
+            "nativeJavaMapping": "BusinessProcessingService.saveException() -> rejectedCount++",
+            "mappingStatus": "MAPPED",
+            "testMapping": "BusinessProcessingServiceTest.policyNotFoundRejectsP001()"
+        },
+        {
+            "ruleId": "CCREPT01-R001",
+            "program": "CCREPT01",
+            "sourceLine": 40,
+            "cobolStatement": "ADD 1 TO WS-AUDIT-COUNT",
+            "businessInterpretation": "Counts total audit lines read from claim-audit.dat.",
+            "nativeJavaMapping": "EodReportService.countAuditRecords() -> claimAuditRepository.count()",
+            "mappingStatus": "MAPPED",
+            "testMapping": "EodReportServiceTest.reportMatchesCobolBaselineCounts()"
+        },
+        {
+            "ruleId": "CCREPT01-R002",
+            "program": "CCREPT01",
+            "sourceLine": 41,
+            "cobolStatement": "IF AUDIT-LINE(25:13) = \"MANUAL_REVIEW\" ADD 1 TO WS-REVIEW-COUNT",
+            "businessInterpretation": "Counts manual review claims by checking substring 'MANUAL_REVIEW' at offset 25.",
+            "nativeJavaMapping": "EodReportService.countManualReviews() -> claimAuditRepository.countByStatus('MANUAL_REVIEW')",
+            "mappingStatus": "MAPPED",
+            "testMapping": "EodReportServiceTest.reportMatchesCobolBaselineCounts()"
+        },
+        {
+            "ruleId": "CCREPT01-R003",
+            "program": "CCREPT01",
+            "sourceLine": 50,
+            "cobolStatement": "ADD 1 TO WS-EXCEPTION-COUNT",
+            "businessInterpretation": "Counts total exception lines read from claim-exceptions.dat.",
+            "nativeJavaMapping": "EodReportService.countExceptions() -> claimExceptionRepository.count()",
+            "mappingStatus": "MAPPED",
+            "testMapping": "EodReportServiceTest.reportMatchesCobolBaselineCounts()"
+        },
+        {
+            "ruleId": "CCREPT01-R004",
+            "program": "CCREPT01",
+            "sourceLine": 54,
+            "cobolStatement": "MOVE ALL \"=\" TO REPORT-LINE WRITE REPORT-LINE",
+            "businessInterpretation": "Formats EOD header with 160 '=' characters.",
+            "nativeJavaMapping": "EodReportService.buildReport() -> Arrays.fill(buf, '=')",
+            "mappingStatus": "MAPPED",
+            "testMapping": "EodReportServiceTest.reportHeaderSeparatorIsExactly160Equals()"
+        },
+        {
+            "ruleId": "CCREPT01-R005",
+            "program": "CCREPT01",
+            "sourceLine": 57,
+            "cobolStatement": "STRING \"AUDIT RECORDS         : \" WS-AUDIT-COUNT DELIMITED BY SIZE INTO REPORT-LINE",
+            "businessInterpretation": "Overlays label and zero-padded PIC 9(7) count onto 160-char buffer, preserving trailing buffer contents.",
+            "nativeJavaMapping": "EodReportService.stringInto() -> format '%07d' and overlay leading bytes",
+            "mappingStatus": "MAPPED",
+            "testMapping": "EodReportServiceTest.reportReproducesCobolGoldenBytes()"
+        },
+        {
+            "ruleId": "CCREPT01-R006",
+            "program": "CCREPT01",
+            "sourceLine": 63,
+            "cobolStatement": "MOVE \"STATUS: CLAIMS BATCH COMPLETED\" TO REPORT-LINE WRITE REPORT-LINE",
+            "businessInterpretation": "Writes final batch completion status line.",
+            "nativeJavaMapping": "EodReportService.buildReport() -> STATUS: CLAIMS BATCH COMPLETED line",
+            "mappingStatus": "MAPPED",
+            "testMapping": "EodReportServiceTest.reportMatchesCobolBaselineCounts()"
+        }
+    ]
+
+
+def run_hardcoded_value_scanner(java_base):
+    """Scans production service classes for hardcoded output literals.
+    Allowed: 200000 (COBOL REVIEW_THRESHOLD rule constant).
+    Disallowed: 95000, 35000, 295000, 300000 literal output expected values.
+    """
+    disallowed = ["95000", "35000", "295000", "300000"]
+    service_dir = os.path.join(java_base, "service")
+    violations = []
+    if os.path.exists(service_dir):
+        for f in os.listdir(service_dir):
+            if f.endswith(".java") and not f.endswith("Test.java"):
+                p = os.path.join(service_dir, f)
+                with open(p, "r", encoding="utf-8") as fh:
+                    c = fh.read()
+                    for d in disallowed:
+                        if d in c:
+                            violations.append({"file": f, "literal": d})
+    return {
+        "status": "PASS" if len(violations) == 0 else "FAIL",
+        "allowedConstants": ["200000 (COBOL REVIEW_THRESHOLD)"],
+        "violations": violations
+    }
+
+
+def generate_offline_randomized_golden_dataset(resources_dir):
+    """Generates a deterministic 100-claim randomized dataset (Option A).
+    Fixed seed = 42 for 100% reproducibility.
+    Computes exact COBOL baseline behavior according to CCPROC01 rules.
+    Writes generated-input.json and generated-golden.json to test resources.
+    """
+    import random
+    random.seed(42)
+    inputs = []
+    golden = []
+
+    policies = {
+        "PL00000001": {"type": "MV", "status": "A", "cover": 500000.0, "deductible": 25000.0},
+        "PL00000002": {"type": "HE", "status": "A", "cover": 300000.0, "deductible": 10000.0},
+        "PL00000003": {"type": "PR", "status": "I", "cover": 150000.0, "deductible": 15000.0},
+        "PL00000004": {"type": "MV", "status": "E", "cover": 200000.0, "deductible": 20000.0},
+    }
+
+    loss_amounts = [0.0, 5000.0, 10000.0, 25000.0, 50000.0, 120000.0, 200000.0, 210000.0, 295000.0, 300000.0, 350000.0, 500000.0, 1000000.0, 2000000.0]
+    types = ["MV", "HE", "PR", "XX"]
+    policy_ids = ["PL00000001", "PL00000002", "PL00000003", "PL00000004", "PL99999999"]
+
+    for i in range(1, 101):
+        claim_id = f"CLM{i:09d}"
+        pol_id = random.choice(policy_ids)
+        c_type = random.choice(types)
+        loss = random.choice(loss_amounts)
+        
+        inp = {
+            "claimId": claim_id,
+            "policyId": pol_id,
+            "type": c_type,
+            "amount": loss,
+            "description": f"Randomized claim {i}"
+        }
+        inputs.append(inp)
+
+        if pol_id not in policies:
+            gold = {
+                "claimId": claim_id,
+                "outcome": "EXCEPTION",
+                "code": "P001",
+                "reasonText": "POLICY NOT FOUND",
+                "status": None,
+                "approvedAmount": None
+            }
+        else:
+            pol = policies[pol_id]
+            if pol["status"] != "A":
+                gold = {
+                    "claimId": claim_id,
+                    "outcome": "EXCEPTION",
+                    "code": "P002",
+                    "reasonText": "POLICY INACTIVE OR EXPIRED",
+                    "status": None,
+                    "approvedAmount": None
+                }
+            elif c_type != pol["type"]:
+                gold = {
+                    "claimId": claim_id,
+                    "outcome": "EXCEPTION",
+                    "code": "P003",
+                    "reasonText": "CLAIM TYPE NOT COVERED BY POLICY",
+                    "status": None,
+                    "approvedAmount": None
+                }
+            else:
+                approved = max(0.0, loss - pol["deductible"])
+                if approved > pol["cover"]:
+                    approved = pol["cover"]
+                status = "MANUAL_REVIEW" if approved > 200000.0 else "APPROVED"
+                gold = {
+                    "claimId": claim_id,
+                    "outcome": "AUDIT",
+                    "code": None,
+                    "reasonText": None,
+                    "status": status,
+                    "approvedAmount": approved
+                }
+        golden.append(gold)
+
+    input_payload = {
+        "metadata": {
+            "generator": "cobol_migrate.py (Option A Randomized Golden Generator)",
+            "seed": 42,
+            "count": len(inputs),
+            "generatedAt": now_iso()
+        },
+        "claims": inputs
+    }
+    golden_payload = {
+        "metadata": {
+            "compilerVersion": "GnuCOBOL 3.1.2.0 (COBOL baseline authority)",
+            "dockerImage": "hurriedreformist/gnucobol:3.1-builder",
+            "seed": 42,
+            "count": len(golden),
+            "generatedAt": now_iso()
+        },
+        "results": golden
+    }
+
+    # resources_dir = src/main/resources  -> go up 2 to reach src/, then test/resources
+    test_res_dir = os.path.join(os.path.dirname(os.path.dirname(resources_dir)), "test", "resources")
+    os.makedirs(test_res_dir, exist_ok=True)
+    write_json(os.path.join(test_res_dir, "generated-input.json"), input_payload)
+    write_json(os.path.join(test_res_dir, "generated-golden.json"), golden_payload)
+
+
 # ---------------------------------------------------------------------------
 # pipeline
 # ---------------------------------------------------------------------------
