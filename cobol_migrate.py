@@ -4810,6 +4810,9 @@ def main():
     ap.add_argument("--no-pull", action="store_true")
     ap.add_argument("--restart-from", type=int, default=0,
                     help="rerun from this stage index (0..10); default 0 = full run")
+    ap.add_argument("--slice-paragraph", default=None, help="COBOL paragraph name to slice out")
+    ap.add_argument("--slice-source", default=None, help="Source COBOL file containing paragraph")
+    ap.add_argument("--slice-out", default=None, help="Output sliced sub-program path")
     args = ap.parse_args()
 
     for stream in (sys.stdout, sys.stderr):
@@ -4817,6 +4820,24 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+
+    # Handle paragraph slicing CLI command execution
+    if args.slice_paragraph:
+        if not args.slice_source or not args.slice_out:
+            print("Error: --slice-source and --slice-out are required when --slice-paragraph is specified.")
+            sys.exit(1)
+        from slicer import ParagraphSlicer
+        try:
+            s = ParagraphSlicer(args.slice_source)
+            if s.slice_paragraph(args.slice_paragraph, args.slice_out):
+                print(f"Successfully sliced paragraph '{args.slice_paragraph}' to {args.slice_out}")
+                sys.exit(0)
+            else:
+                print(f"Error: Paragraph '{args.slice_paragraph}' not found or could not be sliced.")
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error: Slicing failed: {e}")
+            sys.exit(1)
 
     cfg = load_json(args.config, {}) or {}
     ROOT = os.path.dirname(os.path.abspath(__file__))
