@@ -303,13 +303,18 @@ def run_synthetic_test(repo_path, repo_name, skip_docker=False):
 
     try:
         # Always run ingest + discover (no Docker)
+        _idx_ingest   = engine.STAGES.index("ingest")
+        _idx_discover = engine.STAGES.index("discover")
+        _idx_transpile = engine.STAGES.index("transpile")
+        _idx_execute  = engine.STAGES.index("execute")
+
         ok, detail, _ = p.stage_ingest()
-        p.mark(0, "done" if ok else "error", detail)
+        p.mark(_idx_ingest, "done" if ok else "error", detail)
         result["stages"]["ingest"] = {"ok": ok, "detail": detail}
 
         if ok:
             ok2, detail2, _ = p.stage_discover()
-            p.mark(1, "done" if ok2 else "error", detail2)
+            p.mark(_idx_discover, "done" if ok2 else "error", detail2)
             result["stages"]["discover"] = {"ok": ok2, "detail": detail2}
             disc = p.data("discover", {})
             result["programs"] = len(disc.get("sources", []))
@@ -325,7 +330,7 @@ def run_synthetic_test(repo_path, repo_name, skip_docker=False):
                 result["transpile"] = {"ok": None, "detail": "SKIPPED — DOCKER UNAVAILABLE"}
             else:
                 ok3, detail3, _ = p.stage_transpile()
-                p.mark(4, "done" if ok3 else "error", detail3)
+                p.mark(_idx_transpile, "done" if ok3 else "error", detail3)
                 tr = p.data("transpile", {})
                 result["transpile"] = {
                     "ok": ok3,
@@ -334,14 +339,12 @@ def run_synthetic_test(repo_path, repo_name, skip_docker=False):
                     "n_total": tr.get("n_total", 0),
                     "status": tr.get("status", {}),
                 }
-                # If something transpiled and the runtime was vendored, run it too,
-                # so the flag reflects runnability — not just compilation.
                 runtime_scaffold = (os.path.isdir(os.path.join(out_path, "generated"))
                                     and os.path.isfile(os.path.join(out_path, "libcobj.jar")))
                 if ok3 and tr.get("n_ok", 0) > 0 and runtime_scaffold:
                     try:
                         ok5, detail5, _ = p.stage_execute()
-                        p.mark(7, "done" if ok5 else "error", detail5)
+                        p.mark(_idx_execute, "done" if ok5 else "error", detail5)
                         result["execute"] = {"ok": ok5, "detail": detail5}
                     except Exception as exc:
                         result["execute"] = {"ok": False, "detail": str(exc)}
@@ -367,7 +370,7 @@ def write_audit_report(out_dir, audit_data):
 
     verdict = j.get("final_verdict", {})
     color_emoji = {"GREEN": "🟢", "YELLOW": "🟡", "RED": "🔴"}.get(verdict.get("color"), "⚪")
-    md.append(f"\n## Final Verdict\n")
+    md.append("\n## Final Verdict\n")
     md.append(f"### {color_emoji} {verdict.get('verdict', 'UNKNOWN')}\n")
     if verdict.get("issues"):
         for issue in verdict["issues"]:

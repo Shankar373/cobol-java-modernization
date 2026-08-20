@@ -7,9 +7,10 @@
     {
       "file": "src/CCPROC01.cob",
       "reason": "MANUAL SOURCE MODIFICATION",
-      "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "before_hash": "UNKNOWN_original_not_preserved",
       "after_hash": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
-      "timestamp": "2026-08-18T16:34:00Z"
+      "timestamp": "2026-08-18T16:34:00Z",
+      "note": "Original pre-modification hash was incorrectly recorded as SHA-256 of empty string (e3b0c44...). The actual pre-modification source was not preserved. Current file hash matches after_hash."
     }
   ],
   "compare": {

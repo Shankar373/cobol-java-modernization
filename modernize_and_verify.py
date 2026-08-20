@@ -119,7 +119,8 @@ def read_audit():
         if not raw:
             continue
         parts = raw.split(b"|")
-        assert len(parts) >= 5, f"unexpected audit record: {raw!r}"
+        if len(parts) < 5:
+            raise ValueError(f"unexpected audit record format (got {len(parts)} fields, need 5): {raw!r}")
         records.append({
             "id": parts[0].decode("ascii").strip(),
             "policy": parts[1].decode("ascii").strip(),

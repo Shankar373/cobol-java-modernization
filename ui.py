@@ -107,7 +107,10 @@ def start_run(run_id, restart_from):
             run["started_at"] = engine.now_iso()
             engine.LOG_SINK = sink
             try:
-                p = engine.Pipeline(run["repo"], run["out"], cfg=CFG, pull=True)
+                # GAP-1 fix: load per-run config if available, fall back to global CFG
+                run_cfg_path = os.path.join(run["repo"], "migration_config.json")
+                run_cfg = engine.load_json(run_cfg_path, {}) or CFG
+                p = engine.Pipeline(run["repo"], run["out"], cfg=run_cfg, pull=True)
                 p.run(restart_from=restart_from)
                 state = engine.load_json(os.path.join(run["out"], "state.json"), {})
                 run["last_stage"] = 12 if state.get("stages", {}).get("package", {}).get("status") == "done" else 11
@@ -166,6 +169,11 @@ def safe_extract_zip(data, dest):
         if common_prefix and strip and strip[0] == common_prefix:
             strip = strip[1:]
         target = os.path.join(dest, *strip)
+        # Symlink guard: ensure resolved path stays within dest
+        real_dest = os.path.realpath(dest)
+        real_target = os.path.realpath(os.path.join(dest, *strip))
+        if not real_target.startswith(real_dest + os.sep) and real_target != real_dest:
+            continue  # silently skip path-traversal entries
         os.makedirs(os.path.dirname(target), exist_ok=True)
         if info.is_dir():
             os.makedirs(target, exist_ok=True)
@@ -322,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
             with open(path, "rb") as fh:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/zip")
-                self.send_header("Content-Disposition", f"attachment; filename=modernized-package.zip")
+                self.send_header("Content-Disposition", "attachment; filename=modernized-package.zip")
                 self.send_header("Content-Length", str(os.path.getsize(path)))
                 self.end_headers()
                 self.wfile.write(fh.read())
@@ -409,10 +417,13 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+# ponytail: state.json read per-run per-poll; acceptable for single-user local tool.
+# For multi-user scale, cache with mtime invalidation.
 def build_state():
     runs = []
     for rid, run in RUNS.items():
-        state = engine.load_json(os.path.join(run["out"], "state.json"), {})
+        state_path = os.path.join(run["out"], "state.json")
+        state = engine.load_json(state_path, {})
         stages = []
         for idx, (label, desc) in enumerate(STEP_LABELS):
             sname = engine.STAGES[idx]
