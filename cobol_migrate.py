@@ -1746,18 +1746,16 @@ class Pipeline:
 
 
         if is_bank:
-            target_url = f"http://localhost:{validate_port}/api/process/transactions"
+            target_url     = f"http://localhost:{validate_port}/api/process/transactions"
             exceptions_url = f"http://localhost:{validate_port}/api/process/exceptions"
             audits_url = None  # BankCore has no audit table
-            expected_min = 8
             item_name = "transactions"
         else:
-            target_url = f"http://localhost:{validate_port}/api/process/claims"
-            exceptions_url = "http://localhost:8082/api/process/exceptions"
+            target_url     = f"http://localhost:{validate_port}/api/process/claims"
+            exceptions_url = f"http://localhost:{validate_port}/api/process/exceptions"
             # Gate 2 record-level comparison uses /audits (ClaimAudit) not /claims (Claim)
             # because approvedAmount (settled) lives in ClaimAudit, not Claim.amount (raw loss)
             audits_url = f"http://localhost:{validate_port}/api/process/audits"
-            expected_min = 7
             item_name = "claims"
 
         success = False
