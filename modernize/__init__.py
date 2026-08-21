@@ -4,6 +4,7 @@ from .data_flow import DataFlowModel, DataFlowTransition
 from .dependencies import DependencyMigrationStatus, CallDependencyRecord
 from .traceability import TraceabilityModel, TraceabilityRecord
 from .coverage import BusinessRuleCoverage
+from .lexer import CobolLexer, CobolToken
 
 __all__ = [
     "SemanticIR",
@@ -16,5 +17,7 @@ __all__ = [
     "CallDependencyRecord",
     "TraceabilityModel",
     "TraceabilityRecord",
-    "BusinessRuleCoverage"
+    "BusinessRuleCoverage",
+    "CobolLexer",
+    "CobolToken"
 ]
