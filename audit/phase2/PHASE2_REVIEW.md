@@ -1,11 +1,14 @@
-# Phase 2 Master Overview
+# Phase 2 Architecture Review and Validation Report
 
-## 1. Current State Summary
-SystemaOps successfully executes a 13-stage verification pipeline under cached Docker container runtimes.
+## 1. Current State Matrix
+- **Ingestion & Discovery**: Functional.
+- **Baseline Runs**: Functional under Docker wrappers.
+- **Behavioral Comparison**: Hardcoded and subject to empty-output loophole.
+- **Native Java Translation**: Tight emulation library coupling.
 
-## 2. Architectural Genericity Gaps
-- Claims batch files names are hardcoded in the baseline compiler launcher.
-- Empty baseline execution folder inputs produce false-positive comparison passes.
+## 2. Key Risks
+- WSL backend crash errors block Docker container invocations.
+- Regex ignores could mask core business logic output differences.
 
-## 3. Revised Phase 2 Scope
-We will focus strictly on hardening comparison verification algorithms and tracking call-graph resolution states. Native Java translations are deferred to Phase 3.
+## 3. Scope Verification
+Phase 2 focuses strictly on generic comparator hardening and Call-graph tracing. Native Java transformations are deferred.

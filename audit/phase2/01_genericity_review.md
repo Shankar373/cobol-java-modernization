@@ -1,12 +1,18 @@
 # Phase 2: Genericity & Benchmark-Specific Coupling Review
 
-We audited the codebase to locate hardcoded repository dependencies:
+An audit of the codebase to identify hardcoded, benchmark-specific dependencies:
 
-## 1. Identified Coupling Gaps:
-- **Hardcoded Claims Executable**: In `cobol_migrate.py` (Line 2860 & 2929), the binary output file is hardcoded to `bin/claims_core.exe` regardless of whether the input project is Accounting, BankCore, or another unseen repository.
-- **Interactive Parsing Limitations**: `scenario_parser.py` extracts heredoc streams from shell scripts, but makes strong assumptions about test directory structures (`test/`, `tests/`) rather than scanning all directory leaves.
-- **Hardcoded Subprocess Commands**: Launching Java execution in `cobol_migrate.py` (Line 3013) uses `java -cp /target/generated:/target/libcobj.jar {entry}` which couples executions to `libcobj.jar` emulation structures.
+## 1. Hardcoded Executable Output Name
+- **File**: `cobol_migrate.py` (Line 2860 & 2929)
+- **Coupling**: The compilation output name is hardcoded to `bin/claims_core.exe` and invoked as `./bin/claims_core.exe`.
+- **Generic Design**: The GnuCOBOL compiler must output the binary using the dynamically discovered entrypoint program name (e.g. `bin/{entry}.exe`).
 
-## 2. Generic Upgrades Design:
-- **Dynamically Derived Binary Naming**: The GnuCOBOL binary name must be derived from the discovered entrypoint program name (e.g. `bin/{entry}.exe`).
-- **Flexible Scenario Scanner**: Recursive scan directories to resolve any valid input scripts matching test keywords.
+## 2. Interactive Testing Folder Assumptions
+- **File**: `execution/scenario_discovery.py` (Line 34 & 61)
+- **Coupling**: The search paths for scripts are constrained to hardcoded lists (`test/`, `tests/`, etc.).
+- **Generic Design**: Recursively scan all subdirectory structures in the repository root.
+
+## 3. Emulation Class Coupling
+- **File**: `cobol_migrate.py` (Line 3013)
+- **Coupling**: Executes target Java using hardcoded classpaths `java -cp /target/generated:/target/libcobj.jar {entry}`.
+- **Generic Design**: The generation stage must compile target files into standalone modules or dynamically reference runtime libraries according to repository characteristics.

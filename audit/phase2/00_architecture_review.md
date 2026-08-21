@@ -1,8 +1,8 @@
-# Phase 2: Architecture Review
+# Phase 2: SystemaOps Architecture Review
 
-## 1. Architectural Review Mappings
-Here is the structural review of the pipeline flow for SystemaOps:
+This document contains a complete review of the pipeline flow for SystemaOps, analyzing its components and identifying coupling.
 
+## 1. Pipeline Stages Flow
 ```mermaid
 graph TD
     Ingest[Ingest: SHA-256 fingerprinting] --> Discover[Discover: Entry point & copybook search]
@@ -19,8 +19,13 @@ graph TD
     Report --> Package[Package: Zip modernized artifacts]
 ```
 
-## 2. Component Analysis
-- **Ingestion & Discovery**: Ingestion calculates file hashes. Discovery scans file extensions (`.cob`/`.cbl`) to construct local repositories.
-- **Static Analysis & Dependency Graph**: Scans files for static `CALL` statements to draw call-graphs. Unresolved dynamic paths are labeled.
-- **Scenario Discovery**: Prioritizes test scripts containing heredoc markers to build transaction scenarios.
-- **Execution & Equivalence**: Emulates running COBOL and Java using standard docker command line wrappers. Parity compares directory changes.
+## 2. In-Depth Component Assessment
+- **Ingestion**: Verifies file immutability using SHA-256. Fully generic.
+- **Discovery**: Resolves `.cob`/`.cbl` files and entry points. Uses heuristic root detection.
+- **Static Analysis & Dependency Graph**: Scans for static CALL dependency nodes. Dynamic calls are marked.
+- **Scenario Discovery**: Resolves test shell scripts and stdin fixtures.
+- **Baseline Run**: Compiles via GnuCOBOL Docker and runs with watchdogs.
+- **Transformation (Transpile)**: Uses cobj Docker image to produce Java code.
+- **Java Execution**: Compiles and runs the translated classes.
+- **Validator (Compare)**: Structural file comparisons.
+- **Report & Package**: Compiles summaries and zips the results.
