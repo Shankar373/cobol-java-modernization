@@ -1,7 +1,6 @@
 {
   "repo": "legacy",
   "out": "target",
-  "format": "free",
   "legacy_exclude_sources": ["CCLEGACYX.cob"],
   "manual_source_modifications": [
     {
