@@ -1,16 +1,18 @@
-# Phase 2: Business Rule Coverage & Reporting
+# Phase 2: Business Rule Coverage Specification
 
-To ensure business logic is preserved, we design a coverage measurement engine:
+This document details the tracking contract for logic rules mapping:
 
-## 1. Rule Extraction Criteria
-The engine scans the Intermediate Representation (IR) to register logic rule candidates:
-- **Validations**: Boundary and type validation conditionals.
-- **Calculations**: Compute math blocks.
-- **Transitions**: State status modifications.
+## 1. Business Verification Reporting Layout
+The final report must list verification test coverage for all discovered business rules:
 
-## 2. Rule Status Values
-- `DISCOVERED`: Logic rule is mapped in the COBOL IR.
-- `MAPPED`: Translated to Java Target Model structure.
+| Program | Rule ID | COBOL Location | Java Location | Test Case | Status | Evidence |
+| :--- | :--- | :--- | :--- | :--- | :---: | :--- |
+| `BCPROC01` | BR-01 | Line 159 (ACCT-STATUS NOT = 'A') | `BCPROC01.java:120` | `test_inactive_rejection` | **VERIFIED** | Reject logs match |
+| `BCPROC01` | BR-02 | Line 179 (Balance < Overdraft) | `BCPROC01.java:145` | `test_insufficient_debit` | **VERIFIED** | Balance matches |
+
+## 2. Rule Lifecycles
+- `DISCOVERED`: Mapped in the COBOL IR.
+- `MAPPED`: Mapped to Java Target Model structure.
 - `GENERATED`: Written to output source file.
 - `TESTED`: Covered by automated test cases.
 - `VERIFIED`: Parity validations pass under deterministic test scenarios.

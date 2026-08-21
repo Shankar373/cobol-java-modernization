@@ -1,19 +1,17 @@
-# Phase 2: Dependency Graph & CALL Resolution Tracking
+# Phase 2: Subprogram CALL & Dependency Resolution Tracking
 
-We define the tracking contract for subprogram calls, ensuring unresolved routes are explicitly reported:
+Every subprogram call is explicitly mapped and reported:
 
-## 1. CALL Target Statuses
-- `RESOLVED_STATIC`: Static target is located, parsed, and translated.
-- `RESOLVED_DYNAMIC`: Dynamic variable values mapped to specific targets.
-- `UNRESOLVED_DYNAMIC`: Variable target cannot be analyzed statically.
-- `UNSUPPORTED`: Unimplemented JCL or mainframe utility calls (e.g. `SORT`).
-- `MISSING_SOURCE`: Program makes static calls to source files not present in the repository.
+## 1. CALL Target Classifications
+- `RESOLVED_STATIC`: Static target parsed and generated.
+- `RESOLVED_DYNAMIC`: Variable target resolved dynamically.
+- `UNRESOLVED_DYNAMIC`: Variable target cannot be mapped statically.
+- `UNSUPPORTED`: Mainframe calls (e.g. SORT) lacking target emulation.
+- `EXTERNAL_SYSTEM`: Calls to external libraries or APIs.
+- `MISSING_SOURCE`: Reference source file is not in repository.
 
-## 2. Traceability Call Graph
-```mermaid
-graph TD
-    BCMAIN01[BCMAIN01: RESOLVED_STATIC] --> BCLOAD01[BCLOAD01: RESOLVED_STATIC]
-    BCMAIN01 --> BCPROC01[BCPROC01: RESOLVED_STATIC]
-    BCPROC01 --> BCLEGACYX[BCLEGACYX: MISSING_SOURCE]
-```
-No unresolved or missing sources are silently stubbed; they are explicitly flagged in validation reports.
+## 2. CALL Lifecycle Statuses
+Each call records its reachability and modernization status:
+- **Reachability**: `REACHABLE` / `NOT_REACHABLE`.
+- **Execution**: `EXECUTED` / `NOT_EXECUTED`.
+- **Modernization**: `MIGRATED` / `NOT_MIGRATED` (silently mapping to test stubs does not count as migrated business logic).

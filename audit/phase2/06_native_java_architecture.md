@@ -1,6 +1,6 @@
-# Phase 2: Native Java Target Model & Generation Architecture
+# Phase 2: Generic Native Java Architecture
 
-This document defines the architecture of native Java target components:
+To ensure modernization maps COBOL to clean native code, the generator maps from intermediate models:
 
 ## 1. Native Java Transformation Chain
 ```mermaid
@@ -12,7 +12,7 @@ graph TD
 ```
 
 ## 2. Target Component Structures
-- **Domain Models**: Plain Old Java Objects (POJOs) representing variables and group items using native Java types (`String`, `int`, `BigDecimal`).
-- **Business Services**: Clean classes implementing transaction processing logic.
-- **Repository Interface**: Standard JDBC or JPA persistence abstractions (if files or SQL mapping are requested).
-- **Unit Tests**: Standard Junit tests verifying calculations under boundary values.
+- **Domain Models**: Native Java types (`String`, `BigDecimal`) mapping variables and group items.
+- **Business Services**: Execution procedures mapped to clear Java method blocks.
+- **Repository Abstractions**: Interface bindings for file or SQLite operations.
+- **Unit Tests**: Coverage tests verifying logic under boundary values.

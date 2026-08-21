@@ -1,32 +1,41 @@
-# Phase 2: Source-to-Target Traceability Matrix
+# Phase 2: Source-to-Target Traceability Model
 
-This document defines the traceability contract connecting COBOL code to Java targets:
+We define the complete metadata mapping layout connecting COBOL sources to target Java classes:
 
-## 1. Traceability Record Schema
-Every generated business rule or calculation maps directly to its source elements:
-
+## 1. Traceability Record layout
 ```json
 {
-  "rule_id": "RULE-0017",
+  "rule_id": "RULE-017",
   "cobol_source": {
     "file": "PREMCALC.cob",
     "line": 120,
-    "paragraph": "PROCESS-RECORD-PARA"
+    "paragraph": "PROCESS-CALC"
   },
   "intermediate_representation": {
-    "node_id": "STMT_0017"
+    "node_id": "COMPUTE_NODE_41"
   },
   "java_target": {
     "class": "PremiumService",
     "method": "calculatePremium",
-    "statement_index": 12
+    "statement": "this.total = qty.multiply(rate);"
   },
+  "test_cases": [
+    "PremiumServiceTest.testNormalCalculation",
+    "PremiumServiceTest.testBoundaryCalculation"
+  ],
   "verification": {
-    "test_case": "PremiumServiceTest.testBoundaryConditions",
-    "status": "VERIFIED"
+    "status": "VERIFIED",
+    "timestamp": "2026-08-21T17:15:00Z"
   }
 }
 ```
 
-## 2. Integrity Verification
-Traceability reports are generated under the `target/` directory to allow auditors to trace execution paths backwards from Java lines to original COBOL statements.
+## 2. Coverage Tracking Matrices
+We track and report coverage across multiple independent categories:
+- **Program coverage**: Count of compiled programs.
+- **Statement coverage**: Total statement nodes mapped.
+- **CALL coverage**: Total call nodes resolved.
+- **Data-flow coverage**: Total variables traced.
+- **Business-rule coverage**: Total rules verified.
+- **Execution coverage**: Live run checks.
+- **Equivalence coverage**: Evaluated output checks.

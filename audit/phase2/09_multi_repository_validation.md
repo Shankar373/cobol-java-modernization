@@ -1,13 +1,14 @@
-# Phase 2: Genericity & Multi-Repository Validation Plan
+# Phase 2: Multi-Repository Genericity Validation Plan
 
-To verify that the platform functions generically, the execution engine is validated against different repositories:
+We validate the pipeline across diverse repositories:
 
-## 1. Verification Test Suites
-- **Repository A (Simple Batch)**: Single program compiling, executing with zero inputs, and verifying exit codes.
-- **Repository B (Multi-Program)**: Multiple resolved subprogram calls.
-- **Repository C (Interactive)**: Runs through interactive accept scenarios.
-- **Repository D (Copybook Dependent)**: Imports layout definitions.
-- **Repository E (SQL/DB2)**: Detects preprocessor commands and outputs them as unsupported tags.
+## 1. Target Repositories Enumeration
+Each repository is tested individually:
+- **Repository A (Simple Batch)**: Single program batch flow.
+- **Repository B (Multi-Program)**: Nested subprogram call paths.
+- **Repository C (Interactive)**: Runs through accept scenarios.
+- **Repository D (Copybook Dependent)**: Imports layout copybooks.
+- **Repository E (SQL/DB2)**: Modernizes queries to database mappings.
 
-## 2. Previously Unseen Repository Validation
-A validation repository containing distinct filenames and custom subprograms will be compiled through the pipeline to verify that no hardcoded benchmark-specific paths remain in the engine.
+## 2. Unseen Repository Test
+A previously unseen valid repository containing distinct filenames and custom subprograms will be compiled to verify that no hardcoded benchmark-specific strings remain in the engine.

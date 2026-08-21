@@ -1,8 +1,8 @@
 # Phase 2: Revised Implementation Scope
 
-We restrict Phase 2 implementation to the following:
+We restrict Phase 2 implementation to:
 
-## 1. Included in Phase 2
+## 1. Phase 2 Scope:
 - **Goal A: Hardened Comparator**: Generic equivalence checks validating files, exit code parity, and record counts.
 - **Goal B: Semantic IR Scaffolding**: AST node maps preserving variables, operations, and file/line locations.
 - **Genericity Enhancements**: Removing nightly batch name couplings.

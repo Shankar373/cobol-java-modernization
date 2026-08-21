@@ -1,36 +1,21 @@
-# Phase 2: COBOL Semantic Model & Intermediate Representation (IR)
+# Phase 2: Semantic Intermediate Representation (IR) Specification
 
-To enable genuine modernization, SystemaOps maps COBOL elements to an Intermediate Representation (IR).
+The Intermediate Representation maps COBOL declarations to structured semantic nodes:
 
-## 1. COBOL Declaration Semantics
-The model preserves the complete semantics of data definitions:
-- **Field Characteristics**: PIC/PICTURE strings, USAGE modes (COMP, COMP-3, DISPLAY, PACKED-DECIMAL).
-- **Implied Decimals**: Implied decimal position scale and precision values (e.g. `PIC 9(9)V99`).
-- **Data Structures**: Levels, Group items, Elementary items, REDEFINES declarations, and OCCURS arrays.
-- **Conditionals**: 88-level condition names.
+## 1. Data Semantics Schema
+For numeric declarations, the model preserves:
+- **PIC / PICTURE**: The layout definition.
+- **USAGE**: Mapped storage (COMP, COMP-3, DISPLAY, BINARY).
+- **Implied Decimals**: Implied scale and precision bounds.
+- **Sign**: Signed or unsigned declarations.
+- **Groupings**: Level numbers, elementary items, occurs size, and redefines dependencies.
 
-## 2. Semantic IR Node Layout
-Every parsed statement is structured as an IR node preserving source file locations for complete traceability:
+## 2. Control-Flow Semantics
+The IR represents execution flow structures:
+- Statement blocks (`IF`, `ELSE`, `EVALUATE`, `PERFORM`, `GO TO`, `CONTINUE`, `EXIT`).
+- Loops, paragraph transitions, dynamic subprogram `CALL` targets, and returns.
 
-```json
-{
-  "node_id": "STMT_0017",
-  "operation": "COMPUTE",
-  "target": {
-    "name": "WS-TOTAL",
-    "type": "PACKED-DECIMAL",
-    "scale": 2,
-    "precision": 11
-  },
-  "expression": {
-    "op": "MULTIPLY",
-    "left": "WS-QTY",
-    "right": "WS-RATE"
-  },
-  "source_location": {
-    "file": "PREMCALC.cob",
-    "line": 120,
-    "paragraph": "PROCESS-RECORD-PARA"
-  }
-}
-```
+## 3. Data-Flow / Variable-Dependency Tracking
+Trace data transitions through the logic chain:
+`INPUT -> VARIABLE -> CALCULATION -> CONDITION -> OUTPUT`
+This enables tracing target variables back to source input paths.
