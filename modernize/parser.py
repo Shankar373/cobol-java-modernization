@@ -705,6 +705,15 @@ class CobolParser:
             tok = self.peek()
             self.current += 1
             
+            # Skip until period or statement boundary to prevent cascade UNKNOWNs
+            while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                peek_tok = self.peek()
+                if peek_tok.type == "KEYWORD" and peek_tok.value.upper() in STATEMENT_START_VERBS:
+                    break
+                self.current += 1
+            
+            self.match("PUNCTUATION", ".")
+            
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
