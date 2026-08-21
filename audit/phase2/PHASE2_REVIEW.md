@@ -84,3 +84,39 @@ Subprogram dependencies are classified as:
 ## 4. Known Gaps & Next Steps
 1. **Full AST Generation**: Decouple AST tree compiler from GnuCOBOL intermediate code.
 2. **Spring Boot Modernization**: Automatically map Java outputs to JPA and REST endpoints.
+
+---
+
+## 5. Audit Report on Physical Format Differences ("differ")
+
+This section details the comparison audit for `data/work/customer.dat` and `data/work/policy.dat`:
+
+### 1. Why does it differ?
+The files differ physically due to GnuCOBOL writing raw binary index files while modernized Java maps them logically to SQLite database tables.
+
+### 2. Is it an expected intermediate/work artifact?
+Yes, they are indexed dataset files used to persist policy and customer records.
+
+### 3. Is it explicitly excluded by ExecutionContract?
+No. They are explicitly required under `"EXPECTED_FILES"`.
+
+### 4. Is the exclusion auditable?
+Yes, logical matching logs normalized audit events under the `"normalizations"` attribute in the persisted `ComparisonResult`.
+
+### 5. Could the difference represent lost business logic?
+No, logical records are compared row-by-row and verified to be a `LOGICAL_MATCH`.
+
+### 6. What exact rule caused the comparator to allow it?
+The execution engine's logical SQLite comparison validation returned `LOGICAL_MATCH`, which mapped to `logical_verdict` inside the observations, triggering `indexed_logical_normalization` rules.
+
+### 7. Contract and ComparisonResult Evidence
+- **Contract required files**: `["data/work/customer.dat", "data/work/policy.dat"]` in `contract.json`.
+- **ComparisonResult normalizations audit**:
+```json
+{
+  "type": "indexed_logical_normalization",
+  "artifact": "data/work/customer.dat",
+  "reason": "Indexed file physical format variance normalized via database record comparison."
+}
+```
+
