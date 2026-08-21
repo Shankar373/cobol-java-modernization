@@ -5,6 +5,7 @@ from .dependencies import DependencyMigrationStatus, CallDependencyRecord
 from .traceability import TraceabilityModel, TraceabilityRecord
 from .coverage import BusinessRuleCoverage
 from .lexer import CobolLexer, CobolToken
+from .parser import CobolParser
 
 __all__ = [
     "SemanticIR",
@@ -19,5 +20,6 @@ __all__ = [
     "TraceabilityRecord",
     "BusinessRuleCoverage",
     "CobolLexer",
-    "CobolToken"
+    "CobolToken",
+    "CobolParser"
 ]
