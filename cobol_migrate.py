@@ -3048,87 +3048,250 @@ class Pipeline:
 
     # -- 8. compare ----------------------------------------------------------
     def stage_compare(self):
+        from execution import ExecutionObservation, ExecutionContract, EquivalenceEngine, ComparisonResult, NormalizationRules
         d = self.data("discover")
-        baseline = load_snapshot_dir(os.path.join(self.out, "baseline", "legacy"))
-        results = load_snapshot_dir(os.path.join(self.out, "results", "java"))
-        modes = dict(self.cfg.get("compare", {}).get("modes", {}))
-        cmp_rows = []
+        sc_id = self.data("execution_scenario", {}).get("scenario_id") or "non_interactive_default"
+        art_dir = os.path.join(self.out, "execution", sc_id)
+        
+        # Load directories
+        baseline_dir = os.path.join(self.out, "baseline", "legacy")
+        results_dir = os.path.join(self.out, "results", "java")
+        
+        baseline_files = load_snapshot_dir(baseline_dir)
+        results_files = load_snapshot_dir(results_dir)
+        
+        # Load stdout/stderr
+        stdout_baseline = ""
+        stderr_baseline = ""
+        stdout_execute = ""
+        stderr_execute = ""
+        
+        if sc_id != "non_interactive_default":
+            # Load from execution artifacts
+            if os.path.isdir(art_dir):
+                stdout_bl_path = os.path.join(art_dir, "stdout_baseline.txt")
+                stderr_bl_path = os.path.join(art_dir, "stderr_baseline.txt")
+                stdout_ex_path = os.path.join(art_dir, "stdout_execute.txt")
+                stderr_ex_path = os.path.join(art_dir, "stderr_execute.txt")
+                if os.path.isfile(stdout_bl_path):
+                    stdout_baseline = open(stdout_bl_path, "r", encoding="utf-8", errors="replace").read()
+                if os.path.isfile(stderr_bl_path):
+                    stderr_baseline = open(stderr_bl_path, "r", encoding="utf-8", errors="replace").read()
+                if os.path.isfile(stdout_ex_path):
+                    stdout_execute = open(stdout_ex_path, "r", encoding="utf-8", errors="replace").read()
+                if os.path.isfile(stderr_ex_path):
+                    stderr_execute = open(stderr_ex_path, "r", encoding="utf-8", errors="replace").read()
+        else:
+            stdout_baseline = self.data("legacy", {}).get("run_stdout", "")
+            stderr_baseline = self.data("legacy", {}).get("run_stderr", "")
+            stdout_execute = self.data("execute", {}).get("stdout_tail", "")
+            stderr_execute = self.data("execute", {}).get("stderr_tail", "")
 
-        for key in sorted(set(baseline) | set(results)):
-            if key not in baseline or key not in results:
-                cmp_rows.append({
-                    "file": key,
-                    "verdict": "baseline-only" if key in baseline else "java-only",
-                    "baseline": len(baseline.get(key, b"")),
-                    "java": len(results.get(key, b"")),
-                    "logical": None,
+        # Build COBOL Observation
+        cobol_obs_files = {}
+        cobol_obs_contents = {}
+        cobol_obs_sizes = {}
+        cobol_obs_records = {}
+        
+        for f, content in baseline_files.items():
+            status = "PRESENT_EMPTY" if len(content) == 0 else "PRESENT_NONEMPTY"
+            cobol_obs_files[f] = status
+            try:
+                cobol_obs_contents[f] = content.decode("utf-8")
+            except UnicodeDecodeError:
+                cobol_obs_contents[f] = content.hex()[:2000]
+            cobol_obs_sizes[f] = len(content)
+            cobol_obs_records[f] = content.count(b"\n")
+            
+        obs_cobol = ExecutionObservation(
+            scenario_id=sc_id,
+            exit_code=self.data("legacy", {}).get("run_rc", 0),
+            stdout=stdout_baseline,
+            stderr=stderr_baseline,
+            files=cobol_obs_files,
+            file_contents=cobol_obs_contents,
+            file_sizes=cobol_obs_sizes,
+            record_counts=cobol_obs_records,
+            execution_status=self.data("legacy", {}).get("execution_mode", "non-interactive"),
+            duration=round(self.data("legacy", {}).get("duration_seconds", 0.0), 3)
+        )
+        
+        # Build Java Observation
+        java_obs_files = {}
+        java_obs_contents = {}
+        java_obs_sizes = {}
+        java_obs_records = {}
+        
+        for f, content in results_files.items():
+            status = "PRESENT_EMPTY" if len(content) == 0 else "PRESENT_NONEMPTY"
+            java_obs_files[f] = status
+            try:
+                java_obs_contents[f] = content.decode("utf-8")
+            except UnicodeDecodeError:
+                java_obs_contents[f] = content.hex()[:2000]
+            java_obs_sizes[f] = len(content)
+            java_obs_records[f] = content.count(b"\n")
+            
+        obs_java = ExecutionObservation(
+            scenario_id=sc_id,
+            exit_code=self.data("execute", {}).get("rc", 0),
+            stdout=stdout_execute,
+            stderr=stderr_execute,
+            files=java_obs_files,
+            file_contents=java_obs_contents,
+            file_sizes=java_obs_sizes,
+            record_counts=java_obs_records,
+            execution_status=self.data("execute", {}).get("execution_mode", "non-interactive"),
+            duration=round(self.data("execute", {}).get("duration_seconds", 0.0), 3)
+        )
+        
+        # Extract Database state observation if logically compared SQLite exists
+        for f in sorted(set(baseline_files.keys()) & set(results_files.keys())):
+            if is_binary(baseline_files[f]) or is_binary(results_files[f]):
+                result_path = os.path.join(results_dir, f)
+                baseline_path = os.path.join(baseline_dir, f)
+                if os.path.isfile(result_path) and os.path.isfile(baseline_path):
+                    logical = logical_indexed_compare(
+                        baseline_path, result_path, f, self.repo,
+                        self.data("discover"),
+                        os.path.join(self.out, "baseline", "legacy"),
+                    )
+                    if logical:
+                        obs_cobol.database_state[f] = {
+                            "db_type": "sqlite",
+                            "context_id": f,
+                            "affected_tables": [f],
+                            "row_counts": {f: logical.get("record_count_baseline", 0)},
+                            "relevant_keys": {"key": logical.get("key_field", "ACCT-NUMBER")},
+                            "before_after_state": {},
+                            "transaction_status": "normal",
+                            "normalization_metadata": {
+                                "logical_verdict": logical.get("verdict")
+                            },
+                            "evidence_references": [baseline_path]
+                        }
+                        obs_java.database_state[f] = {
+                            "db_type": "sqlite",
+                            "context_id": f,
+                            "affected_tables": [f],
+                            "row_counts": {f: logical.get("record_count_java", 0)},
+                            "relevant_keys": {"key": logical.get("key_field", "ACCT-NUMBER")},
+                            "before_after_state": {},
+                            "transaction_status": "normal",
+                            "normalization_metadata": {
+                                "logical_verdict": logical.get("verdict")
+                            },
+                            "evidence_references": [result_path]
+                        }
+
+        # Build Contract
+        expected_modes = ["EXPECTED_EXIT_STATUS", "EXPECTED_STDOUT"]
+        comp_cfg = self.cfg.get("compare", {})
+        if comp_cfg.get("expect_no_output"):
+            expected_modes.append("EXPECTED_NO_OUTPUT")
+        elif baseline_files:
+            expected_modes.append("EXPECTED_FILES")
+            
+        required_files = list(baseline_files.keys())
+        expected_empty = [f for f, content in baseline_files.items() if len(content) == 0]
+        
+        # Build normalization rules from modes
+        normalization_rules = []
+        for path_key, mode_val in dict(comp_cfg.get("modes", {})).items():
+            if mode_val == "normalized":
+                normalization_rules.append({
+                    "pattern": r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?\b",
+                    "artifact": path_key,
+                    "field": "timestamp",
+                    "reason": "nondeterministic datetime metadata",
+                    "scope": "file_body",
+                    "replacement": "[TIMESTAMP_NORMALIZED]"
                 })
-                continue
-            b1, b2 = baseline[key], results[key]
-            mode = modes.get(key) or (
-                "normalized" if os.path.splitext(key)[1] in TEXT_EXTENSIONS else "exact"
-            )
-            if b1 == b2:
-                verdict, diff = "exact", []
-                logical = None
-            elif mode == "normalized" and normalize(b1) == normalize(b2):
-                verdict, diff = "normalized", []
-                logical = None
+                normalization_rules.append({
+                    "pattern": r"[ \t]+",
+                    "artifact": path_key,
+                    "field": "whitespace",
+                    "reason": "whitespace alignment difference",
+                    "scope": "file_body",
+                    "replacement": " "
+                })
+                
+        contract = ExecutionContract(
+            expected_output_modes=expected_modes,
+            required_files=required_files,
+            expected_empty_files=expected_empty,
+            exit_code_parities=comp_cfg.get("exit_code_parities", {}),
+            normalization_rules=normalization_rules,
+            schema_version="1.0"
+        )
+        
+        # Compare observations
+        result = EquivalenceEngine.compare(obs_cobol, obs_java, contract)
+        
+        # Run additional validation checks if requested
+        checks = run_checks(results_files, comp_cfg.get("checks", []))
+        for check in checks:
+            check_status = "PASS" if check["ok"] else "FAIL"
+            result.checks[f"check_{check['name']}"] = check_status
+            if not check["ok"]:
+                result.status = "FAIL"
+                result.differences.append({
+                    "type": "custom_check_failure",
+                    "name": check["name"],
+                    "expected": check["expected"],
+                    "actual": check.get("actual"),
+                    "reason": f"Custom validation check {check['name']} failed."
+                })
+                
+        # Persist Observations, Contract, and ComparisonResult
+        obs_cobol.save(os.path.join(self.out, "execution", sc_id, "observation_baseline.json"))
+        obs_java.save(os.path.join(self.out, "execution", sc_id, "observation_execute.json"))
+        contract.save(os.path.join(self.out, "execution", sc_id, "contract.json"))
+        result.save(os.path.join(self.out, "execution", sc_id, "comparison_result.json"))
+
+        # Map back to pipeline formats for report/package step
+        cmp_rows = []
+        for key in sorted(set(baseline_files) | set(results_files)):
+            b_size = len(baseline_files.get(key, b""))
+            j_size = len(results_files.get(key, b""))
+            
+            if key not in baseline_files:
+                verdict = "java-only"
+            elif key not in results_files:
+                verdict = "baseline-only"
+            elif baseline_files[key] == results_files[key]:
+                verdict = "exact"
             else:
                 verdict = "differ"
-                diff = (
-                    [f"binary: sizes {len(b1)} vs {len(b2)} bytes, "
-                     f"first diff at offset {first_diff(b1, b2)}"]
-                    if is_binary(b1) or is_binary(b2) else line_diff(b1, b2)
-                )
-                # Attempt logical comparison for indexed files that differ physically
-                logical = None
-                if is_binary(b1) or is_binary(b2):
-                    result_path = os.path.join(self.out, "results", "java", key)
-                    baseline_path = os.path.join(self.out, "baseline", "legacy", key)
-                    if os.path.isfile(result_path) and os.path.isfile(baseline_path):
-                        logical = logical_indexed_compare(
-                            baseline_path, result_path, key, self.repo,
-                            self.data("discover"),
-                            os.path.join(self.out, "baseline", "legacy"),
-                        )
-                        lv = logical.get("verdict")
-                        if lv == "LOGICAL_MATCH":
-                            self.log(f"    [{key}] physical DIFFER but LOGICAL_MATCH "
-                                     f"({logical.get('field_count')} fields x "
-                                     f"{logical.get('record_count_java')} records, "
-                                     f"{logical.get('matched_fields')} fields matched)")
-                        elif lv == "LOGICAL_MISMATCH":
-                            self.log(f"    [{key}] physical DIFFER and LOGICAL_MISMATCH "
-                                     f"({len(logical.get('diffs', []))}+ field diffs, "
-                                     f"{len(logical.get('missing_keys', []))} missing keys)")
-                        else:
-                            self.log(f"    [{key}] physical DIFFER; logical UNABLE: "
-                                     f"{logical.get('reason')}")
-
+                
             cmp_rows.append({
                 "file": key,
                 "verdict": verdict,
-                "baseline": len(b1),
-                "java": len(b2),
-                "mode": mode,
-                "diff": diff,
-                "logical": logical,
+                "baseline": b_size,
+                "java": j_size,
+                "mode": comp_cfg.get("modes", {}).get(key, "exact"),
+                "diff": [],
+                "logical": None
             })
-
-        checks = run_checks(results, self.cfg.get("compare", {}).get("checks", []))
-        counts = {v: sum(1 for r in cmp_rows if r["verdict"] == v)
-                  for v in {"exact", "normalized", "differ", "baseline-only", "java-only"}}
+            
+        counts = {
+            "exact": sum(1 for r in cmp_rows if r["verdict"] == "exact"),
+            "normalized": sum(1 for r in cmp_rows if r["verdict"] == "normalized"),
+            "differ": sum(1 for r in cmp_rows if r["verdict"] == "differ"),
+            "baseline-only": sum(1 for r in cmp_rows if r["verdict"] == "baseline-only"),
+            "java-only": sum(1 for r in cmp_rows if r["verdict"] == "java-only")
+        }
         self.set_data("compare", {"rows": cmp_rows, "verdict_counts": counts, "checks": checks})
 
+        # Logs and prints
         for r in cmp_rows:
             self.log(f"    [{r['verdict']:>12}] {r['file']}")
-            for dd in r.get("diff", [])[:3]:
-                self.log(f"            {dd}")
         for c in checks:
             self.log(f"    [{'PASS' if c['ok'] else 'FAIL'}] check {c['name']} "
                      f"({c['kind']}) -> {c.get('actual')}")
-        return True, str(counts), [r["file"] for r in cmp_rows]
+                     
+        is_ok = (result.status == "PASS")
+        return is_ok, f"ComparisonResult status: {result.status}", [r["file"] for r in cmp_rows]
 
     # -- 10. refactor --------------------------------------------------------
     def stage_refactor(self):

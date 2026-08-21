@@ -34,6 +34,11 @@ from .models import (
     OutputLimitExceeded,
     InputExhausted,
 )
+from .observations import ExecutionObservation
+from .contracts import ExecutionContract
+from .results import ComparisonResult
+from .equivalence import EquivalenceEngine
+from .normalization import NormalizationRules
 
 __all__ = [
     "detect_interactivity",
@@ -47,4 +52,10 @@ __all__ = [
     "ExecutionTimeout",
     "OutputLimitExceeded",
     "InputExhausted",
+    "ExecutionObservation",
+    "ExecutionContract",
+    "ComparisonResult",
+    "EquivalenceEngine",
+    "NormalizationRules",
 ]
+
