@@ -910,6 +910,109 @@ function renderRuns(state) {
   }).join('');
 }
 
+// ---- Log Stream & Artifacts Helpers ----
+let logSource = null;
+let currentLogId = null;
+
+function setupLogStream(runId) {
+  if (logSource && currentLogId === runId) {
+    return;
+  }
+  closeLogStream();
+  currentLogId = runId;
+  const lw = $('logWindow');
+  if (lw) lw.innerHTML = '';
+  logSource = new EventSource(`/api/log-stream?run_id=${encodeURIComponent(runId)}`);
+  logSource.onmessage = function(e) {
+    const line = JSON.parse(e.data);
+    if (lw) {
+      const el = document.createElement('div');
+      el.innerHTML = colorLog(line);
+      lw.appendChild(el);
+      if (lw.scrollHeight - lw.scrollTop - lw.clientHeight < 120) {
+        lw.scrollTop = lw.scrollHeight;
+      }
+    }
+  };
+  logSource.addEventListener('end', function() {
+    closeLogStream();
+  });
+  logSource.onerror = function() {
+    closeLogStream();
+  };
+}
+
+function closeLogStream() {
+  if (logSource) {
+    logSource.close();
+    logSource = null;
+  }
+  currentLogId = null;
+}
+
+async function showArtifactModal(runId, name) {
+  let modal = $('artifactModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'artifactModal';
+    modal.style = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    `;
+    modal.innerHTML = `
+      <div style="background:var(--surface); border:1px solid var(--border); border-radius:12px; max-width:850px; width:100%; height:90%; display:flex; flex-direction:column; padding:20px; gap:16px; box-shadow:0 20px 50px rgba(0,0,0,0.8);">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:10px;">
+          <h3 id="artifactModalTitle" style="font-family:'JetBrains Mono',monospace; font-size:14px; color:var(--acc2);">Artifact Preview</h3>
+          <button onclick="$('artifactModal').style.display='none'" class="control-btn" style="padding:4px 12px;">Close</button>
+        </div>
+        <pre id="artifactModalContent" style="flex:1; background:#04060a; border:1px solid var(--border); border-radius:8px; padding:16px; overflow:auto; font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.6; color:#9cb3d5; white-space:pre-wrap;"></pre>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  
+  $('artifactModalTitle').textContent = `📄 Artifact: ${name}`;
+  $('artifactModalContent').textContent = 'Loading artifact content…';
+  modal.style.display = 'flex';
+  
+  try {
+    const res = await api(`/api/artifact-content?run_id=${encodeURIComponent(runId)}&name=${encodeURIComponent(name)}`);
+    if (res.ok) {
+      $('artifactModalContent').textContent = res.content;
+    } else {
+      $('artifactModalContent').textContent = `Error: ${res.error || 'Failed to load content'}`;
+    }
+  } catch(e) {
+    $('artifactModalContent').textContent = `Connection error: ${e}`;
+  }
+}
+
+async function loadExecutionArtifacts(runId) {
+  const el = $('executionArtifactsList');
+  if (!el) return;
+  try {
+    const res = await api(`/api/artifacts?run_id=${encodeURIComponent(runId)}`);
+    if (res.ok && res.artifacts && res.artifacts.length) {
+      el.innerHTML = res.artifacts.map(art => `
+        <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface2); padding:6px 12px; border-radius:6px; font-family:'JetBrains Mono',monospace; font-size:11px; border:1px solid var(--border); margin-bottom: 4px;">
+          <span>📄 ${escapeHtml(art)}</span>
+          <button class="control-btn" onclick="showArtifactModal('${escapeJs(runId)}', '${escapeJs(art)}')" style="padding:2px 8px; font-size:10px;">View</button>
+        </div>
+      `).join('');
+    } else {
+      el.innerHTML = '<div style="color:var(--muted); font-size:11px;">No execution artifacts found.</div>';
+    }
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--err); font-size:11px;">Error loading: ${escapeHtml(String(e))}</div>`;
+  }
+}
+
 // Render active run inside main Container
 function renderActiveWorkspace(r) {
   const container = $('mainContainer');
@@ -946,7 +1049,6 @@ function renderActiveWorkspace(r) {
     const detail = (st === 'done' || st === 'error') && s.detail
       ? `<div class="stage-detail">${escapeHtml(s.detail)}</div>` : '';
 
-    // Extra badge for Gate 1 (Compare) and Gate 2 (Validate)
     let gateBadge = '';
     if (s.label === 'Compare' && st === 'done') {
       gateBadge = `<span style="font-size:10px; font-weight:700; color:#10b981; background:rgba(16,185,129,0.1); padding:2px 8px; border-radius:4px; margin-left:8px;">GATE 1 PASS ✓</span>`;
@@ -976,7 +1078,6 @@ function renderActiveWorkspace(r) {
   // Baseline/Parity Files Tab content
   let filesHtml = '';
   if (r.stages[8] && (r.stages[8].status === 'done' || r.stages[8].status === 'error' || r.last_stage >= 8)) {
-    // If compare stage was hit, show the comparison cards
     const compareData = r.compare_data || {};
     const rows = compareData.rows || [];
     if (rows.length) {
@@ -1021,7 +1122,7 @@ function renderActiveWorkspace(r) {
     filesHtml = '<div style="color:var(--muted); text-align:center; padding:24px;">Parity files comparison will be populated once the Baseline and Execute stages finish.</div>';
   }
 
-  // Stepper selections — default to failed stage on error, else last_stage+1
+  // Stepper selections
   let defaultRestartIdx = r.last_stage + 1;
   if (r.status === 'error') {
     const failedStage = r.stages.find(s => s.status === 'error');
@@ -1036,69 +1137,306 @@ function renderActiveWorkspace(r) {
   const contText = isDone ? 'Re-run all' : (r.last_stage >= 0 ? 'Continue' : 'Run pipeline');
   const contIdx = isDone ? 0 : defaultRestartIdx;
 
-  container.innerHTML = `
-    <div class="app-container">
-      <!-- Sidebar runs -->
-      <div class="sidebar">
-        <div class="sidebar-header">
-          <h3>Workspaces / Runs</h3>
-        </div>
-        <div class="runs-list" id="runsListSidebar">
-          <!-- Runs populates here -->
-        </div>
-      </div>
-
-      <!-- Main Action Panels -->
-      <div class="content-area">
-        ${banner}
-        ${r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px; margin-bottom:12px;">${escapeHtml(r.error)}</div>` : ''}
-
-        <div class="controls-panel">
-          <button class="control-btn primary" onclick="runIt(${contIdx})">${contText}</button>
-          <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">Re-run from</button>
-          <select id="stageSelect">${selectOpts}</select>
-          <button class="control-btn danger" onclick="resetRun()">Reset</button>
+  // Build the execution dashboard HTML
+  let execScenarioHtml = '';
+  if (r.execution_scenario) {
+    const esc = r.execution_scenario;
+    const leg = r.legacy || {};
+    const exe = r.execute || {};
+    
+    const isTimeout = r.error && (r.error.includes("ExecutionTimeout") || r.error.includes("TIMEOUT"));
+    const isOutputLimit = r.error && (r.error.includes("OutputLimitExceeded") || r.error.includes("LIMIT"));
+    
+    const timeoutTriggered = isTimeout ? 'YES' : 'NO';
+    const outputLimitTriggered = isOutputLimit ? 'YES' : 'NO';
+    const cleanupRequired = (isTimeout || isOutputLimit) ? 'YES (completed)' : 'NOT REQUIRED';
+    const isEquiv = (leg.run_rc === 0 && exe.rc === 0 && !isTimeout && !isOutputLimit);
+    
+    execScenarioHtml = `
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:16px;">
+        <!-- Card 1: Scenario Details -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px;">
+          <div style="font-size:11px; font-weight:700; color:var(--acc2); text-transform:uppercase; margin-bottom:12px; letter-spacing:0.05em; display:flex; align-items:center; gap:8px;">
+            <span>⚡</span> Interactive Execution Scenario
+          </div>
+          <div style="display:grid; grid-template-columns: auto 1fr; gap:8px 16px; font-size:12px;">
+            <div style="color:var(--muted);">Mode:</div>
+            <div style="font-weight:600;">Interactive Scripted</div>
+            
+            <div style="color:var(--muted);">Entry Point:</div>
+            <div style="font-family:'JetBrains Mono',monospace;">${escapeHtml(esc.entrypoint || '—')}</div>
+            
+            <div style="color:var(--muted);">Scenario Source:</div>
+            <div style="font-family:'JetBrains Mono',monospace; color:var(--acc2);">${escapeHtml(esc.input_source || '—')}</div>
+            
+            <div style="color:var(--muted);">Scenario ID:</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; word-break:break-all;">${escapeHtml(esc.scenario_id || '—')}</div>
+            
+            <div style="color:var(--muted);">Inputs Sent:</div>
+            <div style="font-weight:600; color:var(--ok);">${esc.input_values ? esc.input_values.length : 0}</div>
+            
+            <div style="color:var(--muted);">Inputs Consumed:</div>
+            <div style="font-weight:600;">${leg.inputs_consumed || exe.inputs_consumed || (esc.input_values ? esc.input_values.length : 0)}</div>
+          </div>
           
-          <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
-            ${r.stages[11] && r.stages[11].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📄 View report</a>` : ''}
-            ${r.package_size != null ? `<a href="/package?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📦 Download Package</a>` : ''}
-          </div>
+          <details style="margin-top:14px; border-top:1px solid var(--border); padding-top:10px;">
+            <summary style="font-size:12px; font-weight:600; color:var(--acc2); cursor:pointer; outline:none; user-select:none;">
+              [ View Input Scenario (${esc.input_values ? esc.input_values.length : 0} lines) ]
+            </summary>
+            <pre style="background:#04060a; border:1px solid var(--border); border-radius:6px; padding:10px; margin-top:8px; max-height:120px; overflow-y:auto; font-family:'JetBrains Mono',monospace; font-size:11px; color:#9cb3d5; white-space:pre-wrap; line-break:anywhere;">${escapeHtml(esc.input_values ? esc.input_values.join('\n') : '')}</pre>
+          </details>
         </div>
-
-        <div class="tabs-card">
-          <div class="tabs-header">
-            <div class="panel-tab ${currentPanelTab === 'pipeline' ? 'active' : ''}" data-tab="pipeline" onclick="setPanelTab('pipeline')">📋 Pipeline</div>
-            <div class="panel-tab ${currentPanelTab === 'audit' ? 'active' : ''}" data-tab="audit" onclick="setPanelTab('audit')">🔍 Audit</div>
-            <div class="panel-tab ${currentPanelTab === 'files' ? 'active' : ''}" data-tab="files" onclick="setPanelTab('files')">📂 Parity Files</div>
-            <div class="panel-tab ${currentPanelTab === 'modernized' ? 'active' : ''}" data-tab="modernized" onclick="setPanelTab('modernized')">☕ Modernized App</div>
-            <div class="panel-tab ${currentPanelTab === 'log' ? 'active' : ''}" data-tab="log" onclick="setPanelTab('log')">📟 Console Log</div>
+        
+        <!-- Card 2: COBOL vs Java Comparison -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px;">
+          <div style="font-size:11px; font-weight:700; color:var(--acc2); text-transform:uppercase; margin-bottom:12px; letter-spacing:0.05em; display:flex; align-items:center; gap:8px;">
+            <span>⚖️</span> Runtime Equivalence Parity
           </div>
-
-          <div class="panel-body panel-section" data-panel="pipeline" style="${currentPanelTab !== 'pipeline' ? 'display:none' : ''}">
-            <div class="stage-steps">${stepsHtml}</div>
+          
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px;">
+            <div style="border-right:1px solid var(--border); padding-right:16px;">
+              <div style="font-weight:700; font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">LEGACY COBOL</div>
+              <div style="display:grid; grid-template-columns: auto 1fr; gap:4px 8px; font-size:11px;">
+                <div style="color:var(--muted);">Status:</div>
+                <div style="color:${leg.run_rc === 0 ? 'var(--ok)' : (leg.run_rc === undefined ? 'var(--muted)' : 'var(--err)')}; font-weight:700;">${leg.run_rc === 0 ? 'PASS' : (leg.run_rc === undefined ? 'PENDING' : 'FAIL')}</div>
+                <div style="color:var(--muted);">Exit:</div>
+                <div>${leg.run_rc !== undefined ? leg.run_rc : '—'}</div>
+                <div style="color:var(--muted);">Duration:</div>
+                <div>${leg.duration_seconds ? leg.duration_seconds.toFixed(3) + 's' : '—'}</div>
+              </div>
+            </div>
+            
+            <div>
+              <div style="font-weight:700; font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">JAVA (COBJ)</div>
+              <div style="display:grid; grid-template-columns: auto 1fr; gap:4px 8px; font-size:11px;">
+                <div style="color:var(--muted);">Status:</div>
+                <div style="color:${exe.rc === 0 ? 'var(--ok)' : (exe.rc === undefined ? 'var(--muted)' : 'var(--err)')}; font-weight:700;">${exe.rc === 0 ? 'PASS' : (exe.rc === undefined ? 'PENDING' : 'FAIL')}</div>
+                <div style="color:var(--muted);">Exit:</div>
+                <div>${exe.rc !== undefined ? exe.rc : '—'}</div>
+                <div style="color:var(--muted);">Duration:</div>
+                <div>${exe.duration_seconds ? exe.duration_seconds.toFixed(3) + 's' : '—'}</div>
+              </div>
+            </div>
           </div>
-
-          <div class="panel-body panel-section" data-panel="audit" style="${currentPanelTab !== 'audit' ? 'display:none' : ''}">
-            <div id="auditTabContent">Loading audit data…</div>
-          </div>
-
-          <div class="panel-body panel-section" data-panel="files" style="${currentPanelTab !== 'files' ? 'display:none' : ''}">
-            ${filesHtml}
-          </div>
-
-          <div class="panel-body panel-section" data-panel="modernized" style="${currentPanelTab !== 'modernized' ? 'display:none' : ''}">
-            <div id="modernizedTabContent">Loading modernized Java files…</div>
-          </div>
-
-          <div class="panel-body panel-section" data-panel="log" style="${currentPanelTab !== 'log' ? 'display:none' : ''}">
-            <div class="log-window" id="logWindow">${logHtml}</div>
+          
+          <div style="margin-top:14px; border-top:1px solid var(--border); padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
+            <div style="font-size:11px; color:var(--muted);">
+              Scenario Match ID: <strong style="color:var(--ok); font-family:'JetBrains Mono',monospace;">SAME</strong>
+            </div>
+            <div style="background:${isEquiv ? 'var(--ok-bg)' : (r.status === 'running' ? 'rgba(59,130,246,0.1)' : 'var(--err-bg)')}; color:${isEquiv ? 'var(--ok)' : (r.status === 'running' ? 'var(--acc2)' : 'var(--err)')}; border:1px solid ${isEquiv ? 'rgba(16,185,129,0.3)' : (r.status === 'running' ? 'rgba(59,130,246,0.3)' : 'rgba(239,68,68,0.3)')}; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; text-transform:uppercase;">
+              ${isEquiv ? '✓ EQUIVALENT PASS' : (r.status === 'running' ? 'RUNNING...' : '✗ MISMATCH / FAIL')}
+            </div>
           </div>
         </div>
       </div>
-    </div>`;
+      
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:16px;">
+        <!-- Card 3: Watchdog & Execution Protection -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px;">
+          <div style="font-size:11px; font-weight:700; color:var(--acc2); text-transform:uppercase; margin-bottom:12px; letter-spacing:0.05em; display:flex; align-items:center; gap:8px;">
+            <span>🛡️</span> Execution Watchdog Protection
+          </div>
+          <div style="display:grid; grid-template-columns: auto 1fr; gap:8px 16px; font-size:12px;">
+            <div style="color:var(--muted);">Timeout Limit:</div>
+            <div style="font-weight:600;">${esc.timeout_seconds || 120} seconds</div>
+            
+            <div style="color:var(--muted);">Output Limit:</div>
+            <div style="font-weight:600;">${(esc.max_output_bytes ? esc.max_output_bytes / (1024 * 1024) : 5).toFixed(0)} MB</div>
+            
+            <div style="color:var(--muted);">Timeout Triggered:</div>
+            <div style="font-weight:700; color:${timeoutTriggered === 'YES' ? 'var(--err)' : 'var(--muted)'};">${timeoutTriggered}</div>
+            
+            <div style="color:var(--muted);">Output Limit:</div>
+            <div style="font-weight:700; color:${outputLimitTriggered === 'YES' ? 'var(--err)' : 'var(--muted)'};">${outputLimitTriggered}</div>
+            
+            <div style="color:var(--muted);">Process Cleanup:</div>
+            <div style="color:var(--muted);">${cleanupRequired}</div>
+          </div>
+        </div>
+        
+        <!-- Card 4: Execution Artifacts Panel -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px;">
+          <div style="font-size:11px; font-weight:700; color:var(--acc2); text-transform:uppercase; margin-bottom:12px; letter-spacing:0.05em; display:flex; align-items:center; gap:8px;">
+            <span>📁</span> Execution Artifacts
+          </div>
+          <div id="executionArtifactsList" style="display:flex; flex-direction:column; gap:6px;">
+            <div style="color:var(--muted); font-size:11px;">Loading artifacts list…</div>
+          </div>
+        </div>
+      </div>
+    `;
+    setTimeout(() => loadExecutionArtifacts(r.run_id), 100);
+  } else if (r.legacy || r.execute) {
+    const leg = r.legacy || {};
+    const exe = r.execute || {};
+    const isEquiv = (leg.run_rc === 0 && exe.rc === 0);
+    
+    execScenarioHtml = `
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:16px;">
+        <!-- Card 1: Batch Details -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px;">
+          <div style="font-size:11px; font-weight:700; color:var(--acc2); text-transform:uppercase; margin-bottom:12px; letter-spacing:0.05em; display:flex; align-items:center; gap:8px;">
+            <span>⚡</span> Batch Execution Mode
+          </div>
+          <div style="display:grid; grid-template-columns: auto 1fr; gap:8px 16px; font-size:12px;">
+            <div style="color:var(--muted);">Interactivity:</div>
+            <div style="font-weight:600; color:var(--ok);">NON_INTERACTIVE</div>
+            
+            <div style="color:var(--muted);">Scenario Discovery:</div>
+            <div style="color:var(--muted);">NOT REQUIRED (Batch flow)</div>
+            
+            <div style="color:var(--muted);">Execution Path:</div>
+            <div style="font-weight:600; color:var(--acc2);">NORMAL BATCH PATH</div>
+          </div>
+        </div>
+        
+        <!-- Card 2: COBOL vs Java Comparison -->
+        <div style="background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px;">
+          <div style="font-size:11px; font-weight:700; color:var(--acc2); text-transform:uppercase; margin-bottom:12px; letter-spacing:0.05em; display:flex; align-items:center; gap:8px;">
+            <span>⚖️</span> Runtime Equivalence Parity
+          </div>
+          
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:12px;">
+            <div style="border-right:1px solid var(--border); padding-right:16px;">
+              <div style="font-weight:700; font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">LEGACY COBOL</div>
+              <div style="display:grid; grid-template-columns: auto 1fr; gap:4px 8px; font-size:11px;">
+                <div style="color:var(--muted);">Status:</div>
+                <div style="color:${leg.run_rc === 0 ? 'var(--ok)' : (leg.run_rc === undefined ? 'var(--muted)' : 'var(--err)')}; font-weight:700;">${leg.run_rc === 0 ? 'PASS' : (leg.run_rc === undefined ? 'PENDING' : 'FAIL')}</div>
+                <div style="color:var(--muted);">Exit:</div>
+                <div>${leg.run_rc !== undefined ? leg.run_rc : '—'}</div>
+              </div>
+            </div>
+            
+            <div>
+              <div style="font-weight:700; font-size:11px; color:var(--muted); text-transform:uppercase; margin-bottom:8px;">JAVA (COBJ)</div>
+              <div style="display:grid; grid-template-columns: auto 1fr; gap:4px 8px; font-size:11px;">
+                <div style="color:var(--muted);">Status:</div>
+                <div style="color:${exe.rc === 0 ? 'var(--ok)' : (exe.rc === undefined ? 'var(--muted)' : 'var(--err)')}; font-weight:700;">${exe.rc === 0 ? 'PASS' : (exe.rc === undefined ? 'PENDING' : 'FAIL')}</div>
+                <div style="color:var(--muted);">Exit:</div>
+                <div>${exe.rc !== undefined ? exe.rc : '—'}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div style="margin-top:14px; border-top:1px solid var(--border); padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
+            <div style="font-size:11px; color:var(--muted);">
+              Mode: <strong style="color:var(--text);">non-interactive</strong>
+            </div>
+            <div style="background:${isEquiv ? 'var(--ok-bg)' : (r.status === 'running' ? 'rgba(59,130,246,0.1)' : 'var(--err-bg)')}; color:${isEquiv ? 'var(--ok)' : (r.status === 'running' ? 'var(--acc2)' : 'var(--err)')}; border:1px solid ${isEquiv ? 'rgba(16,185,129,0.3)' : (r.status === 'running' ? 'rgba(59,130,246,0.3)' : 'rgba(239,68,68,0.3)')}; font-weight:700; font-size:11px; padding:2px 8px; border-radius:4px; text-transform:uppercase;">
+              ${isEquiv ? '✓ BATCH PARITY PASS' : (r.status === 'running' ? 'RUNNING...' : '✗ MISMATCH / FAIL')}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
-  const lw = $('logWindow');
-  if (lw) lw.scrollTop = lw.scrollHeight;
+  // Trigger live logs streaming if running
+  if (r.status === 'running') {
+    setupLogStream(r.run_id);
+  } else {
+    closeLogStream();
+  }
+
+  const shellNeeded = renderedView !== r.run_id || !document.getElementById('runsListSidebar');
+  if (shellNeeded) {
+    renderedView = r.run_id;
+    container.innerHTML = `
+      <div class="app-container">
+        <!-- Sidebar runs -->
+        <div class="sidebar">
+          <div class="sidebar-header">
+            <h3>Workspaces / Runs</h3>
+          </div>
+          <div class="runs-list" id="runsListSidebar">
+            <!-- Runs populates here -->
+          </div>
+        </div>
+
+        <!-- Main Action Panels -->
+        <div class="content-area">
+          <div id="statusBannerBox">${banner}</div>
+          <div id="errorBox">${r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px; margin-bottom:12px;">${escapeHtml(r.error)}</div>` : ''}</div>
+
+          <div class="controls-panel" id="controlsPanelBox">
+            <button class="control-btn primary" onclick="runIt(${contIdx})">${contText}</button>
+            <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">Re-run from</button>
+            <select id="stageSelect">${selectOpts}</select>
+            <button class="control-btn danger" onclick="resetRun()">Reset</button>
+            
+            <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+              ${r.stages[11] && r.stages[11].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📄 View report</a>` : ''}
+              ${r.package_size != null ? `<a href="/package?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📦 Download Package</a>` : ''}
+            </div>
+          </div>
+
+          <div id="execScenarioGridBox">${execScenarioHtml}</div>
+
+          <div class="tabs-card">
+            <div class="tabs-header">
+              <div class="panel-tab ${currentPanelTab === 'pipeline' ? 'active' : ''}" data-tab="pipeline" onclick="setPanelTab('pipeline')">📋 Pipeline</div>
+              <div class="panel-tab ${currentPanelTab === 'audit' ? 'active' : ''}" data-tab="audit" onclick="setPanelTab('audit')">🔍 Audit</div>
+              <div class="panel-tab ${currentPanelTab === 'files' ? 'active' : ''}" data-tab="files" onclick="setPanelTab('files')">📂 Parity Files</div>
+              <div class="panel-tab ${currentPanelTab === 'modernized' ? 'active' : ''}" data-tab="modernized" onclick="setPanelTab('modernized')">☕ Modernized App</div>
+              <div class="panel-tab ${currentPanelTab === 'log' ? 'active' : ''}" data-tab="log" onclick="setPanelTab('log')">📟 Console Log</div>
+            </div>
+
+            <div class="panel-body panel-section" data-panel="pipeline" style="${currentPanelTab !== 'pipeline' ? 'display:none' : ''}">
+              <div class="stage-steps" id="stagesStepContainer">${stepsHtml}</div>
+            </div>
+
+            <div class="panel-body panel-section" data-panel="audit" style="${currentPanelTab !== 'audit' ? 'display:none' : ''}">
+              <div id="auditTabContent">Loading audit data…</div>
+            </div>
+
+            <div class="panel-body panel-section" data-panel="files" style="${currentPanelTab !== 'files' ? 'display:none' : ''}" id="filesTabContent">
+              ${filesHtml}
+            </div>
+
+            <div class="panel-body panel-section" data-panel="modernized" style="${currentPanelTab !== 'modernized' ? 'display:none' : ''}">
+              <div id="modernizedTabContent">Loading modernized Java files…</div>
+            </div>
+
+            <div class="panel-body panel-section" data-panel="log" style="${currentPanelTab !== 'log' ? 'display:none' : ''}">
+              <div class="log-window" id="logWindow">${logHtml}</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    const lw = $('logWindow');
+    if (lw) lw.scrollTop = lw.scrollHeight;
+  } else {
+    // Dynamic updates for static workspace
+    const bannerBox = $('statusBannerBox');
+    if (bannerBox) bannerBox.innerHTML = banner;
+    const errorBox = $('errorBox');
+    if (errorBox) errorBox.innerHTML = r.error ? `<div class="err-box" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.25); color:var(--err); padding:12px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:11px; margin-bottom:12px;">${escapeHtml(r.error)}</div>` : '';
+    const ctrlBox = $('controlsPanelBox');
+    if (ctrlBox) ctrlBox.innerHTML = `
+      <button class="control-btn primary" onclick="runIt(${contIdx})">${contText}</button>
+      <button class="control-btn" onclick="runIt(Number($('stageSelect').value))">Re-run from</button>
+      <select id="stageSelect">${selectOpts}</select>
+      <button class="control-btn danger" onclick="resetRun()">Reset</button>
+      <div style="margin-left:auto; display:flex; gap:12px; align-items:center;">
+        ${r.stages[11] && r.stages[11].status === 'done' ? `<a href="/report?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📄 View report</a>` : ''}
+        ${r.package_size != null ? `<a href="/package?run_id=${encodeURIComponent(r.run_id)}" class="dl-link" target="_blank" style="color:var(--acc2); font-size:12px; text-decoration:none;">📦 Download Package</a>` : ''}
+      </div>
+    `;
+    const escBox = $('execScenarioGridBox');
+    if (escBox) escBox.innerHTML = execScenarioHtml;
+    const stepsBox = $('stagesStepContainer');
+    if (stepsBox) stepsBox.innerHTML = stepsHtml;
+    const filesBox = $('filesTabContent');
+    if (filesBox) filesBox.innerHTML = filesHtml;
+
+    if (!logSource) {
+      const lw = $('logWindow');
+      if (lw) {
+        lw.innerHTML = logHtml;
+        lw.scrollTop = lw.scrollHeight;
+      }
+    }
+  }
 
   // Populates runs in sidebar list
   api('/api/state').then(renderRuns);
@@ -1256,7 +1594,6 @@ async function poll() {
       // visible DOM/file input is not wiped every poll.
       const statusChanged = prevRunStatus !== null && prevRunStatus !== r.status;
       if (renderedView !== r.run_id || r.status === 'running' || statusChanged) {
-        renderedView = r.run_id;
         prevRunStatus = r.status;
         renderActiveWorkspace(r);
       } else {

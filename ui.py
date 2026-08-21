@@ -268,6 +268,101 @@ class Handler(BaseHTTPRequestHandler):
             run = RUNS.get(rid)
             self._json({"run_id": rid, "log": run["log"] if run else []})
             return
+        if u.path == "/api/log-stream":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            run = RUNS.get(rid)
+            if not run:
+                self.send_error(404, "unknown run")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            sent_idx = 0
+            try:
+                while True:
+                    log_len = len(run["log"])
+                    if sent_idx < log_len:
+                        for i in range(sent_idx, log_len):
+                            line = run["log"][i]
+                            self.wfile.write(f"data: {json.dumps(line)}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                        sent_idx = log_len
+                    if run.get("status") in ("done", "error", "interrupted") and sent_idx >= len(run["log"]):
+                        self.wfile.write(b"event: end\ndata: {}\n\n")
+                        self.wfile.flush()
+                        break
+                    time.sleep(0.2)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                pass
+            return
+        if u.path == "/api/artifacts":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            run = RUNS.get(rid)
+            if not run:
+                self._json({"ok": False, "error": "unknown run"}, 404)
+                return
+            state_path = os.path.join(run["out"], "state.json")
+            state = engine.load_json(state_path, {})
+            sc = state.get("data", {}).get("execution_scenario")
+            if not sc:
+                self._json({"ok": True, "artifacts": []})
+                return
+            sc_id = sc.get("scenario_id")
+            art_dir = os.path.join(run["out"], "execution", sc_id)
+            if not os.path.isdir(art_dir):
+                self._json({"ok": True, "artifacts": []})
+                return
+            allowed = {
+                "scenario.json", "interactive_input.txt",
+                "stdout_baseline.txt", "stdout_execute.txt",
+                "stderr_baseline.txt", "stderr_execute.txt",
+                "execution_metadata_baseline.json", "execution_metadata_execute.json"
+            }
+            files = []
+            for f in sorted(os.listdir(art_dir)):
+                if f in allowed:
+                    files.append(f)
+            self._json({"ok": True, "artifacts": files})
+            return
+        if u.path == "/api/artifact-content":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            name = q.get("name", [""])[0]
+            run = RUNS.get(rid)
+            if not run or not name:
+                self._json({"ok": False, "error": "bad query"}, 400)
+                return
+            allowed = {
+                "scenario.json", "interactive_input.txt",
+                "stdout_baseline.txt", "stdout_execute.txt",
+                "stderr_baseline.txt", "stderr_execute.txt",
+                "execution_metadata_baseline.json", "execution_metadata_execute.json"
+            }
+            if name not in allowed:
+                self._json({"ok": False, "error": "disallowed file"}, 400)
+                return
+            state_path = os.path.join(run["out"], "state.json")
+            state = engine.load_json(state_path, {})
+            sc = state.get("data", {}).get("execution_scenario")
+            if not sc:
+                self._json({"ok": False, "error": "no execution scenario"}, 404)
+                return
+            sc_id = sc.get("scenario_id")
+            file_path = os.path.realpath(os.path.join(run["out"], "execution", sc_id, name))
+            base_dir = os.path.realpath(os.path.join(run["out"], "execution", sc_id))
+            if not file_path.startswith(base_dir + os.sep):
+                self._json({"ok": False, "error": "invalid path"}, 400)
+                return
+            if not os.path.exists(file_path):
+                self._json({"ok": False, "error": "file not found"}, 404)
+                return
+            with open(file_path, "r", encoding="utf-8", errors="replace") as fh:
+                self._json({"ok": True, "content": fh.read()})
+            return
         if u.path == "/report":
             q = urllib.parse.parse_qs(u.query)
             rid = q.get("run_id", [""])[0]
@@ -448,6 +543,9 @@ def build_state():
             "compare_data": state.get("data", {}).get("compare", {}),
             "package_size": os.path.getsize(os.path.join(run["out"], "modernized-package.zip"))
             if os.path.exists(os.path.join(run["out"], "modernized-package.zip")) else None,
+            "execution_scenario": state.get("data", {}).get("execution_scenario"),
+            "legacy": state.get("data", {}).get("legacy"),
+            "execute": state.get("data", {}).get("execute"),
         })
     active = [r for r in RUNS.values() if r.get("status") == "running"]
     return {"runs": runs, "active": bool(active), "git_available": bool(GIT)}
