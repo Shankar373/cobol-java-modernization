@@ -1,4 +1,4 @@
-# Phase 2: SystemaOps Architecture Review
+# Phase 2: Architecture Review
 
 This document contains a complete review of the pipeline flow for SystemaOps, analyzing its components and identifying coupling.
 
