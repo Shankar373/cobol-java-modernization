@@ -2810,6 +2810,7 @@ class Pipeline:
         self.set_data("manifest", manifest)
         return True, "target project assembled", ["manifest.json", "run-java.sh", "run-java.bat"]
 
+
     # -- 3. baseline ---------------------------------------------------------
     def stage_baseline(self):
         d = self.data("discover")
@@ -2857,18 +2858,62 @@ class Pipeline:
             self.set_data("baseline_files", sorted(bl))
             return True, f"baseline partial (build errors); 0 output files captured", []
 
-        run = docker_run(DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
-                         "cd /repo && ./bin/claims_core.exe", shell="sh")
+        # ----- interactive detection and execution layer -----
+        from execution import detect_interactivity, discover_scenario, run_cobol_with_scenario
+        from execution.models import InteractiveInputRequired, ExecutionTimeout, OutputLimitExceeded
+
+        mode = detect_interactivity(self.repo, d)
+        self.log(f"  interactivity: {mode}")
+
+        if mode in ("INTERACTIVE", "UNKNOWN"):
+            # Discover a deterministic scenario; fail fast if none found.
+            try:
+                scenario = discover_scenario(self.repo, self.out, d, self.cfg)
+            except InteractiveInputRequired as exc:
+                self.set_data("legacy", leg)
+                return False, str(exc), []
+
+            self.log(f"  scenario discovered: {scenario.input_source} "
+                     f"({len(scenario.input_values)} stdin lines, id={scenario.scenario_id})")
+            # Persist so stage_execute can reuse the exact same scenario.
+            self.set_data("execution_scenario", scenario.to_dict())
+
+            try:
+                exec_result = run_cobol_with_scenario(
+                    self.repo, scenario, d, self.out, self.cfg,
+                    gnucobol_image=DEFAULT_GNUCOBOL_IMAGE,
+                )
+            except (ExecutionTimeout, OutputLimitExceeded) as exc:
+                self.set_data("legacy", leg)
+                return False, str(exc), []
+
+            run_rc = exec_result.rc
+            run_stdout = exec_result.stdout
+            run_stderr = exec_result.stderr
+            term_status = exec_result.termination_status
+        else:
+            # Non-interactive: existing plain execution path (unchanged)
+            cmd = "cd /repo && ./bin/claims_core.exe"
+            run = docker_run(DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
+                             cmd, shell="sh")
+            run_rc = run.returncode
+            run_stdout = run.stdout
+            run_stderr = run.stderr
+            term_status = "normal" if run_rc == 0 else "nonzero_exit"
+            # No execution_scenario for non-interactive programs.
+
         gcc = docker_run(DEFAULT_GNUCOBOL_IMAGE, [], None, "cobc -V", shell="sh").stdout.splitlines()
         leg.update({
-            "run_rc": run.returncode,
-            "run_stdout": run.stdout[-1500:],
-            "run_stderr": run.stderr[-1500:],
+            "run_rc": run_rc,
+            "run_stdout": run_stdout[-1500:],
+            "run_stderr": run_stderr[-1500:],
             "gcc_version": gcc[0] if gcc else "?",
+            "execution_mode": "interactive-scripted" if mode != "NON_INTERACTIVE" else "non-interactive",
+            "interactivity": mode,
         })
-        if run.returncode != 0:
+        if run_rc != 0:
             self.set_data("legacy", leg)
-            self.log(run.stderr[-1200:])
+            self.log(run_stderr[-1200:])
             return False, "legacy baseline run failed", []
 
         bl = snapshot(self.repo, d["output_dirs"],
@@ -2883,22 +2928,60 @@ class Pipeline:
     def stage_execute(self):
         d = self.data("discover")
         clean_outputs(self.repo, d["output_dirs"])
-        jrun = docker_run(
-            DEFAULT_COBJ_IMAGE,
-            [(self.repo, "/repo"), (self.out, "/target")],
-            "/repo",
-            f"cd /repo && java -cp /target/generated:/target/libcobj.jar "
-            f"{d['entry']} {self.entry_args}".strip(),
-        )
-        ex = {
-            "rc": jrun.returncode,
-            "stdout_tail": jrun.stdout[-2000:],
-            "stderr_tail": jrun.stderr[-2000:],
-            "command": f"java -cp generated:libcobj.jar {d['entry']} {self.entry_args}",
-        }
+
+        from execution.models import ExecutionScenario, ExecutionTimeout, OutputLimitExceeded
+        from execution import run_java_with_scenario
+
+        scenario_dict = self.data("execution_scenario")
+        if scenario_dict:
+            # Interactive path: reuse the EXACT scenario persisted by stage_baseline.
+            # NO rediscovery. NO re-parsing.
+            scenario = ExecutionScenario.from_dict(scenario_dict)
+            self.log(f"  reusing scenario id={scenario.scenario_id} "
+                     f"(source: {scenario.input_source})")
+            try:
+                exec_result = run_java_with_scenario(
+                    self.repo, scenario, d, self.out, self.cfg,
+                    cobj_image=DEFAULT_COBJ_IMAGE,
+                    entry_args=self.entry_args,
+                )
+            except (ExecutionTimeout, OutputLimitExceeded) as exc:
+                return False, str(exc), []
+
+            jrc = exec_result.rc
+            jout = exec_result.stdout
+            jerr = exec_result.stderr
+            ex = {
+                "rc": jrc,
+                "stdout_tail": jout[-2000:],
+                "stderr_tail": jerr[-2000:],
+                "command": exec_result.command,
+                "scenario_id": scenario.scenario_id,
+                "execution_mode": "interactive-scripted",
+            }
+        else:
+            # Non-interactive path: unchanged original behaviour.
+            cmd = f"cd /repo && java -cp /target/generated:/target/libcobj.jar {d['entry']} {self.entry_args}".strip()
+            jrun = docker_run(
+                DEFAULT_COBJ_IMAGE,
+                [(self.repo, "/repo"), (self.out, "/target")],
+                "/repo",
+                cmd,
+            )
+            jrc = jrun.returncode
+            jout = jrun.stdout
+            jerr = jrun.stderr
+            ex = {
+                "rc": jrc,
+                "stdout_tail": jout[-2000:],
+                "stderr_tail": jerr[-2000:],
+                "command": f"java -cp generated:libcobj.jar {d['entry']} {self.entry_args}",
+                "execution_mode": "non-interactive",
+            }
+
         self.set_data("execute", ex)
-        if jrun.returncode != 0:
-            for line in (jrun.stdout + jrun.stderr).splitlines()[-15:]:
+        if jrc != 0:
+            for line in (jout + jerr).splitlines()[-15:]:
                 self.log("    | " + line)
             return False, "transpiled Java execution failed", []
         res = snapshot(self.repo, d["output_dirs"],
