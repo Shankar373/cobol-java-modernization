@@ -11,8 +11,8 @@ graph TD
     Target --> Compile[Native Java Classes]
 ```
 
-## 2. Target Component Structures
-- **Domain Models**: Native Java types (`String`, `BigDecimal`) mapping variables and group items.
-- **Business Services**: Execution procedures mapped to clear Java method blocks.
-- **Repository Abstractions**: Interface bindings for file or SQLite operations.
-- **Unit Tests**: Coverage tests verifying logic under boundary values.
+## 2. Target Component Classification
+- **NATIVE_JAVA**: Code runs independently of libcobj wrappers.
+- **RUNTIME_EMULATED**: Code remains tightly coupled to libcobj emulation.
+- **HYBRID**: Hybrid structures combining wrappers and native classes.
+- **UNSUPPORTED**: Code containing unsupported syntax constructs.

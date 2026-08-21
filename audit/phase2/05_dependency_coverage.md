@@ -14,4 +14,4 @@ Every subprogram call is explicitly mapped and reported:
 Each call records its reachability and modernization status:
 - **Reachability**: `REACHABLE` / `NOT_REACHABLE`.
 - **Execution**: `EXECUTED` / `NOT_EXECUTED`.
-- **Modernization**: `MIGRATED` / `NOT_MIGRATED` (silently mapping to test stubs does not count as migrated business logic).
+- **Modernization**: `MIGRATED` / `PARTIAL` / `UNMIGRATED` / `UNSUPPORTED` / `BLOCKED`.

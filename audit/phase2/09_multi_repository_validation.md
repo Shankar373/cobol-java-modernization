@@ -11,4 +11,5 @@ Each repository is tested individually:
 - **Repository E (SQL/DB2)**: Modernizes queries to database mappings.
 
 ## 2. Unseen Repository Test
-A previously unseen valid repository containing distinct filenames and custom subprograms will be compiled to verify that no hardcoded benchmark-specific strings remain in the engine.
+If no unseen repository is present, we report:
+`UNVERIFIED — NO SUITABLE PREVIOUSLY UNSEEN REPOSITORY AVAILABLE`

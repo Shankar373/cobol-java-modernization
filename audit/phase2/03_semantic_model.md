@@ -15,7 +15,19 @@ The IR represents execution flow structures:
 - Statement blocks (`IF`, `ELSE`, `EVALUATE`, `PERFORM`, `GO TO`, `CONTINUE`, `EXIT`).
 - Loops, paragraph transitions, dynamic subprogram `CALL` targets, and returns.
 
-## 3. Data-Flow / Variable-Dependency Tracking
-Trace data transitions through the logic chain:
-`INPUT -> VARIABLE -> CALCULATION -> CONDITION -> OUTPUT`
-This enables tracing target variables back to source input paths.
+## 3. Operations & Traceability
+Traceability references map to exact file and line coordinates:
+
+```json
+{
+  "node_id": "STMT_0017",
+  "operation": "COMPUTE",
+  "target": "WS-TOTAL",
+  "expression": "WS-QTY * WS-RATE",
+  "source_location": {
+    "file": "PREMCALC.cob",
+    "line": 120,
+    "column": 12
+  }
+}
+```
