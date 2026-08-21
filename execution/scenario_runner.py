@@ -204,6 +204,44 @@ def _docker_cmd(image: str, mounts: list, workdir: str, inner_cmd: str) -> list:
     return full
 
 
+def run_command_with_watchdog(
+    image: str,
+    mounts: list,
+    workdir: str,
+    inner_cmd: str,
+    timeout_seconds: int,
+    max_output_bytes: int,
+    stdin_path: str = None,
+) -> tuple[int, str, str, float, str]:
+    """Run a containerized command with timeout and output-size watchdogs.
+
+    Used to wrap non-interactive/batch runs with the exact same watchdog
+    protection as interactive runs.
+    """
+    import tempfile
+
+    delete_stdin = False
+    if not stdin_path:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tf:
+            tf.write("")
+            stdin_path = tf.name
+        delete_stdin = True
+
+    cmd = _docker_cmd(image, mounts, workdir, inner_cmd)
+    try:
+        rc, stdout, stderr, duration, term_status = _run_with_watchdog(
+            cmd, stdin_path, timeout_seconds, max_output_bytes
+        )
+    finally:
+        if delete_stdin:
+            try:
+                os.remove(stdin_path)
+            except OSError:
+                pass
+
+    return rc, stdout, stderr, duration, term_status
+
+
 # ---------------------------------------------------------------------------
 # COBOL baseline runner
 # ---------------------------------------------------------------------------

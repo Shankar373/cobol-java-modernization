@@ -1858,14 +1858,41 @@ def load_snapshot_dir(dir_path):
     return snap
 
 
-def clean_outputs(repo_dir, rel_dirs):
+def clean_outputs(repo_dir, rel_dirs, file_assigns=None):
     for d in rel_dirs:
         base = os.path.join(repo_dir, d)
         if os.path.isdir(base):
             for root, _, files in os.walk(base):
                 for f in files:
                     if f != ".gitkeep":
-                        os.remove(os.path.join(root, f))
+                        try:
+                            os.remove(os.path.join(root, f))
+                        except OSError:
+                            pass
+    if file_assigns:
+        import glob
+        for src, assigns in file_assigns.items():
+            for a in assigns:
+                path = a.get("assign_path")
+                if path:
+                    # Skip cleaning static input files
+                    p_lower = path.lower().replace("\\", "/")
+                    if "/in/" in p_lower or "/input/" in p_lower or p_lower.endswith("/input.txt") or p_lower.endswith("/interactive_input.txt") or p_lower.endswith("claims.dat") or p_lower.endswith("rundate.txt"):
+                        continue
+
+                    full_path = os.path.join(repo_dir, path)
+                    if os.path.isfile(full_path):
+                        try:
+                            os.remove(full_path)
+                        except OSError:
+                            pass
+                    for pattern in [full_path + ".*", full_path + "-*"]:
+                        for match in glob.glob(pattern):
+                            if os.path.isfile(match):
+                                try:
+                                    os.remove(match)
+                                except OSError:
+                                    pass
 
 
 def normalize(b):
@@ -2826,7 +2853,7 @@ class Pipeline:
         rm_legacy = [s for s in d["sources"]
                      if os.path.basename(s) not in self.cfg.get("legacy_exclude_sources", [])]
         rm_legacy.sort(key=lambda s: 0 if d["program_ids"][s] == d["entry"] else 1)
-        clean_outputs(self.repo, d["output_dirs"])
+        clean_outputs(self.repo, d["output_dirs"], d.get("file_assigns"))
         build = docker_run(
             DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
             f"cd /repo && mkdir -p bin && cobc -x {' '.join(gflags)} {inc} "
@@ -2892,14 +2919,30 @@ class Pipeline:
             run_stderr = exec_result.stderr
             term_status = exec_result.termination_status
         else:
-            # Non-interactive: existing plain execution path (unchanged)
-            cmd = "cd /repo && ./bin/claims_core.exe"
-            run = docker_run(DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
-                             cmd, shell="sh")
-            run_rc = run.returncode
-            run_stdout = run.stdout
-            run_stderr = run.stderr
-            term_status = "normal" if run_rc == 0 else "nonzero_exit"
+            # Non-interactive: run with watchdog protection (repository-agnostic)
+            from execution.scenario_runner import run_command_with_watchdog
+            from execution.models import ExecutionTimeout, OutputLimitExceeded
+            exec_cfg = self.cfg.get("execution", {})
+            timeout = int(exec_cfg.get("timeout_seconds", 120))
+            max_out = int(exec_cfg.get("max_output_bytes", 5 * 1024 * 1024))
+
+            cmd_str = "cd /repo && ./bin/claims_core.exe"
+            try:
+                rc, stdout, stderr, duration, term_status = run_command_with_watchdog(
+                    DEFAULT_GNUCOBOL_IMAGE,
+                    [(self.repo, "/repo")],
+                    "/repo",
+                    cmd_str,
+                    timeout_seconds=timeout,
+                    max_output_bytes=max_out,
+                )
+            except (ExecutionTimeout, OutputLimitExceeded) as exc:
+                self.set_data("legacy", leg)
+                return False, str(exc), []
+
+            run_rc = rc
+            run_stdout = stdout
+            run_stderr = stderr
             # No execution_scenario for non-interactive programs.
 
         gcc = docker_run(DEFAULT_GNUCOBOL_IMAGE, [], None, "cobc -V", shell="sh").stdout.splitlines()
@@ -2927,7 +2970,7 @@ class Pipeline:
     # -- 7. execute ----------------------------------------------------------
     def stage_execute(self):
         d = self.data("discover")
-        clean_outputs(self.repo, d["output_dirs"])
+        clean_outputs(self.repo, d["output_dirs"], d.get("file_assigns"))
 
         from execution.models import ExecutionScenario, ExecutionTimeout, OutputLimitExceeded
         from execution import run_java_with_scenario
@@ -2960,22 +3003,34 @@ class Pipeline:
                 "execution_mode": "interactive-scripted",
             }
         else:
-            # Non-interactive path: unchanged original behaviour.
-            cmd = f"cd /repo && java -cp /target/generated:/target/libcobj.jar {d['entry']} {self.entry_args}".strip()
-            jrun = docker_run(
-                DEFAULT_COBJ_IMAGE,
-                [(self.repo, "/repo"), (self.out, "/target")],
-                "/repo",
-                cmd,
-            )
-            jrc = jrun.returncode
-            jout = jrun.stdout
-            jerr = jrun.stderr
+            # Non-interactive path: run with watchdog protection (repository-agnostic)
+            from execution.scenario_runner import run_command_with_watchdog
+            from execution.models import ExecutionTimeout, OutputLimitExceeded
+            exec_cfg = self.cfg.get("execution", {})
+            timeout = int(exec_cfg.get("timeout_seconds", 120))
+            max_out = int(exec_cfg.get("max_output_bytes", 5 * 1024 * 1024))
+
+            cmd_str = f"cd /repo && java -cp /target/generated:/target/libcobj.jar {d['entry']} {self.entry_args}".strip()
+            try:
+                rc, stdout, stderr, duration, term_status = run_command_with_watchdog(
+                    DEFAULT_COBJ_IMAGE,
+                    [(self.repo, "/repo"), (self.out, "/target")],
+                    "/repo",
+                    cmd_str,
+                    timeout_seconds=timeout,
+                    max_output_bytes=max_out,
+                )
+            except (ExecutionTimeout, OutputLimitExceeded) as exc:
+                return False, str(exc), []
+
+            jrc = rc
+            jout = stdout
+            jerr = stderr
             ex = {
                 "rc": jrc,
                 "stdout_tail": jout[-2000:],
                 "stderr_tail": jerr[-2000:],
-                "command": f"java -cp generated:libcobj.jar {d['entry']} {self.entry_args}",
+                "command": cmd_str,
                 "execution_mode": "non-interactive",
             }
 

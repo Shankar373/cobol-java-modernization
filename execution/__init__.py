@@ -25,7 +25,7 @@ Design constraints (required by spec):
 
 from .interactive_detector import detect_interactivity
 from .scenario_discovery import discover_scenario
-from .scenario_runner import run_cobol_with_scenario, run_java_with_scenario
+from .scenario_runner import run_cobol_with_scenario, run_java_with_scenario, run_command_with_watchdog
 from .models import (
     ExecutionScenario,
     ExecutionResult,
@@ -40,6 +40,7 @@ __all__ = [
     "discover_scenario",
     "run_cobol_with_scenario",
     "run_java_with_scenario",
+    "run_command_with_watchdog",
     "ExecutionScenario",
     "ExecutionResult",
     "InteractiveInputRequired",
