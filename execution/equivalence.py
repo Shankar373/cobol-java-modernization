@@ -45,6 +45,18 @@ class EquivalenceEngine:
 
         expected_modes = contract.expected_output_modes
 
+        # Normalize database states to map format for compatibility
+        def normalize_db_state(db_state):
+            if not isinstance(db_state, dict):
+                return {}
+            if "db_type" in db_state:
+                context = db_state.get("context_id", "default")
+                return {context: db_state}
+            return db_state
+
+        cobol_db_state = normalize_db_state(obs_cobol.database_state)
+        java_db_state = normalize_db_state(obs_java.database_state)
+
         # 2. Exit code parity check
         if "EXPECTED_EXIT_STATUS" in expected_modes:
             result.checks["exit_code"] = "UNVERIFIED"
@@ -174,8 +186,8 @@ class EquivalenceEngine:
                         continue
 
                     # If this file has logical database comparison, check that instead of physical bytes comparison
-                    b_db_state = obs_cobol.database_state.get(key)
-                    j_db_state = obs_java.database_state.get(key)
+                    b_db_state = cobol_db_state.get(key)
+                    j_db_state = java_db_state.get(key)
                     if b_db_state and j_db_state:
                         logical_v = j_db_state.get("normalization_metadata", {}).get("logical_verdict")
                         if logical_v == "LOGICAL_MATCH":
@@ -251,9 +263,9 @@ class EquivalenceEngine:
             result.checks["database_state"] = "UNVERIFIED"
             
             db_fail = False
-            for key in sorted(obs_cobol.database_state.keys() | obs_java.database_state.keys()):
-                b_db = obs_cobol.database_state.get(key, {})
-                j_db = obs_java.database_state.get(key, {})
+            for key in sorted(cobol_db_state.keys() | java_db_state.keys()):
+                b_db = cobol_db_state.get(key, {})
+                j_db = java_db_state.get(key, {})
                 if b_db.get("db_type") != j_db.get("db_type"):
                     db_fail = True
                     result.differences.append({
