@@ -2,7 +2,7 @@
   "engine": "opensource COBOL 4J",
   "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
   "engine_digest": "opensourcecobol/opensourcecobol4j@sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a",
-  "generated_at": "2026-08-19T02:44:29+00:00",
+  "generated_at": "2026-08-21T04:16:08+00:00",
   "entry_point": "CCMAIN01",
   "format": "free",
   "programs": [
@@ -183,9 +183,10 @@
     {
       "file": "src/CCPROC01.cob",
       "reason": "MANUAL SOURCE MODIFICATION",
-      "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "before_hash": "UNKNOWN_original_not_preserved",
       "after_hash": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
-      "timestamp": "2026-08-18T16:34:00Z"
+      "timestamp": "2026-08-18T16:34:00Z",
+      "note": "Original pre-modification hash was incorrectly recorded as SHA-256 of empty string (e3b0c44...). The actual pre-modification source was not preserved. Current file hash matches after_hash."
     }
   ]
 }
