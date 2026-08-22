@@ -4,7 +4,21 @@ import re
 BENCHMARK_NAMES = [
     r"\bBANKMAIN\b",
     r"\bBCMAIN\b",
-    r"\bVALDATE\b",
+    r"\bCCMAIN\b",
+    r"\bCCPROC01\b",
+    r"\bCCREPT01\b",
+    r"\bCCLOAD01\b",
+    r"\bEodReportService\b",
+    r"\bClaimException\b",
+    r"\bClaimAudit\b",
+    r"\bLegacyFeatureService\b",
+    r"\bprocessClaimsJob\b",
+    r"\bprocessTransactionsJob\b",
+    r"\bPolicyRepository\b",
+    r"\bTransactionRepository\b",
+    r"\bCustomerRepository\b",
+    r"\bAccountRepository\b",
+    r"\bClaimRepository\b",
 ]
 
 def test_production_no_benchmark_hardcoding():
@@ -38,14 +52,7 @@ def test_production_no_benchmark_hardcoding():
                     if "self.log(" in trimmed or "logger." in trimmed or "print(" in trimmed:
                         continue
                     
-                    # Exclude legacy Spring modernization logic in cobol_migrate.py from blocking check,
-                    # but check that our new stage_compare does not contain hardcoded conditions.
-                    if path == "cobol_migrate.py":
-                        # stage_compare is between line 3050 and 3300
-                        if 3050 <= (i + 1) <= 3300:
-                            violations.append(f"{path}:{i+1}: {line.strip()}")
-                    else:
-                        violations.append(f"{path}:{i+1}: {line.strip()}")
+                    violations.append(f"{path}:{i+1}: {line.strip()}")
 
     # Report violations if any
     if violations:

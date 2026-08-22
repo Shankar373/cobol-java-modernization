@@ -10,7 +10,8 @@ COBOL_KEYWORDS = {
     "STOP", "RUN", "COPY", "PIC", "PICTURE", "USAGE", "COMP", "COMP-3", "DISPLAY", "BINARY", "PACKED-DECIMAL",
     "REDEFINES", "OCCURS", "JUSTIFIED", "JUST", "VALUE", "VALUES", "WHEN", "TRUE", "FALSE", "EVALUATE",
     "END-IF", "END-PERFORM", "END-READ", "END-WRITE", "END-EVALUATE", "NOT", "EQUAL", "GREATER", "THAN", "LESS",
-    "AND", "OR", "ON", "SIZE", "ERROR", "DECLARATIVES", "END-DECLARATIVES", "RETURN", "VARYING", "CALL", "USING"
+    "AND", "OR", "ON", "SIZE", "ERROR", "DECLARATIVES", "END-DECLARATIVES", "RETURN", "VARYING", "CALL", "USING",
+    "BY", "GIVING", "FROM", "INPUT", "OUTPUT", "STRING", "DELIMITED", "INTO", "I-O", "EXTEND", "AT", "END"
 }
 
 class CobolToken:
@@ -59,7 +60,77 @@ class CobolLexer:
                 free_signals += 1
         return "fixed" if fixed_signals >= free_signals else "free"
 
+    def preprocess_copybooks(self, text: str) -> str:
+        # Regex to match COPY statements (with or without quotes/dots/directories/extensions)
+        pattern = re.compile(
+            r'^\s*COPY\s+["\'\s]?([A-Za-z0-9\-\._/]+)["\'\s]?(?:\s*\.?)\s*$', 
+            re.IGNORECASE
+        )
+        lines = text.splitlines()
+        new_lines = []
+        
+        base_dir = "."
+        if self.file_path:
+            base_dir = os.path.dirname(os.path.abspath(self.file_path))
+            
+        for line in lines:
+            # Check fixed format indicator first, just in case
+            indicator = " "
+            if self.format_mode == "fixed" and len(line) > 6:
+                indicator = line[6]
+            
+            # If it's a comment, don't try to preprocess it as a COPY statement
+            if indicator in ("*", "/"):
+                new_lines.append(line)
+                continue
+                
+            match = pattern.match(line)
+            if match:
+                cp_path = match.group(1)
+                # Candidates search paths
+                candidates = [
+                    os.path.join(base_dir, cp_path),
+                    os.path.join(base_dir, "copybooks", cp_path),
+                    os.path.join(base_dir, "copybook", cp_path),
+                ]
+                
+                cp_base = os.path.basename(cp_path)
+                if "." in cp_base:
+                    cp_name_only = cp_base.rsplit(".", 1)[0]
+                else:
+                    cp_name_only = cp_base
+                
+                for subdir in ("", "copybooks", "copybook", "..", "../copybooks", "../copybook"):
+                    for ext in ("", ".cpy", ".cob", ".cbl"):
+                        candidates.append(os.path.join(base_dir, subdir, cp_name_only + ext))
+                        candidates.append(os.path.join(base_dir, subdir, cp_path + ext))
+                
+                cp_file = None
+                for candidate in candidates:
+                    norm_candidate = os.path.normpath(candidate)
+                    if os.path.exists(norm_candidate) and os.path.isfile(norm_candidate):
+                        cp_file = norm_candidate
+                        break
+                
+                if cp_file:
+                    try:
+                        with open(cp_file, "r", encoding="utf-8") as fh:
+                            cp_content = fh.read()
+                        # Use sub_lexer to recursively preprocess
+                        sub_lexer = CobolLexer(cp_file, format_mode=self.format_mode)
+                        expanded = sub_lexer.preprocess_copybooks(cp_content)
+                        new_lines.append(expanded)
+                    except Exception:
+                        new_lines.append(line)
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        return "\n".join(new_lines)
+
     def tokenize(self, text: str) -> list:
+        # Resolve and expand COPY statements first
+        text = self.preprocess_copybooks(text)
         if not self.format_mode:
             self.format_mode = self.detect_format(text)
 
@@ -191,6 +262,15 @@ class CobolLexer:
                         self.tokens.append(tok)
                         pos += 1
                         continue
+
+                # Comparison operators
+                comp_match = re.match(r'^(<=|>=|<|>)', code_segment[pos:])
+                if comp_match:
+                    comp_val = comp_match.group(0)
+                    tok = CobolToken("PUNCTUATION", comp_val, self.file_path, line_num, tok_col, tok_start_offset, tok_start_offset + len(comp_val))
+                    self.tokens.append(tok)
+                    pos += len(comp_val)
+                    continue
 
                 # Other punctuation
                 if char in (",", "(", ")", "+", "-", "=", "*", "/"):

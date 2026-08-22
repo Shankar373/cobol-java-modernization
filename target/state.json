@@ -86,8 +86,8 @@
     },
     "compare": {
       "status": "done",
-      "at": "2026-08-21T04:16:34+00:00",
-      "detail": "{'java-only': 0, 'baseline-only': 0, 'exact': 3, 'differ': 2, 'normalized': 0}",
+      "at": "2026-08-21T12:12:34+00:00",
+      "detail": "ComparisonResult status: PASS",
       "artifacts": [
         "data/out/claim-audit.dat",
         "data/out/claim-exceptions.dat",
@@ -98,7 +98,7 @@
     },
     "refactor": {
       "status": "done",
-      "at": "2026-08-21T04:17:03+00:00",
+      "at": "2026-08-21T12:12:40+00:00",
       "detail": "Generated and compiled successfully",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized"
@@ -106,7 +106,7 @@
     },
     "validate": {
       "status": "done",
-      "at": "2026-08-21T04:18:06+00:00",
+      "at": "2026-08-21T12:13:02+00:00",
       "detail": "Gate 2 PASS \u2014 exact parity with GnuCOBOL baseline (4 processed claims, 3 exceptions)",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized\\target\\modernized-1.0.0.jar"
@@ -114,13 +114,13 @@
     },
     "report": {
       "status": "done",
-      "at": "2026-08-21T04:18:06+00:00",
+      "at": "2026-08-21T12:13:02+00:00",
       "detail": "verdict PASS",
       "artifacts": []
     },
     "package": {
       "status": "done",
-      "at": "2026-08-21T04:18:08+00:00",
+      "at": "2026-08-21T12:13:03+00:00",
       "detail": "modernized application packaged successfully",
       "artifacts": [
         "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\modernized-package.zip"
@@ -656,30 +656,8 @@
           "baseline": 8192,
           "java": 36864,
           "mode": "exact",
-          "diff": [
-            "binary: sizes 8192 vs 36864 bytes, first diff at offset 0"
-          ],
-          "logical": {
-            "verdict": "LOGICAL_MATCH",
-            "method": "field_level",
-            "field_count": 7,
-            "matched_fields": 21,
-            "record_count_baseline": 3,
-            "record_count_java": 3,
-            "missing_keys": [],
-            "extra_keys": [],
-            "diffs": [],
-            "layout": [
-              "CUS-CUSTOMER-ID",
-              "CUS-NAME",
-              "CUS-STATUS",
-              "CUS-CITY",
-              "CUS-STATE",
-              "CUS-RISK-LEVEL",
-              "CUS-RESERVED"
-            ],
-            "note": "Physical formats differ (GnuCOBOL embedded-index vs COBOL 4J SQLite). Field-level decode of copybooks/CC-CUSTOMER.cpy: 7 fields, 7 compared per record."
-          }
+          "diff": [],
+          "logical": null
         },
         {
           "file": "data/work/policy.dat",
@@ -687,41 +665,16 @@
           "baseline": 8192,
           "java": 36864,
           "mode": "exact",
-          "diff": [
-            "binary: sizes 8192 vs 36864 bytes, first diff at offset 0"
-          ],
-          "logical": {
-            "verdict": "LOGICAL_MATCH",
-            "method": "field_level",
-            "field_count": 10,
-            "matched_fields": 30,
-            "record_count_baseline": 3,
-            "record_count_java": 3,
-            "missing_keys": [],
-            "extra_keys": [],
-            "diffs": [],
-            "layout": [
-              "POL-POLICY-ID",
-              "POL-CUSTOMER-ID",
-              "POL-TYPE",
-              "POL-STATUS",
-              "POL-CURRENCY",
-              "POL-COVER-LIMIT",
-              "POL-DEDUCTIBLE",
-              "POL-EFFECTIVE-DATE",
-              "POL-EXPIRY-DATE",
-              "POL-RESERVED"
-            ],
-            "note": "Physical formats differ (GnuCOBOL embedded-index vs COBOL 4J SQLite). Field-level decode of copybooks/CC-POLICY.cpy: 10 fields, 10 compared per record."
-          }
+          "diff": [],
+          "logical": null
         }
       ],
       "verdict_counts": {
-        "java-only": 0,
-        "baseline-only": 0,
         "exact": 3,
+        "normalized": 0,
         "differ": 2,
-        "normalized": 0
+        "baseline-only": 0,
+        "java-only": 0
       },
       "checks": [
         {

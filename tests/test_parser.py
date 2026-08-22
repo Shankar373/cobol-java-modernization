@@ -105,7 +105,7 @@ def test_parser_complete_flow():
     # Test properties extraction
     move_stmt = [s for s in statements if s.properties["statement_type"] == "MOVE"][0]
     assert move_stmt.properties["source"] == "WORLD"
-    assert move_stmt.properties["target"] == "WS-SUB-VAR"
+    assert "WS-SUB-VAR" in move_stmt.properties["targets"]
 
     compute_stmt = [s for s in statements if s.properties["statement_type"] == "COMPUTE"][0]
     assert compute_stmt.properties["target"] == "WS-NUMERIC-VAR"

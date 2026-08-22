@@ -277,7 +277,7 @@ def run_cobol_with_scenario(
 
     # The stdin file is inside artifacts_dir; mount it into the container
     stdin_guest = f"/execution_input/interactive_input.txt"
-    inner_cmd = f"cd /repo && ./{exe_name} < {stdin_guest}"
+    inner_cmd = f"cd /repo && export COB_LIBRARY_PATH=. && ./{exe_name} < {stdin_guest}"
 
     cmd = _docker_cmd(
         image,
@@ -355,7 +355,7 @@ def run_java_with_scenario(
     java_cp = "/target/generated:/target/libcobj.jar"
     args_str = entry_args.strip()
     inner_cmd = (
-        f"cd /repo && java -cp '{java_cp}' {entry}"
+        f"cd /repo && export COB_PACKAGE_PATH=com.systema.modernized.generated && java -cp '{java_cp}' {entry}"
         + (f" {args_str}" if args_str else "")
         + f" < {stdin_guest}"
     )

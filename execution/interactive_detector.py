@@ -152,7 +152,28 @@ def detect_interactivity(repo_dir: str, discover_data: dict) -> str:
 
     if found_interactive:
         return "INTERACTIVE"
+        
+    # If no source in the entire repo has any stdin-consuming ACCEPT, it is non-interactive.
+    any_accept = False
+    for src in sources:
+        path = os.path.join(repo_dir, src)
+        if not os.path.isfile(path):
+            continue
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for m in _RE_ACCEPT.finditer(text):
+            if _is_interactive_accept(m.group(1), m.group(2)):
+                any_accept = True
+                break
+        if any_accept:
+            break
+            
+    if not any_accept:
+        return "NON_INTERACTIVE"
+
     if has_dynamic:
-        # Dynamic CALLs mean we couldn't traverse the full graph
+        # Dynamic CALLs mean we couldn't traverse the full graph and at least one ACCEPT exists
         return "UNKNOWN"
     return "NON_INTERACTIVE"

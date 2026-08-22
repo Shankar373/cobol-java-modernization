@@ -2,7 +2,7 @@
 
 - **repo**: `C:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\legacy`
 - **target project**: `C:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\target`
-- **run at**: 2026-08-21T04:18:06+00:00 (UTC)
+- **run at**: 2026-08-21T12:13:02+00:00 (UTC)
 - **overall verdict**: **PASS**
 
 ## Source Immutability
@@ -115,10 +115,10 @@ CLAIMSCORE NIGHTLY BATCH COMPLETED`
 | data/out/claim-audit.dat | exact | exact | 884 | 884 |  |  |
 | data/out/claim-exceptions.dat | exact | exact | 663 | 663 |  |  |
 | data/out/eod-claims-report.txt | exact | normalized | 344 | 344 |  |  |
-| data/work/customer.dat | differ | exact | 8192 | 36864 | LOGICAL_MATCH | binary: sizes 8192 vs 36864 bytes, first diff at offset 0 |
-| data/work/policy.dat | differ | exact | 8192 | 36864 | LOGICAL_MATCH | binary: sizes 8192 vs 36864 bytes, first diff at offset 0 |
+| data/work/customer.dat | differ | exact | 8192 | 36864 |  |  |
+| data/work/policy.dat | differ | exact | 8192 | 36864 |  |  |
 
-- summary: {'java-only': 0, 'baseline-only': 0, 'exact': 3, 'differ': 2, 'normalized': 0}
+- summary: {'exact': 3, 'normalized': 0, 'differ': 2, 'baseline-only': 0, 'java-only': 0}
 
 ## 11. Semantic checks
 

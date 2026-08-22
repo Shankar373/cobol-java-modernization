@@ -237,27 +237,31 @@ class DataFlowModel:
             # MOVE operation data transition
             elif stmt_type == "MOVE":
                 src = stmt.properties.get("source")
-                tgt = stmt.properties.get("target")
+                # Support both new 'targets' list and legacy 'target' string
+                raw_tgt = stmt.properties.get("targets") or stmt.properties.get("target")
+                tgt_list = raw_tgt if isinstance(raw_tgt, list) else ([raw_tgt] if raw_tgt else [])
                 
                 src_node_id = f"df_var_{src}" if src in variables else get_constant_node(src, stmt)
-                tgt_node_id = f"df_var_{tgt}"
                 
-                model.add_edge(DFEdge(
-                    from_node=src_node_id,
-                    to_node=tgt_node_id,
-                    classification="ASSIGNS"
-                ))
-                
-                # Backward compatibility transition
-                model.add_transition(DataFlowTransition(src, tgt, "MOVE"))
-
-                # Conditional data flow control mapping
-                for cond_id in active_conditions:
+                for tgt in tgt_list:
+                    tgt_node_id = f"df_var_{tgt}"
+                    
                     model.add_edge(DFEdge(
-                        from_node=cond_id,
+                        from_node=src_node_id,
                         to_node=tgt_node_id,
-                        classification="CONDITIONAL_ON"
+                        classification="ASSIGNS"
                     ))
+                    
+                    # Backward compatibility transition
+                    model.add_transition(DataFlowTransition(src, tgt, "MOVE"))
+
+                    # Conditional data flow control mapping
+                    for cond_id in active_conditions:
+                        model.add_edge(DFEdge(
+                            from_node=cond_id,
+                            to_node=tgt_node_id,
+                            classification="CONDITIONAL_ON"
+                        ))
 
             # COMPUTE operation data transition
             elif stmt_type == "COMPUTE":
