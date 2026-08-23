@@ -41,6 +41,28 @@ POT = {"ip": "127.0.0.1"}
 RUNS = {}               # run_id -> dict
 LOCK = threading.Lock()  # guards starting runs (one active run at a time)
 
+def secure_resolve_path(base_dir, relative_path):
+    norm_rel = relative_path.replace("\\", "/").strip("/")
+    if norm_rel.startswith("/") or (len(norm_rel) > 1 and norm_rel[1] == ":"):
+        return None
+    real_base = os.path.realpath(base_dir)
+    joined_path = os.path.join(real_base, norm_rel)
+    real_target = os.path.realpath(joined_path)
+    if not real_target.startswith(real_base + os.sep) and real_target != real_base:
+        return None
+    if not os.path.exists(real_target) or os.path.isdir(real_target):
+        return None
+    return real_target
+
+
+def get_run_verdict(run):
+    try:
+        p = engine.Pipeline(run["repo"], run["out"])
+        return p._compute_verdict()
+    except Exception:
+        return "UNVERIFIED"
+
+
 STEP_LABELS = [
     ("Ingest",      "Upload repository • fingerprint source • establish baseline"),
     ("Discover",    "Detect technologies • programs • copybooks • dependencies"),
@@ -87,7 +109,26 @@ def restore_workspaces():
             "last_stage": last, "log": [],
             "source": meta.get("source"),
             "name": meta.get("name", name),
+            "events": [],
+            "seq": 0,
         }
+
+
+def emit_run_event(run, event_type, message="", stage=None, status=None, **kwargs):
+    run.setdefault("events", [])
+    run.setdefault("seq", 0)
+    run["seq"] += 1
+    event = {
+        "run_id": run["run_id"],
+        "seq": run["seq"],
+        "timestamp": engine.now_iso(),
+        "type": event_type,
+        "stage": stage,
+        "message": message,
+        "status": status,
+        **kwargs
+    }
+    run["events"].append(event)
 
 
 def start_run(run_id, restart_from):
@@ -97,30 +138,67 @@ def start_run(run_id, restart_from):
     if run.get("status") == "running":
         return False, "run already in progress"
 
+    if restart_from is not None and restart_from > 0:
+        divider_msg = (
+            f"\n=== RESTARTING FROM STAGE {restart_from} ({engine.STAGES[restart_from]}) ===\n"
+            f"Timestamp: {engine.now_iso()}\n"
+            f"Restart Stage: {engine.STAGES[restart_from]}\n"
+            f"Reason: User requested rerun\n"
+        )
+        run["log"].append(divider_msg)
+        emit_run_event(run, "log", message=divider_msg, restart_boundary=True)
+
     def sink(msg):
         run["log"].append(msg)
         run["log"] = run["log"][-400:]
+        emit_run_event(run, "log", message=msg)
+
+    def event_sink(event_type, **kwargs):
+        emit_run_event(run, event_type, **kwargs)
 
     def worker():
         with LOCK:
             run["status"] = "running"
             run["started_at"] = engine.now_iso()
             engine.LOG_SINK = sink
+            engine.EVENT_SINK = event_sink
+            
+            p = None
             try:
-                # GAP-1 fix: load per-run config if available, fall back to global CFG
                 run_cfg_path = os.path.join(run["repo"], "migration_config.json")
-                run_cfg = engine.load_json(run_cfg_path, {}) or CFG
+                if os.path.exists(run_cfg_path):
+                    run_cfg = engine.load_json(run_cfg_path, {})
+                else:
+                    run_cfg = {
+                        "execution": CFG.get("execution", {}),
+                        "compare": {
+                            "output_dirs": [],
+                            "modes": {},
+                            "checks": []
+                        }
+                    }
                 p = engine.Pipeline(run["repo"], run["out"], cfg=run_cfg, pull=True)
+                p.run_id = run_id
+                run["pipeline"] = p
+                
                 p.run(restart_from=restart_from)
+                
                 state = engine.load_json(os.path.join(run["out"], "state.json"), {})
                 run["last_stage"] = 12 if state.get("stages", {}).get("package", {}).get("status") == "done" else 11
                 run["verdict"] = state.get("stages", {}).get("report", {}).get("detail", "done")
                 run["status"] = "done"
-            except Exception as e:  # noqa: BLE001
-                run["error"] = f"{type(e).__name__}: {e}"
-                run["status"] = "error"
+            except BaseException as e:
+                if (p and getattr(p, "cancelled", False)) or isinstance(e, KeyboardInterrupt):
+                    run["status"] = "interrupted"
+                    run["error"] = "Pipeline execution cancelled by user."
+                else:
+                    run["error"] = f"{type(e).__name__}: {e}"
+                    run["status"] = "error"
             finally:
+                run.pop("pipeline", None)
                 engine.LOG_SINK = None
+                engine.EVENT_SINK = None
+                
                 for idx, (lab, _) in enumerate(STEP_LABELS):
                     st = engine.load_json(os.path.join(run["out"], "state.json"), {}).get("stages", {})
                     if st.get(engine.STAGES[idx], {}).get("status") == "done":
@@ -198,7 +276,11 @@ def ingest(payload):
     repo = os.path.join(ws, "repo")
     os.makedirs(repo, exist_ok=True)
     if source == "zip":
-        data = base64.b64decode(payload.get("data", ""))
+        try:
+            data = base64.b64decode(payload.get("data", ""))
+        except Exception as e:
+            shutil.rmtree(ws, ignore_errors=True)
+            return False, f"invalid base64 payload: {e}"
         if not data:
             shutil.rmtree(ws, ignore_errors=True)
             return False, "empty zip payload"
@@ -218,12 +300,22 @@ def ingest(payload):
         if not url:
             shutil.rmtree(ws, ignore_errors=True)
             return False, "missing git url"
+        if url.startswith("-"):
+            shutil.rmtree(ws, ignore_errors=True)
+            return False, "invalid git url (cannot start with -)"
         cmd = [GIT, "clone", "--depth", "1"]
         branch = (payload.get("branch") or "").strip()
         if branch:
+            if branch.startswith("-") or not re.match(r"^[a-zA-Z0-9/._\-]+$", branch):
+                shutil.rmtree(ws, ignore_errors=True)
+                return False, "invalid branch name"
             cmd += ["--branch", branch]
         cmd += [url, repo]
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            shutil.rmtree(ws, ignore_errors=True)
+            return False, "git clone timed out after 30 seconds"
         if r.returncode != 0:
             shutil.rmtree(ws, ignore_errors=True)
             return False, "git clone failed: " + (r.stderr or r.stdout)[-300:]
@@ -232,7 +324,8 @@ def ingest(payload):
     RUNS[run_id] = {"run_id": run_id, "status": "ready",
                     "repo": repo, "out": os.path.join(ws, "target"),
                     "last_stage": -1, "log": [], "source": source,
-                    "name": payload.get("name") or ("git: " + url if source == "git" else "zip-package")}
+                    "name": payload.get("name") or ("git: " + url if source == "git" else "zip-package"),
+                    "events": [], "seq": 0}
     # Persist source + name so they survive server restarts
     engine.write_json(os.path.join(ws, "meta.json"), {
         "source": RUNS[run_id]["source"],
@@ -283,14 +376,15 @@ class Handler(BaseHTTPRequestHandler):
             sent_idx = 0
             try:
                 while True:
-                    log_len = len(run["log"])
-                    if sent_idx < log_len:
-                        for i in range(sent_idx, log_len):
-                            line = run["log"][i]
-                            self.wfile.write(f"data: {json.dumps(line)}\n\n".encode("utf-8"))
+                    run_events = run.get("events", [])
+                    events_len = len(run_events)
+                    if sent_idx < events_len:
+                        for i in range(sent_idx, events_len):
+                            event = run_events[i]
+                            self.wfile.write(f"data: {json.dumps(event)}\n\n".encode("utf-8"))
                         self.wfile.flush()
-                        sent_idx = log_len
-                    if run.get("status") in ("done", "error", "interrupted") and sent_idx >= len(run["log"]):
+                        sent_idx = events_len
+                    if run.get("status") in ("done", "error", "interrupted") and sent_idx >= len(run.get("events", [])):
                         self.wfile.write(b"event: end\ndata: {}\n\n")
                         self.wfile.flush()
                         break
@@ -305,27 +399,47 @@ class Handler(BaseHTTPRequestHandler):
             if not run:
                 self._json({"ok": False, "error": "unknown run"}, 404)
                 return
-            state_path = os.path.join(run["out"], "state.json")
-            state = engine.load_json(state_path, {})
-            sc = state.get("data", {}).get("execution_scenario")
-            if not sc:
-                self._json({"ok": True, "artifacts": []})
-                return
-            sc_id = sc.get("scenario_id")
-            art_dir = os.path.join(run["out"], "execution", sc_id)
-            if not os.path.isdir(art_dir):
-                self._json({"ok": True, "artifacts": []})
-                return
-            allowed = {
-                "scenario.json", "interactive_input.txt",
-                "stdout_baseline.txt", "stdout_execute.txt",
-                "stderr_baseline.txt", "stderr_execute.txt",
-                "execution_metadata_baseline.json", "execution_metadata_execute.json"
-            }
+            
+            out_dir = run["out"]
             files = []
-            for f in sorted(os.listdir(art_dir)):
-                if f in allowed:
-                    files.append(f)
+            
+            reports = [
+                "migration-report.md", "migration-report.json",
+                "business-rule-traceability.md", "business-rule-traceability.json",
+                "transpilation-provenance.json", "pipeline_execution_manifest.json",
+                "state.json", "hardcoded-value-scan.json"
+            ]
+            for rfile in reports:
+                path = os.path.join(out_dir, rfile)
+                if os.path.exists(path) and os.path.isfile(path):
+                    files.append({"name": rfile, "path": rfile, "type": "report"})
+                    
+            gen_dir = os.path.join(out_dir, "generated")
+            if os.path.exists(gen_dir) and os.path.isdir(gen_dir):
+                for root, _, filenames in os.walk(gen_dir):
+                    for f in filenames:
+                        fullpath = os.path.join(root, f)
+                        rel = os.path.relpath(fullpath, out_dir).replace("\\", "/")
+                        files.append({"name": f, "path": rel, "type": "generated"})
+                        
+            exec_dir = os.path.join(out_dir, "execution")
+            if os.path.exists(exec_dir) and os.path.isdir(exec_dir):
+                for root, _, filenames in os.walk(exec_dir):
+                    for f in filenames:
+                        fullpath = os.path.join(root, f)
+                        rel = os.path.relpath(fullpath, out_dir).replace("\\", "/")
+                        files.append({"name": f, "path": rel, "type": "execution"})
+                        
+            mod_dir = os.path.join(out_dir, "modernized")
+            if os.path.exists(mod_dir) and os.path.isdir(mod_dir):
+                for root, _, filenames in os.walk(mod_dir):
+                    for f in filenames:
+                        if f.endswith(".class"):
+                            continue
+                        fullpath = os.path.join(root, f)
+                        rel = os.path.relpath(fullpath, out_dir).replace("\\", "/")
+                        files.append({"name": f, "path": rel, "type": "modernized"})
+
             self._json({"ok": True, "artifacts": files})
             return
         if u.path == "/api/artifact-content":
@@ -334,44 +448,30 @@ class Handler(BaseHTTPRequestHandler):
             name = q.get("name", [""])[0]
             run = RUNS.get(rid)
             if not run or not name:
-                self._json({"ok": False, "error": "bad query"}, 400)
+                self._json({"ok": False, "error": "Artifact not available for this run."}, 400)
                 return
-            allowed = {
-                "scenario.json", "interactive_input.txt",
-                "stdout_baseline.txt", "stdout_execute.txt",
-                "stderr_baseline.txt", "stderr_execute.txt",
-                "execution_metadata_baseline.json", "execution_metadata_execute.json"
-            }
-            if name not in allowed:
-                self._json({"ok": False, "error": "disallowed file"}, 400)
+            resolved = secure_resolve_path(run["out"], name)
+            if not resolved:
+                self._json({"ok": False, "error": "Artifact not available for this run."}, 400)
                 return
-            state_path = os.path.join(run["out"], "state.json")
-            state = engine.load_json(state_path, {})
-            sc = state.get("data", {}).get("execution_scenario")
-            if not sc:
-                self._json({"ok": False, "error": "no execution scenario"}, 404)
-                return
-            sc_id = sc.get("scenario_id")
-            file_path = os.path.realpath(os.path.join(run["out"], "execution", sc_id, name))
-            base_dir = os.path.realpath(os.path.join(run["out"], "execution", sc_id))
-            if not file_path.startswith(base_dir + os.sep):
-                self._json({"ok": False, "error": "invalid path"}, 400)
-                return
-            if not os.path.exists(file_path):
-                self._json({"ok": False, "error": "file not found"}, 404)
-                return
-            with open(file_path, "r", encoding="utf-8", errors="replace") as fh:
-                self._json({"ok": True, "content": fh.read()})
+            try:
+                with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
+                    self._json({"ok": True, "content": fh.read()})
+            except Exception as e:
+                self._json({"ok": False, "error": f"Failed to read file: {e}"}, 500)
             return
         if u.path == "/report":
             q = urllib.parse.parse_qs(u.query)
             rid = q.get("run_id", [""])[0]
             run = RUNS.get(rid)
-            path = os.path.join(run["out"], "migration-report.md") if run else ""
-            if not path or not os.path.exists(path):
+            if not run:
+                self._send(404, b"run not found")
+                return
+            resolved = secure_resolve_path(run["out"], "migration-report.md")
+            if not resolved:
                 self._send(404, b"no report yet")
                 return
-            with open(path, "rb") as fh:
+            with open(resolved, "rb") as fh:
                 self._send(200, fh.read(), "text/markdown; charset=utf-8")
             return
         if u.path == "/api/modernized":
@@ -400,33 +500,34 @@ class Handler(BaseHTTPRequestHandler):
             rpath = q.get("path", [""])[0]
             run = RUNS.get(rid)
             if not run or not rpath:
-                self._json({"ok": False, "error": "bad query"})
+                self._json({"ok": False, "error": "Artifact not available for this run."}, 400)
                 return
-            clean_path = rpath.replace("\\", "/").strip("/")
-            fullpath = os.path.realpath(os.path.join(run["out"], "modernized", clean_path))
-            base = os.path.realpath(os.path.join(run["out"], "modernized"))
-            if not fullpath.startswith(base + os.sep):
-                self._json({"ok": False, "error": "invalid path"})
+            resolved = secure_resolve_path(os.path.join(run["out"], "modernized"), rpath)
+            if not resolved:
+                self._json({"ok": False, "error": "Artifact not available for this run."}, 400)
                 return
-            if not os.path.exists(fullpath) or os.path.isdir(fullpath):
-                self._json({"ok": False, "error": "file not found"})
-                return
-            with open(fullpath, "r", encoding="utf-8", errors="replace") as fh:
-                self._json({"ok": True, "content": fh.read()})
+            try:
+                with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
+                    self._json({"ok": True, "content": fh.read()})
+            except Exception as e:
+                self._json({"ok": False, "error": f"Failed to read file: {e}"}, 500)
             return
         if u.path == "/package":
             q = urllib.parse.parse_qs(u.query)
             rid = q.get("run_id", [""])[0]
             run = RUNS.get(rid)
-            path = os.path.join(run["out"], "modernized-package.zip") if run else ""
-            if not path or not os.path.exists(path):
+            if not run:
+                self._send(404, b"run not found")
+                return
+            resolved = secure_resolve_path(run["out"], "modernized-package.zip")
+            if not resolved:
                 self._send(404, b"no package archive found")
                 return
-            with open(path, "rb") as fh:
+            with open(resolved, "rb") as fh:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/zip")
                 self.send_header("Content-Disposition", "attachment; filename=modernized-package.zip")
-                self.send_header("Content-Length", str(os.path.getsize(path)))
+                self.send_header("Content-Length", str(os.path.getsize(resolved)))
                 self.end_headers()
                 self.wfile.write(fh.read())
             return
@@ -462,12 +563,19 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/report-json":
             q = urllib.parse.parse_qs(u.query)
             rid = q.get("run_id", [""])[0]
-            run = RUNS.get(rid)
-            path = os.path.join(run["out"], "migration-report.json") if run else ""
-            if not path or not os.path.exists(path):
-                self._send(404, b"no report yet")
+            filename = q.get("file", ["migration-report.json"])[0]
+            if filename not in ["migration-report.json", "pipeline_execution_manifest.json"]:
+                self._send(400, b"invalid file name requested")
                 return
-            with open(path, "rb") as fh:
+            run = RUNS.get(rid)
+            if not run:
+                self._send(404, b"run not found")
+                return
+            resolved = secure_resolve_path(run["out"], filename)
+            if not resolved:
+                self._send(404, b"file not found")
+                return
+            with open(resolved, "rb") as fh:
                 self._send(200, fh.read(), "application/json; charset=utf-8")
             return
         self._send(404, b"not found")
@@ -483,7 +591,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/ingest":
             ok, result = ingest(payload)
-            self._json({"ok": ok, "run_id": result if ok else None, "error": None if ok else result})
+            self._json({"ok": ok, "run_id": result if ok else None, "error": None if ok else result}, 200 if ok else 400)
             return
         if u.path == "/api/run":
             run_id = payload.get("run_id")
@@ -505,6 +613,19 @@ class Handler(BaseHTTPRequestHandler):
             ws = os.path.join(WORKSPACE, run_id)
             shutil.rmtree(ws, ignore_errors=True)
             self._json({"ok": True})
+            return
+        if u.path == "/api/stop":
+            run_id = payload.get("run_id")
+            run = RUNS.get(run_id)
+            if not run:
+                self._json({"ok": False, "error": "unknown run"}, 404)
+                return
+            p = run.get("pipeline")
+            if p and run.get("status") == "running":
+                p.cancel()
+                self._json({"ok": True, "message": "Cancellation request sent"})
+            else:
+                self._json({"ok": False, "error": "run is not actively executing"})
             return
         self._json({"ok": False, "error": "unknown route"}, 404)
 
@@ -529,6 +650,11 @@ def build_state():
                 "status": st.get("status", "pending"),
                 "at": st.get("at", ""),
                 "detail": st.get("detail", ""),
+                "started_at": st.get("started_at", ""),
+                "completed_at": st.get("completed_at", ""),
+                "duration_seconds": st.get("duration_seconds"),
+                "warnings": st.get("warnings", []),
+                "errors": st.get("errors", []),
             })
         runs.append({
             "run_id": rid,
@@ -537,7 +663,7 @@ def build_state():
             "name": run.get("name", rid),
             "last_stage": run.get("last_stage", -1),
             "error": run.get("error"),
-            "verdict": run.get("verdict"),
+            "verdict": get_run_verdict(run),
             "log": run["log"][-150:],
             "stages": stages,
             "compare_data": state.get("data", {}).get("compare", {}),
@@ -546,6 +672,9 @@ def build_state():
             "execution_scenario": state.get("data", {}).get("execution_scenario"),
             "legacy": state.get("data", {}).get("legacy"),
             "execute": state.get("data", {}).get("execute"),
+            "manifest_exists": os.path.exists(os.path.join(run["out"], "pipeline_execution_manifest.json")),
+            "data": state.get("data", {}),
+            "events": run.get("events", []),
         })
     active = [r for r in RUNS.values() if r.get("status") == "running"]
     return {"runs": runs, "active": bool(active), "git_available": bool(GIT)}

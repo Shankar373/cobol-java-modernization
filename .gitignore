@@ -26,3 +26,17 @@ __pycache__/
 .gemini/
 ui-server.log
 ui-server.err.log
+
+# Compiled binaries and libraries
+*.exe
+*.so
+*.dll
+*.class
+*.zip
+*.sha256
+*.dat
+
+# Extra target folders and scratch
+target_*/
+scratch/
+generated/

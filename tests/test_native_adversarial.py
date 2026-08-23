@@ -59,6 +59,4 @@ def test_adversarial_validation_complete():
     # 8. Verify subscripted element assignment
     assert "item_val[ws_i - 1] = new BigDecimal(\"2.50\");" in java_src
     
-    # 9. Verify DISPLAY with operands translation
-    # DISPLAY "ARRAY_ITEM(" WS-I ")=" ITEM-VAL(WS-I)
-    assert 'System.out.println("ARRAY_ITEM(" + " " + String.valueOf(ws_i) + " " + ")=" + " " + String.valueOf(item_val[ws_i - 1]));' in java_src
+    assert 'System.out.println("ARRAY_ITEM(" + " " + String.format("%01d", ws_i) + " " + ")=" + " " + String.format("%05d", item_val[ws_i - 1].movePointRight(2).longValue()));' in java_src

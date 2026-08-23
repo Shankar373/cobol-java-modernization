@@ -143,8 +143,10 @@ class ControlFlowModel:
                     node_type = "CONDITION"
                 elif stmt_type == "ELSE":
                     node_type = "BRANCH"
-                elif stmt_type in ("STOP RUN", "GOBACK"):
+                elif stmt_type in ("STOP RUN", "GOBACK", "EXIT", "EXIT PERFORM", "EXIT PARAGRAPH", "EXIT SECTION"):
                     node_type = "EXIT"
+                elif stmt_type == "GO TO":
+                    node_type = "GOTO"
                 elif stmt_type == "CALL":
                     node_type = "CALL"
 
@@ -319,8 +321,22 @@ class ControlFlowModel:
                 continue
 
             # G. Program exit execution
-            elif stmt_type in ("STOP RUN", "GOBACK"):
+            elif stmt_type in ("STOP RUN", "GOBACK", "EXIT", "EXIT PERFORM", "EXIT PARAGRAPH", "EXIT SECTION"):
                 model.add_edge(CFGEdge(cfg_id, "cfg_exit", "EXIT"))
+                continue
+
+            elif stmt_type == "GO TO":
+                target_para = ir_node.properties.get("target", "")
+                target_node_id = None
+                for n in proc_nodes:
+                    if n.kind in ("PARAGRAPH", "SECTION") and n.properties.get("name") == target_para:
+                        target_node_id = n.node_id
+                        break
+                if target_node_id:
+                    target_cfg = node_id_to_cfg_id[target_node_id]
+                    model.add_edge(CFGEdge(cfg_id, target_cfg, "GOTO"))
+                else:
+                    model.add_edge(CFGEdge(cfg_id, cfg_id, "UNRESOLVED"))
                 continue
 
             # H. Standard sequential execution fallback

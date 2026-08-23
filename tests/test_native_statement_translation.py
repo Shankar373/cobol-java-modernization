@@ -57,7 +57,49 @@ def test_translate_display():
             ]
         }
     }
-    
     java_display = trans.translate_statement(node_display)
     assert java_display == 'System.out.println("Total: " + " " + var_a + " " + String.valueOf(var_b));'
+
+
+def test_translate_move_function_numval():
+    var_types = {"TX-AMOUNT-TEXT": "String", "TX-AMOUNT": "BigDecimal"}
+    trans = NativeStatementTranslator(var_types)
+    node_move = {
+        "properties": {
+            "statement_type": "MOVE",
+            "source": "FUNCTION NUMVAL(TX-AMOUNT-TEXT)",
+            "targets": ["TX-AMOUNT"]
+        }
+    }
+    java_code = trans.translate_statement(node_move)
+    assert java_code == "tx_amount = com.systema.modernized.CobolFormatHelper.numval(tx_amount_text);"
+
+
+def test_translate_spaces_condition():
+    var_types = {"TX-AMOUNT-TEXT": "String"}
+    trans = NativeStatementTranslator(var_types)
+    cond = trans._translate_condition("TX-AMOUNT-TEXT NOT = SPACES")
+    assert cond == "!tx_amount_text.equals(\"\")"
+
+
+def test_translate_function_mod():
+    var_types = {"WS-YEAR": "Integer", "WS-RESULT": "Integer"}
+    trans = NativeStatementTranslator(var_types)
+    node_move = {
+        "properties": {
+            "statement_type": "MOVE",
+            "source": "FUNCTION MOD(WS-YEAR, 4)",
+            "targets": ["WS-RESULT"]
+        }
+    }
+    java_code = trans.translate_statement(node_move)
+    assert java_code == "ws_result = (com.systema.modernized.CobolFormatHelper.mod(BigDecimal.valueOf(ws_year), new BigDecimal(\"4\"))).intValue();"
+
+
+def test_translate_condition_function_mod():
+    var_types = {"WS-YEAR": "Integer"}
+    trans = NativeStatementTranslator(var_types)
+    cond = trans._translate_condition("FUNCTION MOD(WS-YEAR, 4) = 0")
+    assert cond == "com.systema.modernized.CobolFormatHelper.mod(ws_year, 4) == 0"
+
 

@@ -174,3 +174,25 @@ Provide:
   - An explicit scenario path in migration_config.json:
       {"execution": {"interactive_scenario": "test/my_script.sh"}}
 ```
+
+---
+
+## Production Verdict Gates (Phase 10)
+
+The pipeline integrates automated gates to enforce strict zero-dependency and mutation-sensitivity requirements:
+
+### 1. Automatic Dependency Gate
+- Scans all generated artifacts (`.java`, `.xml`, `.properties`, `.yml`, `.yaml`, `.sh`, `.bat`, `Dockerfile`, `Makefile`) to verify zero legacy runtime references (`libcobj`, `jp.osscons`, etc.).
+- Failure to pass blocks the `PRODUCTION_READY` verdict.
+
+### 2. Automatic Negative Equivalence Gate
+- Automatically checks mutation sensitivity across 6 distinct mutation strategies during the comparison stage.
+- Skipped or failing mutation runs block the `PRODUCTION_READY` verdict.
+
+### 3. Verdict Ladder
+Verdicts are strictly evidence-driven:
+- `PRODUCTION_READY`: All gates complete and pass with positive evidence.
+- `PRODUCTION_CANDIDATE`: Execution and physical equivalence pass, but one or more mandatory validation/negative equivalence gates were skipped or did not run.
+- `FAILED`: Compilation or physical/logical output mismatches detected.
+- `EQUIVALENCE_UNVERIFIED`: Translation and compilation succeeded, but no baseline files were produced to verify.
+- `UNVERIFIED`: No execution evidence collected.

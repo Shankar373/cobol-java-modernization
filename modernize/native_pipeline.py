@@ -29,6 +29,9 @@ class NativePipeline:
         # Discovered info
         self.sources = []
         self.copybooks = []
+        self.jcl_files = []
+        self.jcl_jobs = {}
+        self.jcl_parsers = {}
         self.entrypoint = None
         self.format = None
         self.file_assigns = []
@@ -44,36 +47,54 @@ class NativePipeline:
 
         # 0. Compile and run baseline
         try:
-            from cobol_migrate import Pipeline, docker_run, DEFAULT_GNUCOBOL_IMAGE
-            cfg = {}
-            config_path = os.path.join(self.repo, "migration_config.json")
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as fh:
-                    cfg = json.load(fh)
-            pipe = Pipeline(self.repo, self.out, cfg=cfg)
-            pipe.stage_discover()
-            pipe.stage_analyze()
-            pipe.stage_baseline()
+            bypass_baseline = False
+            for root, dirs, files in os.walk(self.repo):
+                for file in files:
+                    if file.lower().endswith((".cob", ".cbl")):
+                        try:
+                            with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read().upper()
+                                if "REPORT SECTION" in content or "EXEC SQL" in content or "EXEC CICS" in content:
+                                    bypass_baseline = True
+                                    break
+                        except Exception:
+                            pass
+                if bypass_baseline:
+                    break
             
-            entry_id = (pipe.data("discover").get("entry") or "program").lower().replace("-", "_")
-            exe_name = f"{entry_id}.exe"
-            
-            # Run baseline
-            docker_run(
-                DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
-                f"./{exe_name}", shell="sh"
-            )
-            
-            # Copy produced outputs preserving structure
-            baseline_dir = os.path.join(self.out, "baseline", "legacy")
-            for od in pipe.data("discover")["output_dirs"]:
-                src_od = os.path.join(self.repo, od)
-                dst_od = os.path.join(baseline_dir, od)
-                if os.path.exists(src_od):
-                    os.makedirs(dst_od, exist_ok=True)
-                    for f in os.listdir(src_od):
-                        shutil.copy2(os.path.join(src_od, f), os.path.join(dst_od, f))
-            self.log("Baseline prepared and copied successfully.")
+            if not bypass_baseline:
+                from cobol_migrate import Pipeline, docker_run, DEFAULT_GNUCOBOL_IMAGE
+                cfg = {}
+                config_path = os.path.join(self.repo, "migration_config.json")
+                if os.path.exists(config_path):
+                    with open(config_path, "r", encoding="utf-8") as fh:
+                        cfg = json.load(fh)
+                pipe = Pipeline(self.repo, self.out, cfg=cfg)
+                pipe.stage_discover()
+                pipe.stage_analyze()
+                pipe.stage_baseline()
+                
+                entry_id = (pipe.data("discover").get("entry") or "program").lower().replace("-", "_")
+                exe_name = f"{entry_id}.exe"
+                
+                # Run baseline
+                docker_run(
+                    DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
+                    f"./{exe_name}", shell="sh"
+                )
+                
+                # Copy produced outputs preserving structure
+                baseline_dir = os.path.join(self.out, "baseline", "legacy")
+                for od in pipe.data("discover")["output_dirs"]:
+                    src_od = os.path.join(self.repo, od)
+                    dst_od = os.path.join(baseline_dir, od)
+                    if os.path.exists(src_od):
+                        os.makedirs(dst_od, exist_ok=True)
+                        for f in os.listdir(src_od):
+                            shutil.copy2(os.path.join(src_od, f), os.path.join(dst_od, f))
+                self.log("Baseline prepared and copied successfully.")
+            else:
+                self.log("Bypassing legacy baseline compile for Report Writer program")
         except Exception as e:
             self.log(f"Warning: could not prepare baseline via Pipeline: {e}")
 
@@ -143,6 +164,8 @@ class NativePipeline:
                     self.sources.append(os.path.join(root, f))
                 elif f.upper().endswith((".CPY", ".COPY")):
                     self.copybooks.append(os.path.join(root, f))
+                elif f.upper().endswith(".JCL"):
+                    self.jcl_files.append(os.path.join(root, f))
 
         # Check local config
         config_path = os.path.join(self.repo, "migration_config.json")
@@ -240,16 +263,30 @@ class NativePipeline:
         return "\n".join(new_lines)
 
     def stage_parse(self):
+        self.parsers = {}
         for src in self.sources:
             lexer = CobolLexer(src, format_mode=self.format)
             content = open(src, "r", encoding="utf-8").read()
             content = self._preprocess_cobol(content, self.repo)
             tokens = lexer.tokenize(content)
             parser = CobolParser(tokens, src)
+            self.parsers[src] = parser
             ir = parser.parse()
             self.program_ir[src] = ir
 
+        for jcl_file in self.jcl_files:
+            content = open(jcl_file, "r", encoding="utf-8").read()
+            from modernize.jcl_parser import JclParser
+            parser = JclParser(content, self.repo)
+            job = parser.parse()
+            self.jcl_parsers[jcl_file] = parser
+            self.jcl_jobs[jcl_file] = job
+
     def stage_select_slice(self) -> str:
+        if self.jcl_files:
+            self.log(f"Slice selected (JCL): {os.path.basename(self.jcl_files[0])}")
+            return self.jcl_files[0]
+
         # Dynamically selects the most suitable source file to translate as a vertical slice
         best_src = None
         best_score = -1
@@ -302,6 +339,34 @@ class NativePipeline:
         shutil.rmtree(self.generated_dir, ignore_errors=True)
         os.makedirs(self.src_dir, exist_ok=True)
         
+        has_sql = False
+        for prog_ir in self.program_ir.values():
+            if any(n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_SQL" for n in prog_ir.nodes.values()):
+                has_sql = True
+                break
+
+        deps = ""
+        if has_sql:
+            deps = """
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+            <version>6.1.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
+            <version>6.1.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.2.224</version>
+        </dependency>
+    </dependencies>
+"""
+
         # 1. pom.xml
         pom = f"""<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -314,11 +379,175 @@ class NativePipeline:
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-</project>
+    </properties>{deps}</project>
 """
         with open(os.path.join(self.generated_dir, "pom.xml"), "w", encoding="utf-8") as fh:
             fh.write(pom)
+
+        helper_dir = os.path.join(self.generated_dir, "src", "main", "java", "com", "systema", "modernized")
+        os.makedirs(helper_dir, exist_ok=True)
+        
+        # JclExecutionContext
+        jcl_context_src = """package com.systema.modernized;
+import java.util.HashMap;
+import java.util.Map;
+public class JclExecutionContext {
+    private static final ThreadLocal<Map<String, String>> ddAssignments = ThreadLocal.withInitial(HashMap::new);
+    private static final ThreadLocal<Map<String, String>> sysinData = ThreadLocal.withInitial(HashMap::new);
+    private static final ThreadLocal<Map<String, Integer>> stepReturnCodes = ThreadLocal.withInitial(HashMap::new);
+    
+    public static void setDdAssignment(String ddName, String physicalPath) {
+        ddAssignments.get().put(ddName.toUpperCase(), physicalPath);
+    }
+    
+    public static String getDdAssignment(String ddName) {
+        return ddAssignments.get().get(ddName.toUpperCase());
+    }
+    
+    public static void setSysinData(String ddName, String data) {
+        sysinData.get().put(ddName.toUpperCase(), data);
+    }
+    
+    public static String getSysinData(String ddName) {
+        return sysinData.get().get(ddName.toUpperCase());
+    }
+    
+    public static void setStepReturnCode(String stepName, int rc) {
+        stepReturnCodes.get().put(stepName.toUpperCase(), rc);
+    }
+    
+    public static Integer getStepReturnCode(String stepName) {
+        return stepReturnCodes.get().getOrDefault(stepName.toUpperCase(), 0);
+    }
+    
+    public static boolean checkAnyStepCond(int code, String op) {
+        for (int rc : stepReturnCodes.get().values()) {
+            if (compareRc(code, op, rc)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    public static boolean compareRc(int code, String op, int rc) {
+        switch (op.toUpperCase()) {
+            case "EQ": return code == rc;
+            case "NE": return code != rc;
+            case "GT": return code > rc;
+            case "LT": return code < rc;
+            case "GE": return code >= rc;
+            case "LE": return code <= rc;
+            default: return false;
+        }
+    }
+    
+    public static void clear() {
+        ddAssignments.get().clear();
+        sysinData.get().clear();
+        stepReturnCodes.get().clear();
+    }
+}
+"""
+        with open(os.path.join(helper_dir, "JclExecutionContext.java"), "w", encoding="utf-8") as fh:
+            fh.write(jcl_context_src)
+
+        # CobolFormatHelper
+        format_helper_src = open(os.path.join(os.path.dirname(__file__), "java_helpers", "CobolFormatHelper.java"), "r", encoding="utf-8").read()
+        with open(os.path.join(helper_dir, "CobolFormatHelper.java"), "w", encoding="utf-8") as fh:
+            fh.write(format_helper_src)
+
+        # CobolRef
+        ref_helper_src = open(os.path.join(os.path.dirname(__file__), "java_helpers", "CobolRef.java"), "r", encoding="utf-8").read()
+        with open(os.path.join(helper_dir, "CobolRef.java"), "w", encoding="utf-8") as fh:
+            fh.write(ref_helper_src)
+
+        # SpringContextHelper
+        if has_sql:
+            helper_src = """package com.systema.modernized;
+public class SpringContextHelper {
+    public static org.springframework.jdbc.core.JdbcTemplate jdbcTemplate = null;
+    public static org.springframework.transaction.PlatformTransactionManager transactionManager = null;
+}
+"""
+            with open(os.path.join(helper_dir, "SpringContextHelper.java"), "w", encoding="utf-8") as fh:
+                fh.write(helper_src)
+
+        # CicsProgramRegistry
+        registry_src = """package com.systema.modernized;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+public class CicsProgramRegistry {
+    private static final Map<String, Supplier<Object>> registry = new HashMap<>();
+    public static void register(String name, Supplier<Object> supplier) {
+        registry.put(name.toUpperCase(), supplier);
+    }
+    public static Object invoke(String name, String commarea) throws Exception {
+        Supplier<Object> supplier = registry.get(name.toUpperCase());
+        if (supplier == null) {
+            try {
+                String cleaned = name.replace("-", " ").replace("_", " ");
+                String[] parts = cleaned.split("\\\\s+");
+                StringBuilder sb = new StringBuilder();
+                for (String p : parts) {
+                    if (!p.isEmpty()) {
+                        sb.append(p.substring(0, 1).toUpperCase());
+                        sb.append(p.substring(1).toLowerCase());
+                    }
+                }
+                String className = sb.toString();
+                Class.forName("com.systema.modernized.native_gen." + className);
+                supplier = registry.get(name.toUpperCase());
+            } catch (Exception e) {}
+        }
+        if (supplier == null) {
+            throw new IllegalArgumentException("CICS_INVALID_PROGRAM: Program " + name + " not registered in CICS registry");
+        }
+        Object program = supplier.get();
+        try {
+            java.lang.reflect.Field field = program.getClass().getField("commarea");
+            field.set(program, commarea);
+        } catch (NoSuchFieldException e) {}
+        program.getClass().getMethod("execute").invoke(program);
+        try {
+            java.lang.reflect.Field field = program.getClass().getField("commarea");
+            return field.get(program);
+        } catch (NoSuchFieldException e) {
+            return commarea;
+        }
+    }
+}
+"""
+        with open(os.path.join(helper_dir, "CicsProgramRegistry.java"), "w", encoding="utf-8") as fh:
+            fh.write(registry_src)
+
+        # CicsTransactionContext
+        context_src = """package com.systema.modernized;
+import java.util.HashMap;
+import java.util.Map;
+public class CicsTransactionContext {
+    private static final Map<String, Object> session = new HashMap<>();
+    public static void send(String map, String mapset, Object data) {
+        System.out.println("CICS SEND MAP: " + map + " MAPSET: " + mapset + " DATA: " + data);
+        session.put(mapset.toUpperCase() + "_" + map.toUpperCase() + "_sent", data);
+    }
+    public static Object receive(String map, String mapset) {
+        System.out.println("CICS RECEIVE MAP: " + map + " MAPSET: " + mapset);
+        return session.get(mapset.toUpperCase() + "_" + map.toUpperCase() + "_input");
+    }
+    public static void setSessionInput(String map, String mapset, Object data) {
+        session.put(mapset.toUpperCase() + "_" + map.toUpperCase() + "_input", data);
+    }
+    public static Object getSessionSent(String map, String mapset) {
+        return session.get(mapset.toUpperCase() + "_" + map.toUpperCase() + "_sent");
+    }
+    public static void clear() {
+        session.clear();
+    }
+}
+"""
+        with open(os.path.join(helper_dir, "CicsTransactionContext.java"), "w", encoding="utf-8") as fh:
+            fh.write(context_src)
 
         # Build generators for all programs in the repository first
         all_generators = {}
@@ -336,28 +565,109 @@ class NativePipeline:
             p_id = os.path.splitext(os.path.basename(s_file))[0].upper()
             gen = NativeProgramGenerator(p_id, list(s_ir.nodes.values()), adjusted_assigns)
             all_generators[p_id] = gen
+            
+            def register_child_generators(g):
+                for c_name, c_gen in g.child_generators.items():
+                    all_generators[c_name.upper()] = c_gen
+                    register_child_generators(c_gen)
+            register_child_generators(gen)
 
-        # Now generate the source code for each program
+        # Now generate the source code for each top-level program
         for p_id, gen in all_generators.items():
+            if gen.is_child:
+                continue
             java_src = gen.generate_class_source(all_generators)
             class_name = to_java_class(p_id)
             with open(os.path.join(self.src_dir, f"{class_name}.java"), "w", encoding="utf-8") as fh:
                 fh.write(java_src)
 
+        # Generate JCL Job classes
+        for jcl_file, job in self.jcl_jobs.items():
+            from modernize.jcl_generator import JclGenerator
+            all_programs = set(to_java_class(p_id) for p_id in all_generators.keys())
+            jcl_gen = JclGenerator(job, all_programs)
+            jcl_java_src = jcl_gen.generate()
+            job_class_name = f"JclJob_{job.name.lower().capitalize()}" if job.name else "JclJob_Unnamed"
+            with open(os.path.join(self.src_dir, f"{job_class_name}.java"), "w", encoding="utf-8") as fh:
+                fh.write(jcl_java_src)
+
         # 3. native_ir_mapping.json (for the selected slice/entrypoint)
-        prog_id = os.path.splitext(os.path.basename(src))[0]
-        class_name = to_java_class(prog_id)
-        selected_gen = all_generators.get(prog_id.upper())
-        ir = self.program_ir[src]
-        mapping = {
-            "source_file": src,
-            "target_class": f"com.systema.modernized.native_gen.{class_name}",
-            "variables_count": len(selected_gen.var_types) if selected_gen else 0,
-            "variables": {k: v for k, v in selected_gen.var_types.items()} if selected_gen else {},
-            "statements_count": len([n for n in ir.nodes.values() if n.kind == "STATEMENT"])
-        }
+        if src.upper().endswith(".JCL"):
+            from modernize.jcl_parser import JclParser
+            content = open(src, "r", encoding="utf-8").read()
+            parser = JclParser(content, self.repo)
+            job = parser.parse()
+            job_name = job.name or "Unnamed"
+            class_name = f"JclJob_{job_name.lower().capitalize()}"
+            mapping = {
+                "source_file": src,
+                "target_class": f"com.systema.modernized.native_gen.{class_name}",
+                "variables_count": 0,
+                "variables": {},
+                "statements_count": len(job.steps)
+            }
+        else:
+            prog_id = os.path.splitext(os.path.basename(src))[0]
+            class_name = to_java_class(prog_id)
+            selected_gen = all_generators.get(prog_id.upper())
+            ir = self.program_ir[src]
+            mapping = {
+                "source_file": src,
+                "target_class": f"com.systema.modernized.native_gen.{class_name}",
+                "variables_count": len(selected_gen.var_types) if selected_gen else 0,
+                "variables": {k: v for k, v in selected_gen.var_types.items()} if selected_gen else {},
+                "statements_count": len([n for n in ir.nodes.values() if n.kind == "STATEMENT"])
+            }
         with open(os.path.join(ROOT, "target", "generated", "native_ir_mapping.json"), "w", encoding="utf-8") as fh:
             json.dump(mapping, fh, indent=2)
+
+        # 4. native_translation_diagnostics.json
+        diagnostics = []
+        if hasattr(self, "parsers"):
+            for s, parser in self.parsers.items():
+                for diag in parser.diagnostics:
+                    diagnostics.append({
+                        "construct": "SYNTAX_ERROR",
+                        "source_coordinate": f"{os.path.basename(s)}:{diag.line}",
+                        "semantic_ir_node": None,
+                        "severity": "ERROR",
+                        "status": "NATIVE_TRANSLATION_BLOCKED",
+                        "reason": diag.message
+                    })
+        if hasattr(self, "jcl_parsers"):
+            for jcl_file, parser in self.jcl_parsers.items():
+                for diag in parser.diagnostics:
+                    diagnostics.append({
+                        "construct": diag.get("construct", "JCL"),
+                        "source_coordinate": f"{os.path.basename(jcl_file)}:{diag.get('line', 0)}",
+                        "semantic_ir_node": None,
+                        "severity": "WARNING" if "WARNING" in diag["status"] else "ERROR",
+                        "status": diag["status"],
+                        "reason": diag["reason"]
+                    })
+        for s, ir in self.program_ir.items():
+            for node in ir.nodes.values():
+                if node.status == "UNSUPPORTED":
+                    diagnostics.append({
+                        "construct": node.properties.get("statement_type", "UNKNOWN"),
+                        "source_coordinate": f"{os.path.basename(s)}:{node.source_line}",
+                        "semantic_ir_node": node.node_id,
+                        "severity": "ERROR",
+                        "status": "NATIVE_TRANSLATION_BLOCKED",
+                        "reason": f"Unsupported statement type {node.properties.get('statement_type')}"
+                    })
+        for p_id, gen in all_generators.items():
+            for diag in gen.diagnostics:
+                diagnostics.append({
+                    "construct": diag.get("construct", "UNKNOWN"),
+                    "source_coordinate": diag.get("source_coordinate") or diag.get("source") or "UNKNOWN",
+                    "semantic_ir_node": diag.get("semantic_ir_node"),
+                    "severity": diag.get("severity", "ERROR"),
+                    "status": diag.get("status", "NATIVE_TRANSLATION_BLOCKED"),
+                    "reason": diag.get("reason") or diag.get("detail") or "UNKNOWN"
+                })
+        with open(os.path.join(ROOT, "target", "generated", "native_translation_diagnostics.json"), "w", encoding="utf-8") as fh:
+            json.dump(diagnostics, fh, indent=2)
 
         self.log("Java model and service logic generated successfully.")
 
@@ -366,9 +676,13 @@ class NativePipeline:
         found_dependencies = []
         scanned_files = []
 
+        SCAN_EXTS = (".java", ".xml", ".properties", ".yml", ".yaml", ".sh", ".bat", ".gradle")
+        SCAN_NAMES = {"Dockerfile", "Makefile"}
+
         for root, _, files in os.walk(self.generated_dir):
             for f in files:
-                if f.endswith((".java", ".xml", ".properties")):
+                if f.endswith(SCAN_EXTS) or f in SCAN_NAMES:
+
                     path = os.path.join(root, f)
                     scanned_files.append(os.path.relpath(path, self.generated_dir))
                     content = open(path, "r", encoding="utf-8").read()
@@ -397,7 +711,11 @@ class NativePipeline:
             return False
 
         # Run mvn clean compile
-        res = subprocess.run(["mvn", "clean", "compile"], cwd=self.generated_dir, capture_output=True, text=True, shell=True)
+        try:
+            res = subprocess.run(["mvn", "clean", "compile"], cwd=self.generated_dir, capture_output=True, text=True, shell=True, timeout=180)
+        except subprocess.TimeoutExpired:
+            self.log("Maven compilation timed out after 180 seconds.")
+            return False
         if res.returncode != 0:
             self.log("Maven compilation failed:")
             self.log(res.stderr + "\n" + res.stdout)
@@ -420,16 +738,49 @@ class NativePipeline:
                     os.makedirs(os.path.dirname(tgt_dataset), exist_ok=True)
                     shutil.copy2(src_dataset, tgt_dataset)
 
-        prog_id = os.path.splitext(os.path.basename(src))[0]
-        class_name = to_java_class(prog_id)
+        if src.upper().endswith(".JCL"):
+            from modernize.jcl_parser import JclParser
+            content = open(src, "r", encoding="utf-8").read()
+            parser = JclParser(content, self.repo)
+            job = parser.parse()
+            job_name = job.name or "Unnamed"
+            class_name = f"JclJob_{job_name.lower().capitalize()}"
+        else:
+            prog_id = os.path.splitext(os.path.basename(src))[0]
+            class_name = to_java_class(prog_id)
         
+        # Build classpath string using maven if dependencies are present
+        classpath = "target/classes"
+        cp_file = os.path.join(self.generated_dir, "cp.txt")
+        try:
+            mvn_exe = "mvn.cmd" if sys.platform == "win32" else "mvn"
+            subprocess.run([
+                mvn_exe, "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
+            ], cwd=self.generated_dir, capture_output=True, text=True)
+            if os.path.exists(cp_file):
+                with open(cp_file, "r", encoding="utf-8") as fh:
+                    cp_deps = fh.read().strip()
+                if cp_deps:
+                    classpath += os.pathsep + cp_deps
+        except Exception as e:
+            self.log(f"Warning: could not resolve maven classpath: {e}")
+
         # Run standard Java program
-        res = subprocess.run([
-            "java", "-cp", "target/classes", f"com.systema.modernized.native_gen.{class_name}"
-        ], cwd=self.generated_dir, capture_output=True, text=True)
+        try:
+            res = subprocess.run([
+                "java", "-cp", classpath, f"com.systema.modernized.native_gen.{class_name}"
+            ], cwd=self.generated_dir, capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            self.log("Java execution timed out after 30 seconds.")
+            res = subprocess.CompletedProcess(args=[], returncode=-1, stdout="", stderr="Java execution timed out after 30 seconds.")
         
-        # Snapshot outputs
         java_out_dir = os.path.join(self.out, "results", "native")
+        stdout_path = os.path.join(java_out_dir, "stdout.txt")
+        os.makedirs(os.path.dirname(stdout_path), exist_ok=True)
+        with open(stdout_path, "w", encoding="utf-8") as fh:
+            fh.write(res.stdout or "")
+
+        # Re-scan to include stdout.txt
         out_files = []
         for root, _, files in os.walk(java_out_dir):
             for f in files:
@@ -548,7 +899,7 @@ class NativePipeline:
             # 3. Delete record
             shutil.copy2(backup_file, native_file)
             lines = open(native_file, "r").readlines()
-            if len(lines) > 1:
+            if len(lines) >= 1:
                 with open(native_file, "w") as fh:
                     fh.writelines(lines[:-1])
             v3 = run_compare()
@@ -574,25 +925,47 @@ class NativePipeline:
                 os.remove(backup_file)
 
     def stage_traceability(self, src: str):
-        prog_id = os.path.splitext(os.path.basename(src))[0]
-        class_name = to_java_class(prog_id)
-        
-        ir = self.program_ir[src]
-        
-        # Build mappings list
-        mappings = []
-        for node in ir.nodes.values():
-            if node.kind == "STATEMENT":
+        if src.upper().endswith(".JCL"):
+            from modernize.jcl_parser import JclParser
+            content = open(src, "r", encoding="utf-8").read()
+            parser = JclParser(content, self.repo)
+            job = parser.parse()
+            job_name = job.name or "Unnamed"
+            class_name = f"JclJob_{job_name.lower().capitalize()}"
+            
+            mappings = []
+            flat_steps = parser.collect_all_steps(job.steps)
+            for idx, step in enumerate(flat_steps):
                 mappings.append({
-                    "source_coordinate": f"{os.path.basename(src)}:{node.source_line}",
-                    "lexer_token": node.properties.get("statement_type", "VERB"),
-                    "semantic_ir_node": node.node_id,
-                    "application_semantic_model": "NativeStatement",
+                    "source_coordinate": f"{os.path.basename(src)}:0",
+                    "lexer_token": "EXEC",
+                    "semantic_ir_node": f"STEP_{idx}",
+                    "application_semantic_model": "JclStep",
                     "java_class": f"com.systema.modernized.native_gen.{class_name}",
-                    "java_method": "main_process",
+                    "java_method": f"runStep_{step['name'].replace('.', '_')}",
                     "execution_evidence": "native_execution_observation.json",
                     "equivalence_evidence": "native_equivalence_result.json"
                 })
+        else:
+            prog_id = os.path.splitext(os.path.basename(src))[0]
+            class_name = to_java_class(prog_id)
+            
+            ir = self.program_ir[src]
+            
+            # Build mappings list
+            mappings = []
+            for node in ir.nodes.values():
+                if node.kind == "STATEMENT":
+                    mappings.append({
+                        "source_coordinate": f"{os.path.basename(src)}:{node.source_line}",
+                        "lexer_token": node.properties.get("statement_type", "VERB"),
+                        "semantic_ir_node": node.node_id,
+                        "application_semantic_model": "NativeStatement",
+                        "java_class": f"com.systema.modernized.native_gen.{class_name}",
+                        "java_method": "main_process",
+                        "execution_evidence": "native_execution_observation.json",
+                        "equivalence_evidence": "native_equivalence_result.json"
+                    })
 
         trace = {
             "schema_version": "1.0",

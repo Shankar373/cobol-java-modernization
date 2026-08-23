@@ -39,6 +39,7 @@ from .contracts import ExecutionContract
 from .results import ComparisonResult
 from .equivalence import EquivalenceEngine
 from .normalization import NormalizationRules
+from .topology import detect_topology, observable_summary
 
 __all__ = [
     "detect_interactivity",
@@ -57,5 +58,7 @@ __all__ = [
     "ComparisonResult",
     "EquivalenceEngine",
     "NormalizationRules",
+    "detect_topology",
+    "observable_summary",
 ]
 

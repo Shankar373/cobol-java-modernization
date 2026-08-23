@@ -14,7 +14,7 @@ def test_generate_io_methods_input():
     res = NativeFileIOGenerator.generate_io_methods("FILE-A", "input.dat", True, record_fields)
     
     assert "private BufferedReader file_a_reader;" in res
-    assert "file_a_reader = Files.newBufferedReader(Paths.get(\"input.dat\"));" in res
+    assert "file_a_reader = Files.newBufferedReader(Paths.get(resolve_path_file_a()));" in res
     assert "field_a = val;" in res
     assert "field_b = val.isEmpty() ? 0 : Integer.parseInt(val);" in res
     assert "field_c = val.isEmpty() ? BigDecimal.ZERO : new BigDecimal(val).movePointLeft(2);" in res
@@ -27,6 +27,6 @@ def test_generate_io_methods_output():
     res = NativeFileIOGenerator.generate_io_methods("FILE-B", "output.dat", False, record_fields)
     
     assert "private BufferedWriter file_b_writer;" in res
-    assert "file_b_writer = Files.newBufferedWriter(Paths.get(\"output.dat\"));" in res
+    assert "file_b_writer = Files.newBufferedWriter(Paths.get(resolve_path_file_b()));" in res
     assert "write_file_b" in res
     assert "String.format(\"%-10s%05d\"" in res

@@ -49,7 +49,10 @@ class EquivalenceEngine:
         def normalize_db_state(db_state):
             if not isinstance(db_state, dict):
                 return {}
-            if "db_type" in db_state:
+            std_keys = {"db_type", "context_id", "affected_tables", "row_counts", "relevant_keys",
+                        "before_after_state", "transaction_status", "normalization_metadata", "evidence_references"}
+            extra_keys = set(db_state.keys()) - std_keys
+            if "db_type" in db_state and not extra_keys:
                 context = db_state.get("context_id", "default")
                 return {context: db_state}
             return db_state

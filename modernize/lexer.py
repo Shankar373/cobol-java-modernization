@@ -11,7 +11,11 @@ COBOL_KEYWORDS = {
     "REDEFINES", "OCCURS", "JUSTIFIED", "JUST", "VALUE", "VALUES", "WHEN", "TRUE", "FALSE", "EVALUATE",
     "END-IF", "END-PERFORM", "END-READ", "END-WRITE", "END-EVALUATE", "NOT", "EQUAL", "GREATER", "THAN", "LESS",
     "AND", "OR", "ON", "SIZE", "ERROR", "DECLARATIVES", "END-DECLARATIVES", "RETURN", "VARYING", "CALL", "USING",
-    "BY", "GIVING", "FROM", "INPUT", "OUTPUT", "STRING", "DELIMITED", "INTO", "I-O", "EXTEND", "AT", "END"
+    "BY", "GIVING", "FROM", "INPUT", "OUTPUT", "STRING", "DELIMITED", "INTO", "I-O", "EXTEND", "AT", "END", "IN",
+    "GO", "CONTINUE", "NEXT", "SENTENCE", "DEPENDING", "TIMES", "INVALID", "RANDOM", "MODE", "OVERFLOW",
+    "UNSTRING", "INSPECT", "TALLYING", "REPLACING", "CONVERTING", "POINTER", "CHARACTERS", "FIRST", "END-UNSTRING",
+    "ALL", "LEADING", "WITH", "FOR", "GLOBAL", "PROGRAM", "END-PROGRAM", "SD", "SORT", "MERGE", "RELEASE", "ASCENDING", "DESCENDING", "SET", "ADDRESS", "OF",
+    "REPORT", "REPORTS", "INITIATE", "GENERATE", "TERMINATE", "LINE", "COLUMN", "SOURCE", "SUM", "CONTROL", "RD"
 }
 
 class CobolToken:
@@ -134,6 +138,54 @@ class CobolLexer:
         if not self.format_mode:
             self.format_mode = self.detect_format(text)
 
+        # Find all EXEC SQL blocks first in the full text
+        sql_blocks = []
+        for m in re.finditer(r'\bEXEC\s+SQL\b(.*?)\bEND-EXEC\.?', text, re.IGNORECASE | re.DOTALL):
+            sql_blocks.append({
+                "start": m.start(),
+                "end": m.end(),
+                "content": m.group(1).strip()
+            })
+
+        # Find all EXEC CICS blocks first in the full text
+        cics_blocks = []
+        for m in re.finditer(r'\bEXEC\s+CICS\b(.*?)\bEND-EXEC\.?', text, re.IGNORECASE | re.DOTALL):
+            cics_blocks.append({
+                "start": m.start(),
+                "end": m.end(),
+                "content": m.group(1).strip()
+            })
+            
+        line_starts = [0]
+        for i, char in enumerate(text):
+            if char == '\n':
+                line_starts.append(i + 1)
+                
+        def get_line_col(offset):
+            for idx, start in enumerate(line_starts):
+                if idx + 1 < len(line_starts):
+                    if start <= offset < line_starts[idx + 1]:
+                        return idx + 1, offset - start + 1
+                else:
+                    if start <= offset:
+                        return idx + 1, offset - start + 1
+            return 1, 1
+            
+        sql_ranges = [(b["start"], b["end"]) for b in sql_blocks]
+        cics_ranges = [(b["start"], b["end"]) for b in cics_blocks]
+        
+        def is_in_sql_range(offset):
+            for start, end in sql_ranges:
+                if start <= offset < end:
+                    return True
+            return False
+
+        def is_in_cics_range(offset):
+            for start, end in cics_ranges:
+                if start <= offset < end:
+                    return True
+            return False
+
         lines = text.splitlines()
         abs_offset = 0
 
@@ -223,11 +275,63 @@ class CobolLexer:
             seg_len = len(code_segment)
             
             while pos < seg_len:
-                # Skip spaces
+                # Skip spaces first to align offsets
                 while pos < seg_len and code_segment[pos].isspace():
                     pos += 1
                 if pos >= seg_len:
                     break
+
+                char_offset = code_offset + pos
+                
+                # Check if we hit the start of an SQL block
+                sql_block_started = None
+                for b in sql_blocks:
+                    if b["start"] == char_offset:
+                        sql_block_started = b
+                        break
+                
+                if sql_block_started:
+                    line, col = get_line_col(sql_block_started["start"])
+                    tok = CobolToken(
+                        "EXEC_SQL",
+                        sql_block_started["content"],
+                        self.file_path,
+                        line,
+                        col,
+                        sql_block_started["start"],
+                        sql_block_started["end"]
+                    )
+                    self.tokens.append(tok)
+                    skip_len = sql_block_started["end"] - char_offset
+                    pos += skip_len
+                    continue
+
+                # Check if we hit the start of a CICS block
+                cics_block_started = None
+                for b in cics_blocks:
+                    if b["start"] == char_offset:
+                        cics_block_started = b
+                        break
+
+                if cics_block_started:
+                    line, col = get_line_col(cics_block_started["start"])
+                    tok = CobolToken(
+                        "EXEC_CICS",
+                        cics_block_started["content"],
+                        self.file_path,
+                        line,
+                        col,
+                        cics_block_started["start"],
+                        cics_block_started["end"]
+                    )
+                    self.tokens.append(tok)
+                    skip_len = cics_block_started["end"] - char_offset
+                    pos += skip_len
+                    continue
+                
+                if is_in_sql_range(char_offset) or is_in_cics_range(char_offset):
+                    pos += 1
+                    continue
                 
                 char = code_segment[pos]
                 tok_start_offset = code_offset + pos

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit Engine — 22-point engineering audit for COBOL → Java migration.
+"""Audit Engine - 22-point engineering audit for COBOL -> Java migration.
 
 Reads a completed migration (state.json, manifest.json, generated Java)
 and produces:
@@ -43,7 +43,7 @@ AUTO_MANUAL_MATRIX = [
     ("Source modification (normalization)",      "MANUAL",    "Original files never touched; normalized/ layer if needed"),
     ("cobj transpilation",                       "AUTOMATIC", "Docker: opensourcecobol/opensourcecobol4j:2.0.0"),
     ("Java stub detection",                      "AUTOMATIC", "is_stub_java() checks for cobj runtime imports"),
-    ("Artifact provenance (per-file hash)",      "AUTOMATIC", "manifest.json records source→Java→class chain with SHA-256"),
+    ("Artifact provenance (per-file hash)",      "AUTOMATIC", "manifest.json records source->Java->class chain with SHA-256"),
     ("libcobj.jar vendoring",                    "AUTOMATIC", "preserve_runtime() copies from Docker image"),
     ("GnuCOBOL baseline execution",             "AUTOMATIC", "stage_baseline() via Docker"),
     ("Java execution",                           "AUTOMATIC", "stage_execute() via Docker"),
@@ -661,10 +661,10 @@ def main():
 
     write_audit_report(out, audit_data)
 
-    print(f"\nFinal Verdict: {final_verdict['color']} — {final_verdict['verdict']}")
+    print(f"\nFinal Verdict: {final_verdict['color']} - {final_verdict['verdict']}")
     if final_verdict["issues"]:
         for issue in final_verdict["issues"]:
-            print(f"  ⚠️  {issue}")
+            print(f"  [WARN] {issue}")
 
 
 if __name__ == "__main__":
