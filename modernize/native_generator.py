@@ -2394,6 +2394,17 @@ class NativeStatementTranslator:
                 lines.append("programExited = true;")
                 lines.append("return;")
                 return "\n        ".join(lines)
+                
+            elif cics_type == "RETURN":
+                lines.append("try {")
+                lines.append("    com.systema.modernized.CicsTransactionContext.cicsReturn();")
+                lines.append("    eibresp = 0;")
+                lines.append("} catch (Exception e) {")
+                lines.append("    eibresp = 1;")
+                lines.append("}")
+                lines.append("programExited = true;")
+                lines.append("return;")
+                return "\n        ".join(lines)
 
         if stype and self.current_generator is not None:
             node_id = None

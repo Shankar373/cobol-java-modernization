@@ -1,6 +1,6 @@
 {
-  "lexer_seconds": 0.0013112000015098602,
-  "parser_and_ir_seconds": 0.0012563000054797158,
-  "generation_seconds": 0.003900499999872409,
-  "compilation_and_execution_seconds": 3.307416399999056
+  "lexer_seconds": 0.0012777999945683405,
+  "parser_and_ir_seconds": 0.0011793000012403354,
+  "generation_seconds": 0.003952999992179684,
+  "compilation_and_execution_seconds": 5.468016400001943
 }

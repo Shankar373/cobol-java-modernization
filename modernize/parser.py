@@ -2569,7 +2569,7 @@ class CobolParser:
         
         # Verify CICS supported command constraints
         cics_type = cics_props.get("cics_type", "EMPTY").upper()
-        if cics_type not in ("SEND", "RECEIVE", "LINK", "XCTL"):
+        if cics_type not in ("SEND", "RECEIVE", "LINK", "XCTL", "RETURN"):
             raise ParserDiagnostic("CICS_UNSUPPORTED_COMMAND: Unsupported CICS command", self.file_path, tok.line, tok.column, tok.value, "")
             
         if cics_type in ("LINK", "XCTL") and not cics_props.get("program"):

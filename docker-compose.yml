@@ -1,0 +1,39 @@
+services:
+  cobol-modernizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cobol-modernizer:latest
+    container_name: cobol-modernizer
+    ports:
+      - "8787:8787"
+    volumes:
+      # Pipeline output — generated Java, compiled classes, migration reports
+      - workspace:/app/workspace
+      # Maven local repo cache — persists between restarts so deps aren't re-downloaded
+      - maven-cache:/root/.m2
+      # Mount source repos you want to modernize from host into container
+      # Uncomment and point to your COBOL repo:
+      # - C:/path/to/your/cobol-repo:/input:ro
+    environment:
+      # Optional: point to a real DB2 instance
+      # DB2_URL: jdbc:db2://your-db2-host:50000/MYDB
+      # DB2_USER: db2user
+      # DB2_PASSWORD: secret
+      # Optional: CICS endpoint
+      # CICS_HOST: your-cics-host
+      # CICS_PORT: 2006
+      PYTHONUNBUFFERED: "1"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8787/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  workspace:
+    driver: local
+  maven-cache:
+    driver: local

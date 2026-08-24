@@ -1,0 +1,27 @@
+# Generated pipeline output — re-created on each run
+target/
+workspace/
+scratch/
+someout/
+generated/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Git metadata (not needed in image)
+.git/
+.github/
+.gemini/
+
+# Local dev/audit files
+*.log
+audit/
+execution/
+
+# IDE
+.vscode/
+*.iml

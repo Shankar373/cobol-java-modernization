@@ -273,6 +273,19 @@ class EnterpriseApplicationGenerator:
         lines.append("            </plugin>")
         lines.append("        </plugins>")
         lines.append("    </build>")
+        lines.append("    <profiles>")
+        lines.append("        <profile>")
+        lines.append("            <id>db2</id>")
+        lines.append("            <dependencies>")
+        lines.append("                <dependency>")
+        lines.append("                    <groupId>com.ibm.db2</groupId>")
+        lines.append("                    <artifactId>jcc</artifactId>")
+        lines.append("                    <version>11.5.8.0</version>")
+        lines.append("                    <scope>runtime</scope>")
+        lines.append("                </dependency>")
+        lines.append("            </dependencies>")
+        lines.append("        </profile>")
+        lines.append("    </profiles>")
         lines.append("</project>")
         
         path = os.path.join(dest_dir, "pom.xml")
@@ -284,13 +297,13 @@ class EnterpriseApplicationGenerator:
         lines.append("spring.application.name=modernized")
         
         # Always configure datasource so that Spring Boot/Batch/JPA has a valid database definition
-        lines.append("spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE")
-        lines.append("spring.datasource.driverClassName=org.h2.Driver")
-        lines.append("spring.datasource.username=sa")
-        lines.append("spring.datasource.password=")
+        lines.append("spring.datasource.url=${DB2_URL:jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}")
+        lines.append("spring.datasource.driverClassName=${DB2_DRIVER:org.h2.Driver}")
+        lines.append("spring.datasource.username=${DB2_USERNAME:sa}")
+        lines.append("spring.datasource.password=${DB2_PASSWORD:}")
         
         if is_jpa:
-            lines.append("spring.jpa.database-platform=org.hibernate.dialect.H2Dialect")
+            lines.append("spring.jpa.database-platform=${DB2_DIALECT:org.hibernate.dialect.H2Dialect}")
             lines.append("spring.hibernate.ddl-auto=update")
             
         if self._check_batch_evidence():

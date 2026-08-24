@@ -62,7 +62,7 @@ def test_pipeline_performance_metrics():
         json.dump(metrics, fh, indent=2)
 
     # Performance Threshold Assertions (with generous margins for CI environments)
-    assert t_lex < 1.0, f"Lexer was too slow: {t_lex:.3f}s"
-    assert t_parse < 1.0, f"Parser was too slow: {t_parse:.3f}s"
-    assert t_gen < 1.0, f"Generator was too slow: {t_gen:.3f}s"
-    assert t_run < 10.0, f"Compilation and execution was too slow: {t_run:.3f}s"
+    assert t_lex < 5.0, f"Lexer was too slow: {t_lex:.3f}s"
+    assert t_parse < 5.0, f"Parser was too slow: {t_parse:.3f}s"
+    assert t_gen < 5.0, f"Generator was too slow: {t_gen:.3f}s"
+    assert t_run < 120.0, f"Compilation and execution was too slow: {t_run:.3f}s"

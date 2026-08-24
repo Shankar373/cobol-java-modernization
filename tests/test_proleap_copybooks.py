@@ -67,6 +67,17 @@ def test_resolve_invalid_copybook():
         missing = resolve_copybooks_recursively(cob_path, [tmpdir])
         assert "BAD" in missing
 
+def _proleap_jars_available() -> bool:
+    m2 = os.path.join(os.path.expanduser("~"), ".m2", "repository")
+    required = [
+        os.path.join(m2, "com", "fasterxml", "jackson", "core", "jackson-databind",
+                     "2.15.2", "jackson-databind-2.15.2.jar"),
+        os.path.join(m2, "org", "antlr", "antlr4-runtime", "4.7.2", "antlr4-runtime-4.7.2.jar"),
+    ]
+    return all(os.path.exists(p) for p in required)
+
+
+@pytest.mark.skipif(not _proleap_jars_available(), reason="ProLeap runtime JARs not in .m2 cache — run 'mvn dependency:resolve' first")
 def test_copybook_adapter_missing_fails_cleanly():
     with tempfile.TemporaryDirectory() as tmpdir:
         cob_path = os.path.join(tmpdir, "main.cob")
@@ -78,3 +89,4 @@ def test_copybook_adapter_missing_fails_cleanly():
         assert adapter.status == "FAILURE"
         assert ir.status == "FAILURE"
         assert any("PROLEAP_MISSING_COPYBOOK" in d.detail for d in adapter.diagnostics)
+

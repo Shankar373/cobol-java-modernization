@@ -55,3 +55,37 @@ def test_path_traversal_audit():
                     if re.search(r"\bself\.repo\b|\bself\.out\b", content):
                         assert "os.path.abspath" in content or "os.path.realpath" in content, \
                             f"{path} uses repo/out paths but does not seem to normalize them to absolute paths."
+
+def test_ui_endpoints_security():
+    """Verify that secure_resolve_path and branch validation work correctly to prevent traversal and option injection."""
+    from ui import secure_resolve_path
+    import tempfile
+    
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create a mock base dir and file inside it
+        base = os.path.realpath(tmp_dir)
+        safe_file = os.path.join(base, "artifact.txt")
+        with open(safe_file, "w") as fh:
+            fh.write("safe contents")
+            
+        # Resolved target within base must succeed
+        res = secure_resolve_path(base, "artifact.txt")
+        assert res == safe_file
+        
+        # Traversal target must return None
+        res_traversal = secure_resolve_path(base, "../outside.txt")
+        assert res_traversal is None
+        
+        # Absolute path outside base must return None
+        res_abs = secure_resolve_path(base, "/etc/passwd" if os.name != "nt" else "C:/Windows/win.ini")
+        assert res_abs is None
+
+    # Test Git branch option/injection pattern
+    branch_regex = re.compile(r"^[a-zA-Z0-9/._\-]+$")
+    bad_branches = ["-f", "--exec", "feature; rm -rf /", "feature&killall"]
+    for b in bad_branches:
+        assert b.startswith("-") or not branch_regex.match(b)
+        
+    good_branches = ["feature/JIRA-101", "main", "release_v1.0.0"]
+    for b in good_branches:
+        assert not b.startswith("-") and branch_regex.match(b)

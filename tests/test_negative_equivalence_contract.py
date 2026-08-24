@@ -97,3 +97,49 @@ def test_neg_equiv_no_observable_output_stage_compare_routing(blank_pipeline, tm
     assert ne["status"] == "UNVERIFIED"
     assert ne["mode"] == "NO_OBSERVABLE_OUTPUT"
     assert ne["mutations_tested"] == 0
+
+
+def test_compute_verdict_missing_baseline(blank_pipeline):
+    p = blank_pipeline
+    p.state["stages"] = {"transpile": {"status": "done"}}
+    p.set_data("transpile", {"n_ok": 1, "n_total": 1})
+    p.set_data("baseline_files", [])
+    p.set_data("compare", {"topology": "NO_OBSERVABLE_OUTPUT", "checks": []})
+    assert p._compute_verdict() == "EQUIVALENCE_UNVERIFIED"
+
+
+def test_compute_verdict_compilation_failed(blank_pipeline):
+    p = blank_pipeline
+    p.state["stages"] = {"ingest": {"status": "done"}, "transpile": {"status": "error"}}
+    p.set_data("transpile", {"n_ok": 0, "n_total": 1})
+    assert p._compute_verdict() == "PARTIAL"
+
+
+def test_compute_verdict_comparison_failed(blank_pipeline):
+    p = blank_pipeline
+    p.state["stages"] = {"transpile": {"status": "done"}}
+    p.set_data("transpile", {"n_ok": 1, "n_total": 1})
+    p.set_data("baseline_files", ["output.dat"])
+    p.set_data("compare", {
+        "checks": [{"name": "file_contents", "ok": False, "kind": "file", "expected": "A", "actual": "B"}],
+        "rows": [{"file": "output.dat", "verdict": "differ"}]
+    })
+    assert p._compute_verdict() == "FAILED"
+
+
+def test_compute_verdict_gate2_failed(blank_pipeline):
+    p = blank_pipeline
+    p.state["stages"] = {"transpile": {"status": "done"}}
+    p.set_data("transpile", {"n_ok": 1, "n_total": 1})
+    p.set_data("baseline_files", ["output.dat"])
+    p.set_data("compare", {
+        "checks": [{"name": "file_contents", "ok": True, "kind": "file", "expected": "A", "actual": "A"}],
+        "rows": [{"file": "output.dat", "verdict": "match"}]
+    })
+    p.set_data("validate", {"status": "failed"})
+    assert p._compute_verdict() == "FAILED"
+
+
+def test_compute_verdict_skipped_stages(blank_pipeline):
+    p = blank_pipeline
+    assert p._compute_verdict() == "UNVERIFIED"
