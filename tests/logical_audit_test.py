@@ -4,6 +4,11 @@ import sqlite3
 from cobol_migrate import logical_indexed_compare, find_indexed_layout, decode_sqlite_records, dump_indexed_records, compare_logical_records
 
 def test_logical_comparator_verification():
+    import pytest
+    from cobol_migrate import docker_available
+    if not docker_available():
+        pytest.skip("Docker is not available, skipping logical comparator verification test")
+
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     repo = os.path.join(ROOT, "legacy")
     discover_data = {

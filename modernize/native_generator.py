@@ -295,6 +295,32 @@ class NativeExpressionTranslator:
 
         expr_str = self._translate_subscripts(expr_str)
         
+        # Mask substring calls to protect them from operator tokenizer splitting
+        substring_placeholders = {}
+        while True:
+            idx = expr_str.find(".substring(")
+            if idx == -1:
+                break
+            ident_start = idx
+            while ident_start > 0 and (expr_str[ident_start - 1].isalnum() or expr_str[ident_start - 1] in ('_', '-')):
+                ident_start -= 1
+            start_idx = idx + len(".substring(")
+            depth = 1
+            curr = start_idx
+            while curr < len(expr_str) and depth > 0:
+                if expr_str[curr] == '(':
+                    depth += 1
+                elif expr_str[curr] == ')':
+                    depth -= 1
+                curr += 1
+            if depth == 0:
+                full_call = expr_str[ident_start:curr]
+                key = f"\x00SUB{len(substring_placeholders)}\x00"
+                substring_placeholders[key] = full_call
+                expr_str = expr_str[:ident_start] + key + expr_str[curr:]
+            else:
+                break
+
         # Protect array subscript expressions from being split by operator tokenizer.
         # Replace [...] content with placeholders, restore after tokenizing.
         placeholders = {}
@@ -354,6 +380,8 @@ class NativeExpressionTranslator:
         for ph, val in numval_placeholders.items():
             res = res.replace(ph, val)
         for ph, val in mod_placeholders.items():
+            res = res.replace(ph, val)
+        for ph, val in substring_placeholders.items():
             res = res.replace(ph, val)
         return res
 
@@ -1846,6 +1874,7 @@ class NativeStatementTranslator:
         elif stype == "CALL":
             target = props.get("target", "")
             arguments = props.get("arguments", [])
+            returning = props.get("returning")
             
             def get_flat_vars(prog_gen, arg_names):
                 flat = []
@@ -1875,7 +1904,7 @@ class NativeStatementTranslator:
                     cond = "if" if first else "else if"
                     first = False
                     lines.append(f"{cond} (targetProg_{java_var}.equals(\"{other_prog_name.upper()}\")) {{")
-                    call_lines = self._generate_call_block(other_prog_name, other_gen, caller_vars)
+                    call_lines = self._generate_call_block(other_prog_name, other_gen, caller_vars, returning)
                     for cl in call_lines:
                         lines.append(f"    {cl}")
                     lines.append("}")
@@ -1884,7 +1913,7 @@ class NativeStatementTranslator:
                 target_upper = target.strip('"').strip("'").upper()
                 if target_upper in self.all_generators:
                     other_gen = self.all_generators[target_upper]
-                    call_lines = self._generate_call_block(target_upper, other_gen, caller_vars)
+                    call_lines = self._generate_call_block(target_upper, other_gen, caller_vars, returning)
                     return "\n        ".join(call_lines)
                 else:
                     target_clean = target.strip('"').strip("'").upper()
@@ -2498,7 +2527,7 @@ class NativeStatementTranslator:
                     return f"{_jv}{sub}.compareTo({r_val}) {map_ops.get(op, op)}"
                 cond = re.sub(pattern, repl_bd, cond)
             elif t == "String":
-                pattern = r'\b' + re.escape(jv) + r'(\[[^\]]+\]|\.substring\([^)]+\))?\s*(==|!=)\s*(\"[^\"]*\"|\'[^\']*\'|[A-Za-z0-9_\-\.]+)'
+                pattern = r'\b' + re.escape(jv) + r'(\[[^\]]+\]|\.substring\((?:[^()]+|\([^()]*\))*\))?\s*(==|!=)\s*(\"[^\"]*\"|\'[^\']*\'|[A-Za-z0-9_\-\.]+)'
                 def repl_str(match, _jv=jv):
                     sub = match.group(1) or ""
                     op = match.group(2)
@@ -2518,7 +2547,7 @@ class NativeStatementTranslator:
                 cond = re.sub(pattern, f"get_{to_java_var(v)}()", cond)
         return cond
 
-    def _generate_call_block(self, target_name: str, target_gen, caller_vars: list) -> list:
+    def _generate_call_block(self, target_name: str, target_gen, caller_vars: list, returning: str = None) -> list:
         self.call_counter += 1
         suffix = f"_{self.call_counter}"
         target_vars = []
@@ -2551,6 +2580,9 @@ class NativeStatementTranslator:
                 
         lines.append(f"{var_name}.execute();")
         lines.append(f"return_code = {var_name}.return_code;")
+        if returning:
+            ret_jvar = to_java_var(returning)
+            lines.append(f"{ret_jvar} = {var_name}.return_code;")
         
         for i, c_var in enumerate(caller_vars):
             if i < len(target_vars):
@@ -3074,7 +3106,7 @@ class NativeProgramGenerator:
             
         self.ir_nodes = program_nodes.get(self.program_name.upper(), ir_nodes)
         
-        self.var_types = {"RETURN-CODE": "int"}
+        self.var_types = {"RETURN-CODE": "Integer"}
         self.var_pics = {}
         self.var_edited = {}
         self.fd_fields = {}
@@ -3726,8 +3758,8 @@ class NativeProgramGenerator:
                 if initial_val.upper() in ("ZERO", "ZEROS", "ZEROES"):
                     if java_type == "BigDecimal":
                         lines.append(f"    public BigDecimal {java_var} = BigDecimal.ZERO;")
-                    elif java_type in ("Integer", "Long"):
-                        t_prim = "int" if java_type == "Integer" else "long"
+                    elif java_type in ("Integer", "Long", "int", "long"):
+                        t_prim = "int" if java_type in ("Integer", "int") else "long"
                         lines.append(f"    public {t_prim} {java_var} = 0;")
                     else:
                         pic = self.var_pics.get(v, "")
@@ -3752,11 +3784,11 @@ class NativeProgramGenerator:
                     
                     if java_type == "BigDecimal":
                         lines.append(f"    public BigDecimal {java_var} = new BigDecimal(\"{initial_val}\");")
-                    elif java_type in ("Integer", "Long"):
+                    elif java_type in ("Integer", "Long", "int", "long"):
                         cleaned_val = re.sub(r'[^\d\-]', '', initial_val)
                         if not cleaned_val:
                             cleaned_val = "0"
-                        t_prim = "int" if java_type == "Integer" else "long"
+                        t_prim = "int" if java_type in ("Integer", "int") else "long"
                         lines.append(f"    public {t_prim} {java_var} = {cleaned_val};")
                     else:
                         pic = self.var_pics.get(v, "")
@@ -3769,8 +3801,8 @@ class NativeProgramGenerator:
             else:
                 if java_type == "BigDecimal":
                     lines.append(f"    public BigDecimal {java_var} = BigDecimal.ZERO;")
-                elif java_type in ("Integer", "Long"):
-                    t_prim = "int" if java_type == "Integer" else "long"
+                elif java_type in ("Integer", "Long", "int", "long"):
+                    t_prim = "int" if java_type in ("Integer", "int") else "long"
                     lines.append(f"    public {t_prim} {java_var} = 0;")
                 else:
                     pic = self.var_pics.get(v, "")

@@ -1436,6 +1436,11 @@ class CobolParser:
                     tok = self.consume_val("Expected USING argument name")
                     args.append(tok.value)
             
+            returning_val = None
+            if self.match("KEYWORD", "RETURNING") or self.match("KEYWORD", "GIVING"):
+                ret_tok = self.consume_val("Expected returning identifier")
+                returning_val = ret_tok.value
+            
             self.match("PUNCTUATION", ".")
             
             node = SemanticIRNode(
@@ -1444,7 +1449,8 @@ class CobolParser:
                 properties={
                     "statement_type": "CALL",
                     "target": tgt_tok.value,
-                    "arguments": args
+                    "arguments": args,
+                    "returning": returning_val
                 },
                 source_file=self.file_path,
                 source_line=start_tok.line,

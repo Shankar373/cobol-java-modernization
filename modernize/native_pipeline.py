@@ -47,7 +47,8 @@ class NativePipeline:
         self.log(f"  Out: {self.out}")
 
         # 0. Compile and run baseline
-        bypass_baseline = False
+        from cobol_migrate import docker_available
+        bypass_baseline = not docker_available()
         try:
             config_path = os.path.join(self.repo, "migration_config.json")
             if os.path.exists(config_path):

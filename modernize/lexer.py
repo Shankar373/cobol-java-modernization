@@ -63,7 +63,7 @@ class CobolLexer:
                 free_signals += 1
             elif len(line) > 72:
                 free_signals += 1
-        return "fixed" if fixed_signals >= free_signals else "free"
+        return "fixed" if fixed_signals > free_signals else "free"
 
     def preprocess_copybooks(self, text: str) -> str:
         # Regex to match COPY statements (with or without quotes/dots/directories/extensions)

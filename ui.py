@@ -163,9 +163,8 @@ def start_run(run_id, restart_from):
         emit_run_event(run, event_type, **kwargs)
 
     def worker():
-        # Set sinks globally for this single active execution thread
-        engine.LOG_SINK = sink
-        engine.EVENT_SINK = event_sink
+        engine.set_log_sink(sink)
+        engine.set_event_sink(event_sink)
         
         p = None
         try:
@@ -201,8 +200,8 @@ def start_run(run_id, restart_from):
         finally:
             with LOCK:
                 run.pop("pipeline", None)
-                engine.LOG_SINK = None
-                engine.EVENT_SINK = None
+                engine.set_log_sink(None)
+                engine.set_event_sink(None)
                 
             for idx, (lab, _) in enumerate(STEP_LABELS):
                 st = engine.load_json(os.path.join(run["out"], "state.json"), {}).get("stages", {})
@@ -341,6 +340,29 @@ def ingest(payload):
 
 # ---------------------------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
+    def check_auth(self):
+        auth_env = os.environ.get("UI_AUTH_CREDENTIALS")
+        if not auth_env:
+            return True
+        auth_hdr = self.headers.get("Authorization")
+        if not auth_hdr or not auth_hdr.startswith("Basic "):
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="COBOL Modernization Platform"')
+            self.end_headers()
+            self.wfile.write(b"Unauthorized")
+            return False
+        try:
+            auth_val = base64.b64decode(auth_hdr[6:].encode("ascii")).decode("ascii")
+            if auth_val == auth_env:
+                return True
+        except Exception:
+            pass
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="COBOL Modernization Platform"')
+        self.end_headers()
+        self.wfile.write(b"Unauthorized")
+        return False
+
     def _send(self, code, body, ctype="application/json; charset=utf-8", binary=False):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -352,6 +374,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode("utf-8"))
 
     def do_GET(self):
+        if not self.check_auth():
+            return
         u = urllib.parse.urlparse(self.path)
         if u.path in ("/", "/index.html"):
             with open(os.path.join(ROOT, "ui.html"), "rb") as fh:
@@ -586,8 +610,13 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found")
 
     def do_POST(self):
+        if not self.check_auth():
+            return
         u = urllib.parse.urlparse(self.path)
         length = int(self.headers.get("Content-Length", 0))
+        if length > 30 * 1024 * 1024:
+            self._json({"ok": False, "error": "payload exceeds maximum limit of 20MB"}, 400)
+            return
         body = self.rfile.read(length)
         try:
             payload = json.loads(body.decode("utf-8"))

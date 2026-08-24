@@ -38,6 +38,11 @@ class TestParagraphSlicer(unittest.TestCase):
 
         # 4. Compile check using GnuCOBOL container to ensure syntax validity
         # Mount output_dir to /target, run cobc syntactical compile check
+        from cobol_migrate import docker_available
+        if not docker_available():
+            print("  [SKIP] Docker not available, skipping container compilation checks")
+            return
+            
         cobj_img = "hurriedreformist/gnucobol:3.1-builder"
         
         # Run syntactical check: cobc -fsyntax-only <file>

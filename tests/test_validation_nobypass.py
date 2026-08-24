@@ -9,6 +9,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cobol_migrate import Pipeline
 
 def test_validation_gate2_no_bypass_on_mismatch():
+    from cobol_migrate import docker_available
+    if not docker_available():
+        pytest.skip("Docker is not available, skipping Gate 2 validation bypass test")
+        
     temp_repo = tempfile.mkdtemp()
     temp_out = tempfile.mkdtemp()
     
