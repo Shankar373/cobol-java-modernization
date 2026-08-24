@@ -4438,7 +4438,7 @@ class Pipeline:
         compile_status = "Generated successfully"
         if mvn:
             self.log("    running Maven compile check...")
-            r = sh([mvn, "-o", "clean", "compile"], cwd=mod_dir)
+            r = sh([mvn, "-o", "clean", "compile"], cwd=mod_dir, timeout=240)
             if r.returncode == 0:
                 self.log("    [PASS] Spring Boot Maven project compiled successfully")
                 compile_status = "Generated and compiled successfully"
@@ -4492,7 +4492,7 @@ class Pipeline:
             return False, msg, []
 
         self.log("    Building modernized Spring Boot package for Gate 2 validation...")
-        r = sh([mvn, "-o", "clean", "package", "-DskipTests"], cwd=mod_dir)
+        r = sh([mvn, "-o", "clean", "package", "-DskipTests"], cwd=mod_dir, timeout=240)
         if r.returncode != 0:
             self.log("    [FAIL] Maven build/package failed for validation. Error:")
             self.log((r.stdout or "")[-1200:])
