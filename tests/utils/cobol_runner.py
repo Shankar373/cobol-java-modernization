@@ -97,7 +97,7 @@ public class JclExecutionContext {
             ["javac", os.path.join(jcl_context_dir, "JclExecutionContext.java")],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=180
         )
         
         # Write and compile CobolFormatHelper.java to prevent compilation failures for programs with complex PICTURE editing
@@ -109,7 +109,7 @@ public class JclExecutionContext {
             ["javac", os.path.join(jcl_context_dir, "CobolFormatHelper.java")],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=180
         )
         
         # Write input files if any
@@ -138,7 +138,7 @@ public class JclExecutionContext {
             ["javac", "-cp", temp_dir, src_file],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=180
         )
         if compile_res.returncode != 0:
             raise RuntimeError(f"Java compilation failed:\n{compile_res.stderr}\nSource:\n{adjusted_java_source}")
@@ -148,7 +148,7 @@ public class JclExecutionContext {
             ["java", "-cp", temp_dir, f"com.systema.modernized.native_gen.{program_name.capitalize()}"],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=180
         )
         
         if return_full:

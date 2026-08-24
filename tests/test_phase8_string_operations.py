@@ -127,3 +127,53 @@ def test_inspect_converting():
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
     assert "CONV: XBYDZFG" in lines
+
+def test_initialize_statement():
+    code = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INIT1.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP.
+          05 WS-STR  PIC X(5) VALUE "HELLO".
+          05 WS-NUM  PIC 9(3) VALUE 123.
+       PROCEDURE DIVISION.
+           INITIALIZE WS-GROUP.
+           DISPLAY "STR:" WS-STR ":NUM:" WS-NUM.
+           GOBACK.
+    """
+    ret, stdout, stderr, java_src, outputs = run_cobol_code("INIT1", code)
+    assert ret == 0
+    lines = [l.strip() for l in stdout.strip().splitlines()]
+    assert "STR:       :NUM: 000" in lines
+
+def test_exit_program_statement():
+    code = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MAINPROG.
+       PROCEDURE DIVISION.
+           DISPLAY "BEFORE CALL".
+           CALL "SUBPROG".
+           DISPLAY "AFTER CALL".
+           GOBACK.
+       END PROGRAM MAINPROG.
+
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUBPROG.
+       PROCEDURE DIVISION.
+       MAIN-SUB.
+           DISPLAY "BEFORE EXIT".
+           PERFORM EXIT-PARA.
+           DISPLAY "AFTER EXIT".
+           GOBACK.
+       EXIT-PARA.
+           EXIT PROGRAM.
+       END PROGRAM SUBPROG.
+    """
+    ret, stdout, stderr, java_src, outputs = run_cobol_code("MAINPROG", code)
+    assert ret == 0
+    lines = [l.strip() for l in stdout.strip().splitlines()]
+    assert "BEFORE CALL" in lines
+    assert "BEFORE EXIT" in lines
+    assert "AFTER CALL" in lines
+    assert "AFTER EXIT" not in lines

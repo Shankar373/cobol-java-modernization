@@ -97,6 +97,16 @@ def run_db2_pipeline_e2e(repo_name, expected_stdout):
         verdict = p.run()
         
         # Verify NativePipeline returned success
+        if verdict != "NATIVE_JAVA_VERIFIED":
+            print(f"FAILED VERDICT: {verdict}")
+            b_path = os.path.join(temp_out, "baseline", "legacy", "stdout.txt")
+            n_path = os.path.join(temp_out, "results", "native", "stdout.txt")
+            print(f"Baseline path exists: {os.path.exists(b_path)}")
+            print(f"Native path exists: {os.path.exists(n_path)}")
+            if os.path.exists(b_path):
+                print(f"--- BASELINE --- \n{open(b_path).read()}")
+            if os.path.exists(n_path):
+                print(f"--- NATIVE --- \n{open(n_path).read()}")
         assert verdict == "NATIVE_JAVA_VERIFIED", f"Pipeline failed. Check temp out: {temp_out}"
         
         # Double check that the execution observation exists and was captured

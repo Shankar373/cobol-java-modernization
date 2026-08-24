@@ -74,7 +74,7 @@ def test_jcl_pipeline_e2e():
             try:
                 mvn_exe = "mvn.cmd" if os.name == "nt" else "mvn"
                 subprocess.run([
-                    mvn_exe, "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
+                    mvn_exe, "-o", "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
                 ], cwd=pipeline.generated_dir, capture_output=True, text=True)
                 if os.path.exists(cp_file):
                     with open(cp_file, "r", encoding="utf-8") as fh:
@@ -85,7 +85,9 @@ def test_jcl_pipeline_e2e():
                 pass
                 
             # Run the compiled JCL Job main class
-            tgt_input = os.path.join(pipeline.generated_dir, "MY.INPUT.DATA")
+            results_dir = os.path.join(out_dir, "results", "native")
+            os.makedirs(results_dir, exist_ok=True)
+            tgt_input = os.path.join(results_dir, "MY.INPUT.DATA")
             shutil.copy2(input_file, tgt_input)
             
             res = subprocess.run([
@@ -111,9 +113,9 @@ def test_jcl_pipeline_e2e():
             
             # Verify data resolution equivalence across steps
             # Target output files: in repo since JclExecutionContext.setDdAssignment resolves them
-            output_data = os.path.join(pipeline.generated_dir, "MY.OUTPUT.DATA")
-            report_data = os.path.join(pipeline.generated_dir, "MY.REPORT.DATA")
-            final_data = os.path.join(pipeline.generated_dir, "MY.FINAL.DATA")
+            output_data = os.path.join(results_dir, "MY.OUTPUT.DATA")
+            report_data = os.path.join(results_dir, "MY.REPORT.DATA")
+            final_data = os.path.join(results_dir, "MY.FINAL.DATA")
             
             assert os.path.exists(output_data), "MY.OUTPUT.DATA was not created"
             assert os.path.exists(report_data), "MY.REPORT.DATA was not created"

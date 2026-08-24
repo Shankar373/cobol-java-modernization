@@ -147,7 +147,12 @@ def test_e2e_modernization_lifecycle(test_server, minimal_cobol_zip):
         if manifest_node.count() > 0:
             manifest_node.first.click()
             page.wait_for_selector("#explorerCodeWindow")
-            code_text = page.locator("#explorerCodeWindow").inner_text()
+            # Wait for content to load
+            for _ in range(50):
+                code_text = page.locator("#explorerCodeWindow").inner_text()
+                if "Retrieving file content..." not in code_text:
+                    break
+                page.wait_for_timeout(100)
             assert "verdict" in code_text or "stages" in code_text
             
         # --- 7. Responsive layout checks ---

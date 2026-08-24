@@ -2,14 +2,14 @@
   "engine": "opensource COBOL 4J",
   "engine_version": "opensourcecobol/opensourcecobol4j:2.0.0",
   "engine_digest": "opensourcecobol/opensourcecobol4j@sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a",
-  "generated_at": "2026-08-21T04:16:08+00:00",
+  "generated_at": "2026-08-23T14:58:29+00:00",
   "entry_point": "CCMAIN01",
   "format": "free",
   "programs": [
     {
       "source": "src/CCLEGACYX.cob",
       "program_id": "CCLEGACYX",
-      "source_hash": "791f1b6774f34ba524ebaa4eb2c1ceb59e8ecec53db25eb36d190c88f17f5276",
+      "source_hash": "aa288dfd01ef5ae35cf50c349ff73b8fea663617acb0c871b8614e52209619ce",
       "transpiled": true,
       "java_file": "CCLEGACYX.java",
       "java_hash": "fa8500c49643cc3962f0690b85b888bb2816cb031377f7f3b87cbfa835ebac93",
@@ -19,7 +19,7 @@
     {
       "source": "src/CCLOAD01.cob",
       "program_id": "CCLOAD01",
-      "source_hash": "448abf1fa5aff4b6d9b238463017264634ac4308e2fbe139af96c6c3da49c6c8",
+      "source_hash": "989708dcf1ca542e418bc80b48cc62577ae932fa7271cb0fbdb9f9558e17452c",
       "transpiled": true,
       "java_file": "CCLOAD01.java",
       "java_hash": "b8b635b4e268726fcc09ce2282b368a477f4226f059e213caa9a09a364fece53",
@@ -29,7 +29,7 @@
     {
       "source": "src/CCMAIN01.cob",
       "program_id": "CCMAIN01",
-      "source_hash": "c4afcb139c81bdace03f328376e7908bcef7ac1eb7d586ed7df8d2c712c016ee",
+      "source_hash": "d74d2ebf95260dcba84d5a4b9e4ae258db6caa407dc64b62a4dc469f24c39a06",
       "transpiled": true,
       "java_file": "CCMAIN01.java",
       "java_hash": "414f709391ab3a66699fc8da2a87bcccc748a0cad9f3ea8f2c2d25ac8de74ac1",
@@ -39,7 +39,7 @@
     {
       "source": "src/CCPROC01.cob",
       "program_id": "CCPROC01",
-      "source_hash": "3ac7548dab0e790f97a7831851acce06296a12b7031a16a73e09050a78481da2",
+      "source_hash": "a30343c37e0de18b20d2a95af385eff285bc5a9c8bcf3176e9ad88bf9193c715",
       "transpiled": true,
       "java_file": "CCPROC01.java",
       "java_hash": "afdec60e88cfca55b1a5bf774bd281299d05e9c23adb0bc8d25f9573de5d373a",
@@ -49,7 +49,7 @@
     {
       "source": "src/CCREPT01.cob",
       "program_id": "CCREPT01",
-      "source_hash": "2113d2b5fb3845ac811744840e546523ad4cef72f0a41e49a2a96418c8a20085",
+      "source_hash": "2fcc5adcb69ed6c66ffc9e9a2016419f4b721bfb690eea2cb52d89c85071bd7b",
       "transpiled": true,
       "java_file": "CCREPT01.java",
       "java_hash": "3840cfe041a17ab78e94d63a2ff4989b9818dc6e81739f3cfcc5fcc54ddb1a9a",
@@ -109,8 +109,8 @@
       }
     },
     "roots": [
-      "CCMAIN01",
-      "CCLEGACYX"
+      "CCLEGACYX",
+      "CCMAIN01"
     ],
     "dynamic_callers": []
   },

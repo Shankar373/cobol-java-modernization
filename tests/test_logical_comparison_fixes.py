@@ -42,7 +42,7 @@ class TestLogicalComparisonPropagation:
             ]
         })
         v = p._compute_verdict()
-        assert v == "PASS_WITH_LIMITATIONS"
+        assert v == "VERIFIED_WITH_LIMITATIONS"
 
     def test_physical_diff_logical_mismatch(self, blank_pipeline):
         """Physical difference + Logical Mismatch -> FAILED"""
@@ -136,6 +136,6 @@ class TestUiStatusMappings:
             "repo": "somerepo",
             "out": "someout"
         }
-        monkeypatch.setattr(cm.Pipeline, "_compute_verdict", lambda self: "PASS_WITH_LIMITATIONS")
+        monkeypatch.setattr(cm.Pipeline, "_compute_verdict", lambda self: "VERIFIED_WITH_LIMITATIONS")
         verd = ui.get_run_verdict(run)
-        assert verd == "PASS_WITH_LIMITATIONS"
+        assert verd == "VERIFIED_WITH_LIMITATIONS"

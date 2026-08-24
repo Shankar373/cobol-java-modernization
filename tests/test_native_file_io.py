@@ -15,9 +15,9 @@ def test_generate_io_methods_input():
     
     assert "private BufferedReader file_a_reader;" in res
     assert "file_a_reader = Files.newBufferedReader(Paths.get(resolve_path_file_a()));" in res
-    assert "field_a = val;" in res
-    assert "field_b = val.isEmpty() ? 0 : Integer.parseInt(val);" in res
-    assert "field_c = val.isEmpty() ? BigDecimal.ZERO : new BigDecimal(val).movePointLeft(2);" in res
+    assert "field_a = val_field_a;" in res
+    assert "field_b = val_field_b.isEmpty() ? 0 : Integer.parseInt(val_field_b);" in res
+    assert "field_c = val_field_c.isEmpty() ? BigDecimal.ZERO : new BigDecimal(val_field_c).movePointLeft(2);" in res
 
 def test_generate_io_methods_output():
     record_fields = [

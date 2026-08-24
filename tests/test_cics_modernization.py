@@ -52,7 +52,7 @@ def test_cics_pipeline_e2e():
                 try:
                     mvn_exe = "mvn.cmd" if os.name == "nt" else "mvn"
                     subprocess.run([
-                        mvn_exe, "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
+                        mvn_exe, "-o", "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
                     ], cwd=pipeline.generated_dir, capture_output=True, text=True)
                     if os.path.exists(cp_file):
                         with open(cp_file, "r", encoding="utf-8") as fh:

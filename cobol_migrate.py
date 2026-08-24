@@ -3905,7 +3905,8 @@ class Pipeline:
         # Extract Database state observation if logically compared SQLite exists
         logical_results = {}
         for f in sorted(set(baseline_files.keys()) & set(results_files.keys())):
-            if is_binary(baseline_files[f]) or is_binary(results_files[f]):
+            schema = find_indexed_layout(self.repo, self.data("discover"), f)
+            if schema:
                 result_path = os.path.join(results_dir, f)
                 baseline_path = os.path.join(baseline_dir, f)
                 if os.path.isfile(result_path) and os.path.isfile(baseline_path):
@@ -4416,7 +4417,7 @@ class Pipeline:
                 parser = CobolParser(tokens, os.path.join(self.repo, src))
                 ir = parser.parse()
                 prog_assigns = d.get("file_assigns", {}).get(src, [])
-                gen = NativeProgramGenerator(prog_id, list(ir.nodes.values()), file_assigns=prog_assigns)
+                gen = NativeProgramGenerator(prog_id, list(ir.nodes.values()), file_assigns=prog_assigns, repo_path=self.repo)
                 all_generators[prog_id] = gen
             except Exception as e:
                 self.log(f"    [WARN] Failed to pre-generate parser/generator for {src}: {e}")
@@ -4437,7 +4438,7 @@ class Pipeline:
         compile_status = "Generated successfully"
         if mvn:
             self.log("    running Maven compile check...")
-            r = sh([mvn, "clean", "compile"], cwd=mod_dir)
+            r = sh([mvn, "-o", "clean", "compile"], cwd=mod_dir)
             if r.returncode == 0:
                 self.log("    [PASS] Spring Boot Maven project compiled successfully")
                 compile_status = "Generated and compiled successfully"
@@ -4491,7 +4492,7 @@ class Pipeline:
             return False, msg, []
 
         self.log("    Building modernized Spring Boot package for Gate 2 validation...")
-        r = sh([mvn, "clean", "package", "-DskipTests"], cwd=mod_dir)
+        r = sh([mvn, "-o", "clean", "package", "-DskipTests"], cwd=mod_dir)
         if r.returncode != 0:
             self.log("    [FAIL] Maven build/package failed for validation. Error:")
             self.log((r.stdout or "")[-1200:])
@@ -4620,7 +4621,7 @@ class Pipeline:
                 # The app has a web server (Tomcat) so it won't exit on its own.
                 # Detect batch completion from the application log instead.
                 job_completed = False
-                for _ in range(120): # ~60s ceiling
+                for _ in range(240): # ~120s ceiling
                     if getattr(self, "cancelled", False):
                         raise KeyboardInterrupt("Pipeline execution cancelled by user.")
                     rc = proc.poll()
@@ -4775,7 +4776,7 @@ class Pipeline:
 
             job_completed = False
             job_terminal = None
-            for _ in range(120):          # ~60 s hard ceiling
+            for _ in range(240):          # ~120 s hard ceiling
                 if getattr(self, "cancelled", False):
                     raise KeyboardInterrupt("Pipeline execution cancelled by user.")
                 rc = proc.poll()
@@ -5507,6 +5508,20 @@ class Pipeline:
         if not done_stages:
             return "UNVERIFIED"
 
+        # Check for unsupported diagnostics
+        diag_path = os.path.join(self.out, "generated", "native_translation_diagnostics.json")
+        if not os.path.exists(diag_path):
+            diag_path = os.path.join(os.path.dirname(self.out), "target", "generated", "native_translation_diagnostics.json")
+        if os.path.exists(diag_path):
+            try:
+                with open(diag_path, "r", encoding="utf-8") as fh:
+                    diags = json.load(fh)
+                    for d in diags:
+                        if d.get("status") == "NATIVE_TRANSLATION_BLOCKED" or d.get("severity") == "ERROR":
+                            return "UNSUPPORTED"
+            except Exception:
+                pass
+
         legacy = self.data("legacy", {})
         if legacy.get("status") == "BASELINE_UNPRODUCIBLE":
             return "BASELINE_UNPRODUCIBLE"
@@ -5588,7 +5603,7 @@ class Pipeline:
             return "UNVERIFIED"
 
         if has_logical_match_diff:
-            return "PASS_WITH_LIMITATIONS"
+            return "VERIFIED_WITH_LIMITATIONS"
 
         # Limitations check
         refactor_data = self.data("refactor", {})
@@ -6013,6 +6028,8 @@ def main():
     ap.add_argument("--slice-out", default=None, help="Output sliced sub-program path")
     ap.add_argument("--native-java", action="store_true",
                     help="Run independent native Java transpilation pipeline instead of Phase 4 emulation")
+    ap.add_argument("--parser", choices=["custom", "proleap", "compare"], default="custom",
+                    help="COBOL parser to use (custom, proleap, compare)")
     args = ap.parse_args()
 
     for stream in (sys.stdout, sys.stderr):
@@ -6046,7 +6063,10 @@ def main():
         _repo = os.path.abspath(args.repo or os.path.join(ROOT, "legacy"))
         _out = os.path.abspath(args.out or os.path.join(ROOT, "target", "native_out"))
         from modernize.native_pipeline import NativePipeline
-        result = NativePipeline(_repo, _out).run()
+        if args.parser == "custom":
+            result = NativePipeline(_repo, _out).run()
+        else:
+            result = NativePipeline(_repo, _out, parser_choice=args.parser).run()
         print(f"PIPELINE_RESULT: {result}")
         sys.exit(0 if result == "NATIVE_JAVA_VERIFIED" else 2)
 

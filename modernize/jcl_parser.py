@@ -265,9 +265,11 @@ class JclParser:
             return text
         resolved = text
         
+        # Protect double ampersands (&&) from being matched as symbol references
+        placeholder = "\u0000JCL_TEMP_DSN\u0000"
+        resolved = resolved.replace("&&", placeholder)
+        
         # Resolve patterns like &VAR. or &VAR
-        # Verify if unresolved symbols exist
-        # Perform replacements for known symbols
         for sym_name, sym_val in sorted(self.symbols.items(), key=lambda x: len(x[0]), reverse=True):
             if isinstance(sym_val, str):
                 resolved = resolved.replace(f"&{sym_name}.", sym_val)
@@ -278,6 +280,9 @@ class JclParser:
         if unresolved:
             for u in unresolved:
                 self.log_diag("NATIVE_TRANSLATION_BLOCKED", "SYMBOL", f"JCL_UNRESOLVED_SYMBOL: Unresolved symbol reference &{u}")
+                
+        # Restore double ampersands
+        resolved = resolved.replace(placeholder, "&&")
         return resolved
 
     def parse_cond_param(self, cond_val, line_num):
@@ -579,8 +584,10 @@ class JclParser:
             if k_upper not in ("PGM", "PROC", "COND"):
                 merged_args[k_upper] = v
                 
-        # Define local JclParser with local symbols
+        # Define local JclParser with local symbols inheriting global symbols
         local_parser = JclParser("", self.repo_dir)
+        for k, v in self.symbols.items():
+            local_parser.symbols[k] = v
         for k, v in merged_args.items():
             local_parser.symbols[k] = v
             

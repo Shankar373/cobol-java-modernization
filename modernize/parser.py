@@ -96,7 +96,8 @@ STATEMENT_START_VERBS = {
     "REWRITE", "OPEN", "CLOSE", "STOP", "GOBACK", "IF", "ELSE", "END-IF", "THEN",
     "EVALUATE", "WHEN", "END-EVALUATE", "STRING", "END-READ",
     "DISPLAY", "INITIALIZE", "EXIT", "END-PERFORM", "GO", "CONTINUE", "NEXT",
-    "UNSTRING", "INSPECT", "END-UNSTRING", "SORT", "MERGE", "RELEASE", "RETURN", "SET", "INITIATE", "GENERATE", "TERMINATE"
+    "UNSTRING", "INSPECT", "END-UNSTRING", "SORT", "MERGE", "RELEASE", "RETURN", "SET", "INITIATE", "GENERATE", "TERMINATE",
+    "DELETE", "START", "END-DELETE", "END-START"
 }
 
 def is_tok_statement_start(tok) -> bool:
@@ -107,7 +108,7 @@ def is_tok_statement_start(tok) -> bool:
 
 class CobolParser:
     def __init__(self, tokens: list, file_path: str):
-        self.tokens = tokens
+        self.tokens = [t for t in tokens if t.type != "COMMENT"]
         self.file_path = file_path
         self.current = 0
         self.diagnostics = []
@@ -860,7 +861,9 @@ class CobolParser:
             self.consume("KEYWORD", "TO", "Expected TO keyword")
             # Collect all targets (MOVE X TO A B C)
             targets = []
-            while self.check("IDENTIFIER"):
+            while self.check("IDENTIFIER") or self.check("PUNCTUATION", ","):
+                if self.match("PUNCTUATION", ","):
+                    continue
                 targets.append(self.consume_subscripted_identifier())
             if not targets:
                 tgt_val = self.consume_subscripted_identifier("Expected target identifier")
@@ -1139,6 +1142,20 @@ class CobolParser:
                 if self.match("KEYWORD", "THRU"):
                     thru_tok = self.consume("IDENTIFIER", None, "Expected THRU paragraph name")
                     props["thru"] = thru_tok.value
+                
+                if self.match("KEYWORD", "UNTIL"):
+                    cond_parts = []
+                    while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                        tok = self.peek()
+                        if is_tok_statement_start(tok):
+                            break
+                        self.current += 1
+                        if tok.type == "LITERAL_STRING":
+                            cond_parts.append(f'"{tok.value}"')
+                        else:
+                            cond_parts.append(tok.value)
+                    props["statement_type"] = "PERFORM_UNTIL_OUT"
+                    props["condition"] = " ".join(cond_parts)
             
             self.match_statement_period()
             
@@ -1245,6 +1262,8 @@ class CobolParser:
                     break
                 if is_tok_statement_start(peek_tok):
                     break
+                if self.match("PUNCTUATION", ","):
+                    continue
                 tgt_tok = self.consume("IDENTIFIER", None, "Expected target identifier in UNSTRING")
                 targets.append(tgt_tok.value)
                 
@@ -1436,7 +1455,7 @@ class CobolParser:
             )
             self.ir.add_node(node)
 
-        elif self.match("KEYWORD", "READ") or self.match("KEYWORD", "WRITE") or self.match("KEYWORD", "REWRITE"):
+        elif self.match("KEYWORD", "READ") or self.match("KEYWORD", "WRITE") or self.match("KEYWORD", "REWRITE") or self.match("KEYWORD", "DELETE") or self.match("KEYWORD", "START"):
             op = self.peek(-1).value.upper()
             file_tok = self.consume("IDENTIFIER", None, f"Expected file identifier after {op}")
             
@@ -1446,16 +1465,49 @@ class CobolParser:
             not_at_end_nodes = []
             invalid_key_nodes = []
             not_invalid_key_nodes = []
+            key_operator = None
+            key_name = None
+            is_next = False
             
             if op in ("WRITE", "REWRITE") and self.match("KEYWORD", "FROM"):
                 from_tok = self.consume_val("Expected source identifier/literal after FROM")
                 from_source = from_tok.value
             elif op == "READ":
+                if self.match("KEYWORD", "NEXT"):
+                    is_next = True
                 if self.match("KEYWORD", "INTO"):
                     into_tok = self.consume("IDENTIFIER", None, "Expected target identifier after INTO")
                     into_target = into_tok.value
+                if self.match("KEYWORD", "NEXT"):
+                    is_next = True
+            elif op == "DELETE":
+                self.match("KEYWORD", "RECORD")
+            elif op == "START":
+                if self.match("KEYWORD", "KEY"):
+                    self.match("KEYWORD", "IS")
+                    if self.match("KEYWORD", "EQUAL"):
+                        self.match("KEYWORD", "TO")
+                        key_operator = "="
+                    elif self.match("PUNCTUATION", "="):
+                        key_operator = "="
+                    elif self.match("KEYWORD", "GREATER"):
+                        self.match("KEYWORD", "THAN")
+                        key_operator = ">"
+                    elif self.match("PUNCTUATION", ">"):
+                        key_operator = ">"
+                    elif self.match("KEYWORD", "NOT"):
+                        self.consume("KEYWORD", "LESS")
+                        self.match("KEYWORD", "THAN")
+                        key_operator = ">="
+                    elif self.match("PUNCTUATION", ">="):
+                        key_operator = ">="
+                    else:
+                        raise ParserDiagnostic("Expected relation operator in START KEY clause", self.file_path, self.peek().line, self.peek().column, self.peek().value, "START statement")
                     
-            # Parse clauses for all READ/WRITE/REWRITE
+                    key_tok = self.consume("IDENTIFIER", None, "Expected key variable identifier in START statement")
+                    key_name = key_tok.value
+                    
+            # Parse clauses for all READ/WRITE/REWRITE/DELETE/START
             in_at_end = False
             in_not_at_end = False
             in_invalid_key = False
@@ -1556,6 +1608,19 @@ class CobolParser:
                             if self.match("KEYWORD", "THRU"):
                                 thru_tok = self.consume("IDENTIFIER", None, "Expected THRU paragraph name")
                                 props["thru"] = thru_tok.value
+                            if self.match("KEYWORD", "UNTIL"):
+                                cond_parts = []
+                                while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                                    tok = self.peek()
+                                    if is_tok_statement_start(tok):
+                                        break
+                                    self.current += 1
+                                    if tok.type == "LITERAL_STRING":
+                                        cond_parts.append(f'"{tok.value}"')
+                                    else:
+                                        cond_parts.append(tok.value)
+                                props["statement_type"] = "PERFORM_UNTIL_OUT"
+                                props["condition"] = " ".join(cond_parts)
                             stmt_node = SemanticIRNode(
                                 node_id=self.next_node_id(),
                                 kind="STATEMENT",
@@ -1828,7 +1893,10 @@ class CobolParser:
                     "at_end_nodes": at_end_nodes,
                     "not_at_end_nodes": not_at_end_nodes,
                     "invalid_key_nodes": invalid_key_nodes,
-                    "not_invalid_key_nodes": not_invalid_key_nodes
+                    "not_invalid_key_nodes": not_invalid_key_nodes,
+                    "key_operator": key_operator,
+                    "key_name": key_name,
+                    "is_next": is_next
                 },
                 source_file=self.file_path,
                 source_line=start_tok.line,
@@ -2008,6 +2076,8 @@ class CobolParser:
                 exit_type = "EXIT PERFORM"
             elif self.match("KEYWORD", "PARAGRAPH") or self.match("IDENTIFIER", "PARAGRAPH"):
                 exit_type = "EXIT PARAGRAPH"
+            elif self.match("KEYWORD", "PROGRAM") or self.match("IDENTIFIER", "PROGRAM"):
+                exit_type = "EXIT_PROGRAM"
             elif self.match("KEYWORD", "SECTION") or self.match("IDENTIFIER", "SECTION"):
                 exit_type = "EXIT SECTION"
             
@@ -2304,6 +2374,92 @@ class CobolParser:
             )
             self.ir.add_node(node)
 
+        elif self.match("KEYWORD", "INITIALIZE"):
+            targets = []
+            while self.check("IDENTIFIER"):
+                targets.append(self.consume_subscripted_identifier())
+                self.match("PUNCTUATION", ",")
+            self.match_statement_period()
+            node = SemanticIRNode(
+                node_id=self.next_node_id(),
+                kind="STATEMENT",
+                properties={
+                    "statement_type": "INITIALIZE",
+                    "targets": targets
+                },
+                source_file=self.file_path,
+                source_line=start_tok.line,
+                source_column=start_tok.column,
+                start_offset=start_tok.start_offset,
+                end_offset=self.peek().start_offset,
+                status="PARSED"
+            )
+            self.ir.add_node(node)
+
+
+        elif self.match("KEYWORD", "SEARCH"):
+            is_all = self.match("KEYWORD", "ALL")
+            while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                self.current += 1
+            self.match_statement_period()
+            node = SemanticIRNode(
+                node_id=self.next_node_id(),
+                kind="STATEMENT",
+                properties={
+                    "statement_type": "SEARCH_ALL" if is_all else "SEARCH",
+                    "reason": "SEARCH statement is not supported natively; refactor manually."
+                },
+                source_file=self.file_path,
+                source_line=start_tok.line,
+                source_column=start_tok.column,
+                start_offset=start_tok.start_offset,
+                end_offset=self.peek().start_offset,
+                status="UNSUPPORTED"
+            )
+            self.ir.add_node(node)
+
+        elif self.match("KEYWORD", "ENTRY"):
+            entry_name = self.consume_val("Expected entry name in ENTRY").value
+            while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                self.current += 1
+            self.match_statement_period()
+            node = SemanticIRNode(
+                node_id=self.next_node_id(),
+                kind="STATEMENT",
+                properties={
+                    "statement_type": "ENTRY",
+                    "entry_name": entry_name,
+                    "reason": "Alternate entry points are not supported in JVM."
+                },
+                source_file=self.file_path,
+                source_line=start_tok.line,
+                source_column=start_tok.column,
+                start_offset=start_tok.start_offset,
+                end_offset=self.peek().start_offset,
+                status="UNSUPPORTED"
+            )
+            self.ir.add_node(node)
+
+        elif self.match("KEYWORD", "CANCEL"):
+            prog_name = self.consume_val("Expected program target in CANCEL").value
+            self.match_statement_period()
+            node = SemanticIRNode(
+                node_id=self.next_node_id(),
+                kind="STATEMENT",
+                properties={
+                    "statement_type": "CANCEL",
+                    "program_name": prog_name,
+                    "reason": "CANCEL subprogram unloading is not supported in JVM."
+                },
+                source_file=self.file_path,
+                source_line=start_tok.line,
+                source_column=start_tok.column,
+                start_offset=start_tok.start_offset,
+                end_offset=self.peek().start_offset,
+                status="UNSUPPORTED"
+            )
+            self.ir.add_node(node)
+
         else:
             tok = self.peek()
             self.current += 1
@@ -2335,6 +2491,28 @@ class CobolParser:
 
     def parse_exec_sql(self, tok):
         sql_text = tok.value
+        
+        # Dialect warnings for unsupported DB2 constructs
+        sql_upper = sql_text.upper()
+        unsupported_constructs = []
+        if "WITH UR" in sql_upper:
+            unsupported_constructs.append("WITH UR (Isolation Level)")
+        if "FOR UPDATE" in sql_upper:
+            unsupported_constructs.append("FOR UPDATE OF clause")
+        if "FETCH FIRST" in sql_upper and "ONLY" in sql_upper:
+            unsupported_constructs.append("FETCH FIRST N ROWS ONLY clause")
+            
+        for construct in unsupported_constructs:
+            diag = ParserDiagnostic(
+                message=f"DB2_UNSUPPORTED_CONSTRUCT: {construct} is not supported natively in H2/standard JDBC mapping",
+                file=self.file_path,
+                line=tok.line,
+                column=tok.column,
+                token_value=tok.value,
+                context="SQL Dialect Validation"
+            )
+            self.diagnostics.append(diag)
+            
         sql_tokens = tokenize_sql(sql_text)
         try:
             sql_props = parse_sql_tokens(sql_tokens)
@@ -2453,10 +2631,88 @@ class CobolParser:
 
 def tokenize_sql(sql_text):
     tokens = []
-    pattern = re.compile(r'(?i):[a-z0-9_-]+|[a-z0-9_-]+|\'[^\']*\'|"[^"]*"|<=|>=|<>|!=|=|<|>|\(|\)|,|\.')
+    pattern = re.compile(r'(?i):[a-z0-9_-]+|[a-z0-9_-]+\.[a-z0-9_-]+|[a-z0-9_-]+|\'[^\']*\'|"[^"]*"|<=|>=|<>|!=|=|<|>|\(|\)|,|\.')
     for m in pattern.finditer(sql_text):
         tokens.append(m.group(0))
     return tokens
+
+def parse_sql_where(tokens, i):
+    predicates = []
+    if i < len(tokens) and tokens[i].upper() == "WHERE":
+        i += 1
+        while i < len(tokens):
+            t_upper = tokens[i].upper()
+            if t_upper in ("WITH", "FOR", "ORDER", "GROUP"):
+                break
+            if t_upper in ("AND", "OR", "NOT", "(", ")"):
+                predicates.append({"logical": t_upper})
+                i += 1
+                continue
+            
+            if i >= len(tokens):
+                break
+            col = tokens[i]
+            i += 1
+            if i >= len(tokens):
+                raise ValueError("Unexpected end of WHERE clause")
+            
+            op = tokens[i].upper()
+            i += 1
+            
+            if op == "IS":
+                if i < len(tokens) and tokens[i].upper() == "NOT":
+                    i += 1
+                    if i < len(tokens) and tokens[i].upper() == "NULL":
+                        i += 1
+                        predicates.append({"column": col, "op": "IS NOT NULL"})
+                        continue
+                    else:
+                        raise ValueError("Expected NULL after IS NOT")
+                elif i < len(tokens) and tokens[i].upper() == "NULL":
+                    i += 1
+                    predicates.append({"column": col, "op": "IS NULL"})
+                    continue
+                else:
+                    raise ValueError("Expected NOT or NULL after IS")
+            
+            if op == "BETWEEN":
+                if i >= len(tokens):
+                    raise ValueError("Expected value after BETWEEN")
+                val1 = tokens[i]
+                i += 1
+                if i < len(tokens) and tokens[i].upper() == "AND":
+                    i += 1
+                    if i >= len(tokens):
+                        raise ValueError("Expected value after AND")
+                    val2 = tokens[i]
+                    i += 1
+                    predicates.append({"column": col, "op": "BETWEEN", "value": val1, "value2": val2})
+                    continue
+                else:
+                    raise ValueError("Expected AND in BETWEEN clause")
+            
+            if op == "IN":
+                if i < len(tokens) and tokens[i] == "(":
+                    i += 1
+                    vals = []
+                    while i < len(tokens) and tokens[i] != ")":
+                        if tokens[i] != ",":
+                            vals.append(tokens[i])
+                        i += 1
+                    if i < len(tokens) and tokens[i] == ")":
+                        i += 1
+                    predicates.append({"column": col, "op": "IN", "values": vals})
+                    continue
+                else:
+                    raise ValueError("Expected ( after IN")
+            
+            if i >= len(tokens):
+                raise ValueError(f"Expected value after operator {op}")
+            val = tokens[i]
+            i += 1
+            predicates.append({"column": col, "op": op, "value": val})
+            
+    return predicates, i
 
 def parse_sql_tokens(tokens):
     if not tokens:
@@ -2532,28 +2788,47 @@ def parse_sql_tokens(tokens):
         if i >= len(tokens) or tokens[i].upper() != "FROM":
             raise ValueError("Expected FROM keyword in SELECT")
         i += 1
-        table = tokens[i]
-        i += 1
         
-        predicates = []
-        if i < len(tokens) and tokens[i].upper() == "WHERE":
+        from_tokens = []
+        while i < len(tokens) and tokens[i].upper() != "WHERE":
+            from_tokens.append(tokens[i])
             i += 1
-            while i < len(tokens):
-                if tokens[i].upper() in ("AND", "OR", "NOT"):
-                    predicates.append({"logical": tokens[i].upper()})
-                    i += 1
-                    continue
-                col = tokens[i]
-                op = tokens[i+1]
-                val = tokens[i+2]
-                predicates.append({"column": col, "op": op, "value": val})
-                i += 3
+            
+        alias_map = {}
+        tables = []
+        def is_alias_candidate(tok):
+            t_u = tok.upper()
+            return t_u not in ("INNER", "LEFT", "RIGHT", "JOIN", "ON", "WHERE", "AND", "OR", ",", ".", "=", "<", ">", "<=", ">=", "<>", "!=")
+            
+        if from_tokens:
+            first_table = from_tokens[0].upper()
+            tables.append(first_table)
+            if len(from_tokens) > 1 and is_alias_candidate(from_tokens[1]):
+                alias_map[from_tokens[1].upper()] = first_table
+            
+            k = 1
+            while k < len(from_tokens):
+                t_upper = from_tokens[k].upper()
+                if t_upper == "JOIN" and k + 1 < len(from_tokens):
+                    tbl = from_tokens[k+1].upper()
+                    tables.append(tbl)
+                    if k + 2 < len(from_tokens) and is_alias_candidate(from_tokens[k+2]):
+                        alias_map[from_tokens[k+2].upper()] = tbl
+                        k += 3
+                    else:
+                        k += 2
+                else:
+                    k += 1
+                    
+        predicates, i = parse_sql_where(tokens, i)
                 
         return {
             "sql_type": "SELECT",
             "columns": cols,
             "into_variables": into_vars,
-            "table": table,
+            "table": tables[0] if tables else None,
+            "tables": tables,
+            "alias_map": alias_map,
             "predicates": predicates
         }
         
@@ -2610,21 +2885,7 @@ def parse_sql_tokens(tokens):
             if i < len(tokens) and tokens[i] == ",":
                 i += 1
                 
-        predicates = []
-        if i < len(tokens) and tokens[i].upper() == "WHERE":
-            i += 1
-            while i < len(tokens):
-                if tokens[i].upper() in ("AND", "OR", "NOT"):
-                    predicates.append({"logical": tokens[i].upper()})
-                    i += 1
-                    continue
-                col = tokens[i]
-                op = tokens[i+1]
-                val = tokens[i+2]
-                if val.startswith(":"):
-                    val = val[1:]
-                predicates.append({"column": col, "op": op, "value": val})
-                i += 3
+        predicates, i = parse_sql_where(tokens, i)
                 
         return {
             "sql_type": "UPDATE",
@@ -2638,21 +2899,7 @@ def parse_sql_tokens(tokens):
             raise ValueError("Expected FROM in DELETE")
         table = tokens[2]
         i = 3
-        predicates = []
-        if i < len(tokens) and tokens[i].upper() == "WHERE":
-            i += 1
-            while i < len(tokens):
-                if tokens[i].upper() in ("AND", "OR", "NOT"):
-                    predicates.append({"logical": tokens[i].upper()})
-                    i += 1
-                    continue
-                col = tokens[i]
-                op = tokens[i+1]
-                val = tokens[i+2]
-                if val.startswith(":"):
-                    val = val[1:]
-                predicates.append({"column": col, "op": op, "value": val})
-                i += 3
+        predicates, i = parse_sql_where(tokens, i)
         return {
             "sql_type": "DELETE",
             "table": table,
@@ -2667,10 +2914,21 @@ def extract_host_variables(props):
     for v in props.get("into_variables", []):
         vars.append(v)
     for p in props.get("predicates", []):
-        val = p.get("value")
-        if val and isinstance(val, str) and (val.startswith(":") or val.upper() in ("WS-", "LK-") or "-" in val):
-            cleaned = val[1:] if val.startswith(":") else val
-            vars.append(cleaned)
+        if "value" in p:
+            val = p["value"]
+            if val and isinstance(val, str) and (val.startswith(":") or val.upper() in ("WS-", "LK-") or "-" in val):
+                cleaned = val[1:] if val.startswith(":") else val
+                vars.append(cleaned)
+        if "value2" in p:
+            val = p["value2"]
+            if val and isinstance(val, str) and (val.startswith(":") or val.upper() in ("WS-", "LK-") or "-" in val):
+                cleaned = val[1:] if val.startswith(":") else val
+                vars.append(cleaned)
+        if "values" in p:
+            for val in p["values"]:
+                if val and isinstance(val, str) and (val.startswith(":") or val.upper() in ("WS-", "LK-") or "-" in val):
+                    cleaned = val[1:] if val.startswith(":") else val
+                    vars.append(cleaned)
     for v in props.get("values", []):
         if isinstance(v, str):
             vars.append(v)

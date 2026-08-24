@@ -463,6 +463,16 @@ class NativeStatementTranslator:
                 return expr[19:-1]
         return expr
 
+    def generate_initialization_statement(self, var_name):
+        var_type = self._get_var_type(var_name, "String")
+        if var_type == "BigDecimal":
+            default_val = "BigDecimal.ZERO"
+        elif var_type in ("Integer", "Long"):
+            default_val = "0"
+        else:
+            default_val = '""'
+        return self.generate_assignment(var_name, default_val)
+
     def generate_assignment(self, tgt: str, value_expr: str) -> str:
         match = re.match(r'^([A-Za-z0-9_-]+)\s*\(\s*([^()]+)\s*\)$', tgt)
         if match:
@@ -845,9 +855,17 @@ class NativeStatementTranslator:
             java_tgt = to_java_var(tgt)
             java_thru = to_java_var(thru) if thru else None
             if java_thru:
-                return f"perform(\"{java_tgt}\", \"{java_thru}\");\n        if (nextParagraphIndex != -1) return;"
+                return f"perform(\"{java_tgt}\", \"{java_thru}\");\n        if (nextParagraphIndex != -1 || programExited) return;"
             else:
-                return f"perform(\"{java_tgt}\", null);\n        if (nextParagraphIndex != -1) return;"
+                return f"perform(\"{java_tgt}\", null);\n        if (nextParagraphIndex != -1 || programExited) return;"
+
+        elif stype == "PERFORM_UNTIL_OUT":
+            tgt = props.get("target", "")
+            thru = props.get("thru", None)
+            cond = self._translate_condition(props.get("condition", ""))
+            java_tgt = to_java_var(tgt)
+            java_thru = f"\"{to_java_var(thru)}\"" if thru else "null"
+            return f"while (!({cond})) {{\n            perform(\"{java_tgt}\", {java_thru});\n            if (nextParagraphIndex != -1 || programExited) return;\n        }}"
 
         elif stype == "OPEN":
             open_calls = []
@@ -1238,7 +1256,7 @@ class NativeStatementTranslator:
                 access_mode = self.current_generator.file_access_modes.get(tgt.upper(), "SEQUENTIAL")
                 record_key = self.current_generator.file_keys.get(tgt.upper())
                 
-            is_keyed = (org == "INDEXED" and access_mode in ("RANDOM", "DYNAMIC"))
+            is_keyed = (org == "INDEXED" and access_mode in ("RANDOM", "DYNAMIC") and not props.get("is_next", False))
             
             key_expr = "null"
             if record_key:
@@ -1360,10 +1378,118 @@ class NativeStatementTranslator:
                     lines.append(f"write_{java_tgt}();")
             return "\n        ".join(lines)
 
+        elif stype == "DELETE":
+            tgt = props.get("target", "")
+            invalid_key_nodes = props.get("invalid_key_nodes", [])
+            not_invalid_key_nodes = props.get("not_invalid_key_nodes", [])
+            
+            java_tgt = to_java_var(tgt)
+            org = "SEQUENTIAL"
+            access_mode = "SEQUENTIAL"
+            record_key = None
+            if self.current_generator:
+                org = self.current_generator.file_orgs.get(tgt.upper(), "SEQUENTIAL")
+                access_mode = self.current_generator.file_access_modes.get(tgt.upper(), "SEQUENTIAL")
+                record_key = self.current_generator.file_keys.get(tgt.upper())
+                
+            is_keyed = (org == "INDEXED" and access_mode in ("RANDOM", "DYNAMIC"))
+            
+            key_expr = "null"
+            if record_key:
+                key_jvar = to_java_var(record_key)
+                if self.current_generator and record_key.upper() in self.current_generator.redefines_layout:
+                    key_expr = f"get_{key_jvar}()"
+                else:
+                    key_expr = key_jvar
+                    
+            lines = []
+            if not invalid_key_nodes and not not_invalid_key_nodes:
+                if is_keyed:
+                    return f"delete_{java_tgt}_key({key_expr});"
+                else:
+                    return f"delete_{java_tgt}();"
+                    
+            if is_keyed:
+                lines.append(f"if (!delete_{java_tgt}_key({key_expr})) {{")
+                for node in invalid_key_nodes:
+                    stmt_str = self.translate_statement(node)
+                    if stmt_str:
+                        lines.append(f"    {stmt_str}")
+                lines.append("} else {")
+                for node in not_invalid_key_nodes:
+                    stmt_str = self.translate_statement(node)
+                    if stmt_str:
+                        lines.append(f"    {stmt_str}")
+                lines.append("}")
+            else:
+                lines.append(f"if (!delete_{java_tgt}()) {{")
+                for node in invalid_key_nodes:
+                    stmt_str = self.translate_statement(node)
+                    if stmt_str:
+                        lines.append(f"    {stmt_str}")
+                lines.append("} else {")
+                for node in not_invalid_key_nodes:
+                    stmt_str = self.translate_statement(node)
+                    if stmt_str:
+                        lines.append(f"    {stmt_str}")
+                lines.append("}")
+            return "\n        ".join(lines)
+
+        elif stype == "START":
+            tgt = props.get("target", "")
+            key_op = props.get("key_operator", "=") or "="
+            key_var = props.get("key_name")
+            invalid_key_nodes = props.get("invalid_key_nodes", [])
+            not_invalid_key_nodes = props.get("not_invalid_key_nodes", [])
+            
+            java_tgt = to_java_var(tgt)
+            if not key_var and self.current_generator:
+                key_var = self.current_generator.file_keys.get(tgt.upper())
+                
+            key_expr = "null"
+            if key_var:
+                key_jvar = to_java_var(key_var)
+                if self.current_generator and key_var.upper() in self.current_generator.redefines_layout:
+                    key_expr = f"get_{key_jvar}()"
+                else:
+                    key_expr = key_jvar
+                    
+            lines = []
+            if not invalid_key_nodes and not not_invalid_key_nodes:
+                return f"start_{java_tgt}({key_expr}, \"{key_op}\");"
+                
+            lines.append(f"if (!start_{java_tgt}({key_expr}, \"{key_op}\")) {{")
+            for node in invalid_key_nodes:
+                stmt_str = self.translate_statement(node)
+                if stmt_str:
+                    lines.append(f"    {stmt_str}")
+            lines.append("} else {")
+            for node in not_invalid_key_nodes:
+                stmt_str = self.translate_statement(node)
+                if stmt_str:
+                    lines.append(f"    {stmt_str}")
+            lines.append("}")
+            return "\n        ".join(lines)
+
         elif stype == "GOBACK":
             return "if (true) { programExited = true; return; }"
         elif stype == "STOP RUN":
             return "if (true) { throw new StopRunException(); }"
+        elif stype == "INITIALIZE":
+            targets = props.get("targets", [])
+            lines = []
+            for tgt in targets:
+                tgt_upper = tgt.upper()
+                if self.current_generator and tgt_upper in self.current_generator.group_fields:
+                    for child in self.current_generator.group_fields[tgt_upper]:
+                        lines.append(self.generate_initialization_statement(child))
+                else:
+                    lines.append(self.generate_initialization_statement(tgt))
+            return "\n        ".join(lines)
+        elif stype == "EXIT_PROGRAM":
+            return "if (true) { programExited = true; return; }"
+        elif stype == "EXIT":
+            return ""
 
         elif stype == "GO TO":
             target = to_java_var(props.get("target", ""))
@@ -1444,7 +1570,7 @@ class NativeStatementTranslator:
                 f"for (int {loop_idx} = 0; {loop_idx} < {limit_expr}; {loop_idx}++) {{",
                 f"    if (skipToNextSentence) break;",
                 f"    perform(\"{java_tgt}\", {thru_expr});",
-                f"    if (nextParagraphIndex != -1) return;",
+                f"    if (nextParagraphIndex != -1 || programExited) return;",
                 f"}}"
             ]
             return "\n        ".join(lines)
@@ -1761,6 +1887,16 @@ class NativeStatementTranslator:
                     call_lines = self._generate_call_block(target_upper, other_gen, caller_vars)
                     return "\n        ".join(call_lines)
                 else:
+                    target_clean = target.strip('"').strip("'").upper()
+                    if target_clean in ("CBLTDLI", "ASMTDLI", "PLITDLI") or target_clean.startswith("MQ"):
+                        self.current_generator.diagnostics.append({
+                            "construct": "IMS_MQ",
+                            "source_coordinate": f"{node.source_file}:{node.source_line}",
+                            "semantic_ir_node": node.node_id,
+                            "severity": "ERROR",
+                            "status": "NATIVE_TRANSLATION_BLOCKED",
+                            "reason": f"Mainframe IMS/MQ Call to '{target_clean}' is not supported natively."
+                        })
                     return f"// Call to unknown program: {target}. Available: {list(self.all_generators.keys())}"
 
         elif stype == "EVALUATE":
@@ -1863,6 +1999,41 @@ class NativeStatementTranslator:
             sql_type = sql_props.get("sql_type", "").upper()
             
             def build_param_sql(props):
+                original_sql = props.get("original_sql")
+                if original_sql:
+                    from modernize.parser import tokenize_sql
+                    tokens = tokenize_sql(original_sql)
+                    sql_parts = []
+                    params = []
+                    
+                    skip_mode = False
+                    i = 0
+                    while i < len(tokens):
+                        t = tokens[i]
+                        t_upper = t.upper()
+                        if t_upper == "INTO":
+                            skip_mode = True
+                            i += 1
+                            continue
+                        if skip_mode:
+                            if t_upper in ("FROM", "WHERE", "ORDER", "GROUP", "HAVING", "JOIN", "INNER", "LEFT", "RIGHT"):
+                                skip_mode = False
+                            else:
+                                i += 1
+                                continue
+                        
+                        if t.startswith(":"):
+                            sql_parts.append("?")
+                            params.append(t[1:])
+                        else:
+                            sql_parts.append(t)
+                        i += 1
+                        
+                    sql = " ".join(sql_parts)
+                    import re
+                    sql = re.sub(r'\s*\.\s*', '.', sql)
+                    return sql, params
+                
                 sql_type = props.get("sql_type")
                 table = props.get("table")
                 params = []
@@ -2107,7 +2278,14 @@ class NativeStatementTranslator:
                 mapset_val = cics_props.get("mapset", "")
                 from_var = cics_props.get("from", "")
                 java_from = to_java_var(from_var) if from_var else "null"
-                lines.append(f"com.systema.modernized.CicsTransactionContext.send(\"{map_val}\", \"{mapset_val}\", {java_from});")
+                lines.append("java.util.Map<String, Object> sendOpts = new java.util.HashMap<>();")
+                for key, val in cics_props.items():
+                    if key not in ("cics_type", "map", "mapset", "from"):
+                        if isinstance(val, bool):
+                            lines.append(f'sendOpts.put("{key.lower()}", {str(val).lower()});')
+                        else:
+                            lines.append(f'sendOpts.put("{key.lower()}", "{val}");')
+                lines.append(f"com.systema.modernized.CicsTransactionContext.send(\"{map_val}\", \"{mapset_val}\", {java_from}, sendOpts);")
                 lines.append("eibresp = 0;")
                 return "\n        ".join(lines)
                 
@@ -2115,14 +2293,21 @@ class NativeStatementTranslator:
                 map_val = cics_props.get("map", "")
                 mapset_val = cics_props.get("mapset", "")
                 into_var = cics_props.get("into", "")
+                lines.append("java.util.Map<String, Object> recvOpts = new java.util.HashMap<>();")
+                for key, val in cics_props.items():
+                    if key not in ("cics_type", "map", "mapset", "into"):
+                        if isinstance(val, bool):
+                            lines.append(f'recvOpts.put("{key.lower()}", {str(val).lower()});')
+                        else:
+                            lines.append(f'recvOpts.put("{key.lower()}", "{val}");')
                 if into_var:
                     java_into = to_java_var(into_var)
-                    lines.append(f"Object receivedData = com.systema.modernized.CicsTransactionContext.receive(\"{map_val}\", \"{mapset_val}\");")
+                    lines.append(f"Object receivedData = com.systema.modernized.CicsTransactionContext.receive(\"{map_val}\", \"{mapset_val}\", recvOpts);")
                     lines.append("if (receivedData != null) {")
                     lines.append(f"    {java_into} = receivedData.toString();")
                     lines.append("}")
                 else:
-                    lines.append(f"com.systema.modernized.CicsTransactionContext.receive(\"{map_val}\", \"{mapset_val}\");")
+                    lines.append(f"com.systema.modernized.CicsTransactionContext.receive(\"{map_val}\", \"{mapset_val}\", recvOpts);")
                 lines.append("eibresp = 0;")
                 return "\n        ".join(lines)
                 
@@ -2619,7 +2804,77 @@ class NativeFileIOGenerator:
             lines.append(f"        return false;")
             lines.append(f"    }}")
             lines.append("")
-            
+
+            lines.append(f"    private boolean delete_{java_fd}() {{")
+            lines.append(f"        String line = format_{java_fd}_record();")
+            lines.append(f"        if (line.length() >= {key_end}) {{")
+            lines.append(f"            String key = line.substring({key_start}, {key_end}).trim();")
+            lines.append(f"            if (!{java_fd}_records.containsKey(key)) {{")
+            status_miss = get_status_assign("23")
+            if status_miss: lines.append(f"                {status_miss}")
+            lines.append(f"                return false;")
+            lines.append(f"            }}")
+            lines.append(f"            {java_fd}_records.remove(key);")
+            lines.append(f"            save_{java_fd}();")
+            status_ok = get_status_assign("00")
+            if status_ok: lines.append(f"            {status_ok}")
+            lines.append(f"            return true;")
+            lines.append(f"        }}")
+            lines.append(f"        return false;")
+            lines.append(f"    }}")
+            lines.append("")
+
+            lines.append(f"    private boolean delete_{java_fd}_key(String key) {{")
+            lines.append(f"        if (key == null) return false;")
+            lines.append(f"        if (!{java_fd}_records.containsKey(key.trim())) {{")
+            status_miss = get_status_assign("23")
+            if status_miss: lines.append(f"            {status_miss}")
+            lines.append(f"            return false;")
+            lines.append(f"        }}")
+            lines.append(f"        {java_fd}_records.remove(key.trim());")
+            lines.append(f"        save_{java_fd}();")
+            status_ok = get_status_assign("00")
+            if status_ok: lines.append(f"        {status_ok}")
+            lines.append(f"        return true;")
+            lines.append(f"    }}")
+            lines.append("")
+
+            lines.append(f"    private boolean start_{java_fd}(String key, String op) {{")
+            lines.append(f"        if (key == null) return false;")
+            lines.append(f"        java.util.Iterator<java.util.Map.Entry<String, String>> it = {java_fd}_records.entrySet().iterator();")
+            lines.append(f"        int skipCount = 0;")
+            lines.append(f"        boolean found = false;")
+            lines.append(f"        String targetKey = key.trim();")
+            lines.append(f"        while (it.hasNext()) {{")
+            lines.append(f"            java.util.Map.Entry<String, String> entry = it.next();")
+            lines.append(f"            String k = entry.getKey();")
+            lines.append(f"            int cmp = k.compareTo(targetKey);")
+            lines.append(f"            boolean match = false;")
+            lines.append(f"            if (op.equals(\"=\")) match = (cmp == 0);")
+            lines.append(f"            else if (op.equals(\">\")) match = (cmp > 0);")
+            lines.append(f"            else if (op.equals(\">=\")) match = (cmp >= 0);")
+            lines.append(f"            if (match) {{")
+            lines.append(f"                found = true;")
+            lines.append(f"                break;")
+            lines.append(f"            }}")
+            lines.append(f"            skipCount++;")
+            lines.append(f"        }}")
+            lines.append(f"        if (!found) {{")
+            status_miss = get_status_assign("23")
+            if status_miss: lines.append(f"            {status_miss}")
+            lines.append(f"            return false;")
+            lines.append(f"        }}")
+            lines.append(f"        // Reposition iterator so that the next read returns the found element")
+            lines.append(f"        {java_fd}_iterator = {java_fd}_records.values().iterator();")
+            lines.append(f"        for (int i = 0; i < skipCount; i++) {{")
+            lines.append(f"            if ({java_fd}_iterator.hasNext()) {java_fd}_iterator.next();")
+            lines.append(f"        }}")
+            status_ok = get_status_assign("00")
+            if status_ok: lines.append(f"        {status_ok}")
+            lines.append(f"        return true;")
+            lines.append(f"    }}")
+            lines.append("")
+
             lines.append(f"    private void close_{java_fd}() {{")
             lines.append(f"        save_{java_fd}();")
             lines.append(f"        {java_fd}_records.clear();")
@@ -2667,27 +2922,25 @@ class NativeFileIOGenerator:
                         pic = [p for n, p in record_fields if n == f_name][0]
                         java_type = NativeTypeMapper.get_java_type(pic)
                         
-                        lines.append(f"                if (line.length() >= {end}) {{")
-                        lines.append(f"                    String val = line.substring({start}, {end}).trim();")
+                        lines.append(f"                String val_{java_var} = (line.length() >= {end}) ? line.substring({start}, {end}).trim() : (line.length() > {start} ? line.substring({start}).trim() : \"\");")
                         if java_type == "BigDecimal":
                             scale = NativeTypeMapper.parse_pic(pic)[2]
                             signed = NativeTypeMapper.parse_pic(pic)[3]
                             if signed:
-                                lines.append(f"                    {java_var} = parseSigned(val, {scale});")
+                                lines.append(f"                {java_var} = parseSigned(val_{java_var}, {scale});")
                             else:
-                                lines.append(f"                    {java_var} = val.isEmpty() ? BigDecimal.ZERO : new BigDecimal(val).movePointLeft({scale});")
+                                lines.append(f"                {java_var} = val_{java_var}.isEmpty() ? BigDecimal.ZERO : new BigDecimal(val_{java_var}).movePointLeft({scale});")
                         elif java_type in ("Integer", "Long"):
                             signed = NativeTypeMapper.parse_pic(pic)[3]
                             t_cast = "int" if java_type == "Integer" else "long"
                             if signed:
-                                lines.append(f"                    {java_var} = ({t_cast}) parseSignedLong(val);")
+                                lines.append(f"                {java_var} = ({t_cast}) parseSignedLong(val_{java_var});")
                             else:
-                                parse_call = "Integer.parseInt(val)" if java_type == "Integer" else "Long.parseLong(val)"
+                                parse_call = f"Integer.parseInt(val_{java_var})" if java_type == "Integer" else f"Long.parseLong(val_{java_var})"
                                 zero_val = "0" if java_type == "Integer" else "0L"
-                                lines.append(f"                    {java_var} = val.isEmpty() ? {zero_val} : {parse_call};")
+                                lines.append(f"                {java_var} = val_{java_var}.isEmpty() ? {zero_val} : {parse_call};")
                         else:
-                            lines.append(f"                    {java_var} = val;")
-                        lines.append(f"                }}")
+                            lines.append(f"                {java_var} = val_{java_var};")
                 status_ok = get_status_assign("00")
                 if status_ok: lines.append(f"                {status_ok}")
                 lines.append(f"            }}")
@@ -2779,9 +3032,10 @@ class NativeFileIOGenerator:
         return "\n".join(lines)
 
 class NativeProgramGenerator:
-    def __init__(self, program_name: str, ir_nodes: list, file_assigns: list = None, is_child: bool = False, parent_generator = None):
+    def __init__(self, program_name: str, ir_nodes: list, file_assigns: list = None, is_child: bool = False, parent_generator = None, repo_path: str = None):
         self.program_name = program_name
         self.file_assigns = file_assigns or []
+        self.repo_path = repo_path
         
         self.child_generators = {}
         self.is_child = is_child
@@ -3951,6 +4205,141 @@ class NativeProgramGenerator:
             lines.append("        }")
         has_sql = any(n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_SQL" for n in self.ir_nodes)
         if has_sql:
+            # 1. Extract tables and columns dynamically
+            tables = {}
+            
+            def record_column(table_name, col_name, var_name, sp=None):
+                table_name = table_name.upper()
+                col_name = col_name.upper()
+                resolved_table = table_name
+                actual_col = col_name
+                if "." in col_name:
+                    parts = col_name.split(".")
+                    prefix = parts[0].upper()
+                    actual_col = parts[-1]
+                    if sp:
+                        alias_map = sp.get("alias_map", {})
+                        if prefix in alias_map:
+                            resolved_table = alias_map[prefix]
+                        elif prefix in sp.get("tables", []):
+                            resolved_table = prefix
+                
+                if resolved_table not in tables:
+                    tables[resolved_table] = {}
+                if actual_col not in tables[resolved_table]:
+                    t = "VARCHAR(100)"
+                    if var_name:
+                        v = var_name
+                        if v.startswith(":"):
+                            v = v[1:]
+                        v_type = self.var_types.get(v, "String")
+                        if v_type == "BigDecimal":
+                            t = "DECIMAL(18, 2)"
+                        elif v_type in ("Integer", "Long"):
+                            t = "INT"
+                    tables[resolved_table][actual_col] = t
+
+            def process_sql_props(sp):
+                if not sp:
+                    return
+                stype = sp.get("sql_type", "").upper()
+                table = sp.get("table")
+                
+                if stype == "DECLARE_CURSOR":
+                    process_sql_props(sp.get("cursor_query"))
+                    return
+                    
+                if not table:
+                    return
+                    
+                if stype == "SELECT":
+                    cols = sp.get("columns", [])
+                    into = sp.get("into_variables", [])
+                    for idx, c in enumerate(cols):
+                        v = into[idx] if idx < len(into) else None
+                        record_column(table, c, v, sp)
+                    for pred in sp.get("predicates", []):
+                        if "column" in pred:
+                            record_column(table, pred["column"], pred.get("value") or pred.get("values", [None])[0], sp)
+                elif stype == "INSERT":
+                    cols = sp.get("columns", [])
+                    vals = sp.get("values", [])
+                    for idx, c in enumerate(cols):
+                        v = vals[idx] if idx < len(vals) else None
+                        record_column(table, c, v, sp)
+                elif stype == "UPDATE":
+                    for s in sp.get("sets", []):
+                        record_column(table, s["column"], s.get("value"), sp)
+                    for pred in sp.get("predicates", []):
+                        if "column" in pred:
+                            record_column(table, pred["column"], pred.get("value") or pred.get("values", [None])[0], sp)
+                elif stype == "DELETE":
+                    for pred in sp.get("predicates", []):
+                        if "column" in pred:
+                            record_column(table, pred["column"], pred.get("value") or pred.get("values", [None])[0], sp)
+
+            for node in self.ir_nodes:
+                if node.kind == "STATEMENT" and node.properties.get("statement_type") == "EXEC_SQL":
+                    process_sql_props(node.properties.get("sql_props"))
+                    
+            # 2. Seed queries list
+            seed_queries = []
+            if hasattr(self, "repo_path") and self.repo_path:
+                for table_name in tables:
+                    data_dir = os.path.join(self.repo_path, "data")
+                    if os.path.exists(data_dir):
+                        sql_file = None
+                        for name in os.listdir(data_dir):
+                            if name.upper() == f"{table_name}.SQL":
+                                sql_file = os.path.join(data_dir, name)
+                                break
+                        if sql_file:
+                            with open(sql_file, "r", encoding="utf-8", errors="replace") as fh:
+                                for line in fh:
+                                    line_clean = line.strip()
+                                    if line_clean and not line_clean.startswith("--") and not line_clean.startswith("*"):
+                                        stmt = line_clean
+                                        if stmt.endswith(";"):
+                                            stmt = stmt[:-1]
+                                        stmt_esc = stmt.replace('"', '\\"')
+                                        seed_queries.append(stmt_esc)
+                                        # Extract columns from seed SQL
+                                        m = re.search(r'(?i)\bINSERT\s+INTO\s+(\w+)\s*\(([^)]+)\)', stmt)
+                                        if m:
+                                            tbl = m.group(1).upper()
+                                            cols_str = m.group(2)
+                                            for c in cols_str.split(","):
+                                                c_clean = c.strip().upper()
+                                                if tbl not in tables:
+                                                    tables[tbl] = {}
+                                                if c_clean not in tables[tbl]:
+                                                    tables[tbl][c_clean] = "VARCHAR(100)"
+                                        
+                        csv_file = None
+                        for name in os.listdir(data_dir):
+                            if name.upper() == f"{table_name}.CSV":
+                                csv_file = os.path.join(data_dir, name)
+                                break
+                        if csv_file:
+                            with open(csv_file, "r", encoding="utf-8", errors="replace") as fh:
+                                for line in fh:
+                                    line_clean = line.strip()
+                                    if line_clean:
+                                        parts = [p.strip().strip("'").strip('"') for p in line_clean.split(",")]
+                                        cols = list(tables[table_name].keys())
+                                        if cols:
+                                            cols_str = ", ".join(cols)
+                                            vals_formatted = []
+                                            for idx, val in enumerate(parts):
+                                                if idx < len(cols):
+                                                    c_type = tables[table_name].get(cols[idx], "VARCHAR(100)")
+                                                    if "INT" in c_type.upper() or "DECIMAL" in c_type.upper():
+                                                        vals_formatted.append(val)
+                                                    else:
+                                                        vals_formatted.append(f"'{val}'")
+                                            vals_str = ", ".join(vals_formatted)
+                                            seed_queries.append(f"INSERT INTO {table_name} ({cols_str}) VALUES ({vals_str})")
+
             lines.append("        if (com.systema.modernized.SpringContextHelper.jdbcTemplate == null) {")
             lines.append("            org.springframework.jdbc.datasource.DriverManagerDataSource dataSource = new org.springframework.jdbc.datasource.DriverManagerDataSource();")
             lines.append("            dataSource.setDriverClassName(\"org.h2.Driver\");")
@@ -3960,10 +4349,13 @@ class NativeProgramGenerator:
             lines.append("            com.systema.modernized.SpringContextHelper.jdbcTemplate = new org.springframework.jdbc.core.JdbcTemplate(dataSource);")
             lines.append("            com.systema.modernized.SpringContextHelper.transactionManager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);")
             lines.append("            try {")
-            lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"CREATE TABLE IF NOT EXISTS customer (cust_id INT PRIMARY KEY, cust_name VARCHAR(100))\");")
-            lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"DELETE FROM customer\");")
-            lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"INSERT INTO customer (cust_id, cust_name) VALUES (101, 'TEST CUSTOMER')\");")
-            lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"INSERT INTO customer (cust_id, cust_name) VALUES (102, 'ANOTHER CUST')\");")
+            for table_name, cols in tables.items():
+                col_defs = ", ".join(f"{c} {t}" for c, t in cols.items())
+                create_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({col_defs})"
+                lines.append(f"                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"{create_query}\");")
+                lines.append(f"                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"DELETE FROM {table_name}\");")
+            for q in seed_queries:
+                lines.append(f"                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"{q}\");")
             lines.append("            } catch (Exception e) {}")
             lines.append("        }")
         if total_paras == 0 and self.child_generators:

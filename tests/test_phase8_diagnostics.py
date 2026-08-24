@@ -209,3 +209,20 @@ def test_supported_constructs_produce_no_blocked_diagnostics():
     gen, _ = _build_and_generate('SUPPTEST', code)
     blocked = [d for d in gen.diagnostics if d['status'] == 'NATIVE_TRANSLATION_BLOCKED']
     assert not blocked, f'Supported constructs triggered NATIVE_TRANSLATION_BLOCKED: {blocked}'
+
+def test_ims_mq_unsupported_diagnostics():
+    code = '''
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IMSMQTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-PCB PIC X(4).
+       PROCEDURE DIVISION.
+           CALL "CBLTDLI" USING WS-PCB.
+           GOBACK.
+    '''
+    gen, _ = _build_and_generate('IMSMQTEST', code)
+    blocked = [d for d in gen.diagnostics if d['status'] == 'NATIVE_TRANSLATION_BLOCKED']
+    assert len(blocked) > 0, 'No diagnostics were recorded for CBLTDLI call'
+    assert any('CBLTDLI' in d['reason'] for d in blocked)
+    assert any(d['construct'] == 'IMS_MQ' for d in blocked)

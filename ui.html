@@ -1289,8 +1289,7 @@ function renderActiveWorkspace(r) {
   activeRunData = r;
 
   // 1. Final Verdict calculations
-  const isFinished = r.status === 'done' || r.status === 'error' || r.status === 'interrupted';
-  const verd = isFinished ? (r.verdict || 'UNVERIFIED') : 'UNVERIFIED';
+  const verd = (r.status === 'done') ? (r.verdict || 'UNVERIFIED') : (r.status === 'error' ? 'FAILED' : 'UNVERIFIED');
   let bannerCls = 'chip-ready';
   let verdictStyle = 'border-color: var(--border);';
   let verdictDesc = 'No pipeline evidence has been produced yet. Run the modernization pipeline to execute the validation steps.';

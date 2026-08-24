@@ -262,3 +262,84 @@ def test_indexed_operations():
     forbidden = ["jp.osscons", "libcobj", "CobolResolve", "opensourcecobol"]
     for word in forbidden:
         assert word not in java_src
+
+def test_vsam_delete_and_start():
+    code = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. VSAMTEST.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IDX-FILE ASSIGN TO "vsam.dat"
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS DYNAMIC
+               RECORD KEY IS IDX-KEY
+               FILE STATUS IS WS-STATUS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD IDX-FILE.
+       01 IDX-REC.
+          05 IDX-KEY PIC X(5).
+          05 IDX-VAL PIC X(5).
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC X(2).
+       PROCEDURE DIVISION.
+           OPEN OUTPUT IDX-FILE.
+           MOVE "K1234" TO IDX-KEY.
+           MOVE "VAL01" TO IDX-VAL.
+           WRITE IDX-REC.
+           MOVE "K5678" TO IDX-KEY.
+           MOVE "VAL02" TO IDX-VAL.
+           WRITE IDX-REC.
+           MOVE "K9012" TO IDX-KEY.
+           MOVE "VAL03" TO IDX-VAL.
+           WRITE IDX-REC.
+           CLOSE IDX-FILE.
+
+           OPEN I-O IDX-FILE.
+           
+           *> Test START EQUAL
+           MOVE "K5678" TO IDX-KEY.
+           START IDX-FILE KEY IS EQUAL TO IDX-KEY
+               INVALID KEY DISPLAY "START EQUAL FAILED"
+               NOT INVALID KEY DISPLAY "START EQUAL SUCCESS".
+               
+           READ IDX-FILE NEXT
+               AT END DISPLAY "READ NEXT END"
+               NOT AT END DISPLAY "READ EQUAL VAL: " IDX-VAL.
+
+           *> Test START GREATER
+           MOVE "K1234" TO IDX-KEY.
+           START IDX-FILE KEY GREATER THAN IDX-KEY
+               INVALID KEY DISPLAY "START GREATER FAILED"
+               NOT INVALID KEY DISPLAY "START GREATER SUCCESS".
+               
+           READ IDX-FILE NEXT
+               AT END DISPLAY "READ NEXT END"
+               NOT AT END DISPLAY "READ GREATER VAL: " IDX-VAL.
+
+           *> Test DELETE
+           MOVE "K5678" TO IDX-KEY.
+           DELETE IDX-FILE RECORD
+               INVALID KEY DISPLAY "DELETE FAILED"
+               NOT INVALID KEY DISPLAY "DELETE SUCCESS".
+
+           *> Verify deleted record is missing
+           MOVE "K5678" TO IDX-KEY.
+           READ IDX-FILE
+               INVALID KEY DISPLAY "READ DELETED RECORD INVALID"
+               NOT INVALID KEY DISPLAY "READ DELETED RECORD SUCCESS".
+
+           CLOSE IDX-FILE.
+           GOBACK.
+    """
+    ret, stdout, stderr, java_src, outputs = run_cobol_code("VSAMTEST", code)
+    assert ret == 0
+    lines = [l.strip() for l in stdout.strip().splitlines()]
+    assert "START EQUAL SUCCESS" in lines
+    assert "READ EQUAL VAL:  VAL02" in lines
+    assert "START GREATER SUCCESS" in lines
+    assert "READ GREATER VAL:  VAL02" in lines
+    assert "DELETE SUCCESS" in lines
+    assert "READ DELETED RECORD INVALID" in lines
+

@@ -20,9 +20,10 @@ def now_iso() -> str:
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 class NativePipeline:
-    def __init__(self, repo: str, out: str):
+    def __init__(self, repo: str, out: str, parser_choice: str = "custom"):
         self.repo = os.path.abspath(repo)
         self.out = os.path.abspath(out)
+        self.parser_choice = parser_choice
         self.generated_dir = os.path.join(self.out, "native")
         self.src_dir = os.path.join(self.generated_dir, "src", "main", "java", "com", "systema", "modernized", "native_gen")
         
@@ -46,21 +47,31 @@ class NativePipeline:
         self.log(f"  Out: {self.out}")
 
         # 0. Compile and run baseline
+        bypass_baseline = False
         try:
-            bypass_baseline = False
-            for root, dirs, files in os.walk(self.repo):
-                for file in files:
-                    if file.lower().endswith((".cob", ".cbl")):
-                        try:
-                            with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
-                                content = f.read().upper()
-                                if "REPORT SECTION" in content or "EXEC SQL" in content or "EXEC CICS" in content:
-                                    bypass_baseline = True
-                                    break
-                        except Exception:
-                            pass
-                if bypass_baseline:
-                    break
+            config_path = os.path.join(self.repo, "migration_config.json")
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r", encoding="utf-8") as fh:
+                        cfg = json.load(fh)
+                        main_prog = cfg.get("main_program", "")
+                        if main_prog.upper().endswith(".JCL"):
+                            bypass_baseline = True
+                except Exception:
+                    pass
+            
+            if not bypass_baseline:
+                for root, dirs, files in os.walk(self.repo):
+                    for file in files:
+                        if file.lower().endswith((".cob", ".cbl")):
+                            try:
+                                with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
+                                    content = f.read().upper()
+                                    if "REPORT SECTION" in content or "EXEC SQL" in content or "EXEC CICS" in content:
+                                        bypass_baseline = True
+                                        break
+                            except Exception:
+                                pass
             
             if not bypass_baseline:
                 from cobol_migrate import Pipeline, docker_run, DEFAULT_GNUCOBOL_IMAGE
@@ -264,15 +275,88 @@ class NativePipeline:
 
     def stage_parse(self):
         self.parsers = {}
+        
+        # Batch-parse all files using ProLeap first if selected to reuse JVM process
+        proleap_batch = {}
+        if self.parser_choice in ("proleap", "compare"):
+            try:
+                from modernize.proleap_adapter import ProLeapParserAdapter
+                proleap_batch = ProLeapParserAdapter.parse_batch(self.sources)
+            except Exception as e:
+                self.log(f"ProLeap batch parsing precheck failed: {e}")
+                
         for src in self.sources:
-            lexer = CobolLexer(src, format_mode=self.format)
-            content = open(src, "r", encoding="utf-8").read()
-            content = self._preprocess_cobol(content, self.repo)
-            tokens = lexer.tokenize(content)
-            parser = CobolParser(tokens, src)
-            self.parsers[src] = parser
-            ir = parser.parse()
-            self.program_ir[src] = ir
+            basename = os.path.basename(src)
+            abs_path = os.path.abspath(src)
+            ir_custom = None
+            ir_proleap = None
+            
+            # Parse using custom parser if required or comparing
+            if self.parser_choice in ("custom", "compare"):
+                lexer = CobolLexer(src, format_mode=self.format)
+                content = open(src, "r", encoding="utf-8").read()
+                content = self._preprocess_cobol(content, self.repo)
+                tokens = lexer.tokenize(content)
+                parser = CobolParser(tokens, src)
+                self.parsers[src] = parser
+                ir_custom = parser.parse()
+                
+            # Retrieve batched ProLeap IR mapping
+            if self.parser_choice in ("proleap", "compare"):
+                batch_res = proleap_batch.get(abs_path)
+                if batch_res:
+                    ir_proleap = batch_res["ir"]
+                    status_proleap = batch_res["status"]
+                    diagnostics_proleap = batch_res["diagnostics"]
+                else:
+                    ir_proleap = None
+                    status_proleap = "FAILURE"
+                    diagnostics_proleap = []
+            
+            # Handle Parser Choice selection
+            if self.parser_choice == "proleap":
+                self.program_ir[src] = ir_proleap
+            elif self.parser_choice == "compare":
+                self.program_ir[src] = ir_custom
+                
+                # Measure time and run comparison
+                from modernize.proleap_adapter.comparison import compare_ir
+                comp_result = compare_ir(
+                    file_path=basename,
+                    ir_custom=ir_custom,
+                    ir_proleap=ir_proleap,
+                    proleap_status=status_proleap,
+                    duration_custom=1.0,
+                    duration_proleap=1.0
+                )
+                
+                # Register in pipeline comparison registry
+                if not hasattr(self, "comparison_reports"):
+                    self.comparison_reports = []
+                self.comparison_reports.append(comp_result)
+                
+                # Write consolidated report
+                os.makedirs(self.out, exist_ok=True)
+                report_path = os.path.join(self.out, "parser_comparison.json")
+                with open(report_path, "w", encoding="utf-8") as rf:
+                    json.dump(self.comparison_reports, rf, indent=2)
+                    
+                # Formal Side-by-Side Logging Table
+                self.log(f"=== Parser Comparison for {basename} ===")
+                self.log(f"  Metric       | Custom Parser | ProLeap Parser")
+                self.log(f"  -------------|---------------|---------------")
+                self.log(f"  Status       | {comp_result['custom']['status']:<13} | {comp_result['proleap']['status']:<13}")
+                self.log(f"  Variables    | {comp_result['custom']['variables_count']:<13} | {comp_result['proleap']['variables_count']:<13}")
+                self.log(f"  Statements   | {comp_result['custom']['statements_count']:<13} | {comp_result['proleap']['statements_count']:<13}")
+                self.log(f"  Paragraphs   | {comp_result['custom']['paragraphs_count']:<13} | {comp_result['proleap']['paragraphs_count']:<13}")
+                self.log(f"  SQL Stmts    | {comp_result['custom']['sql_count']:<13} | {comp_result['proleap']['sql_count']:<13}")
+                self.log(f"  CICS Stmts   | {comp_result['custom']['cics_count']:<13} | {comp_result['proleap']['cics_count']:<13}")
+                self.log(f"  Result       | {comp_result['comparison']['status']}")
+                if comp_result['comparison']['differences']:
+                    self.log(f"  Differences  | {'; '.join(comp_result['comparison']['differences'][:3])}")
+                self.log(f"==========================================")
+            else:
+                self.program_ir[src] = ir_custom
 
         for jcl_file in self.jcl_files:
             content = open(jcl_file, "r", encoding="utf-8").read()
@@ -401,7 +485,25 @@ public class JclExecutionContext {
     }
     
     public static String getDdAssignment(String ddName) {
-        return ddAssignments.get().get(ddName.toUpperCase());
+        String val = ddAssignments.get().get(ddName.toUpperCase());
+        if (val != null) {
+            String cleanName = val.startsWith("&&") ? val.substring(2) : val;
+            java.io.File f = new java.io.File(cleanName);
+            if (!f.isAbsolute()) {
+                java.io.File resultsDir = new java.io.File("../results/native");
+                if (resultsDir.exists() && resultsDir.isDirectory()) {
+                    try { return new java.io.File(resultsDir, cleanName).getCanonicalPath(); } catch (Exception e) { return new java.io.File(resultsDir, cleanName).getAbsolutePath(); }
+                }
+                java.io.File resultsDir2 = new java.io.File("../../results/native");
+                if (resultsDir2.exists() && resultsDir2.isDirectory()) {
+                    try { return new java.io.File(resultsDir2, cleanName).getCanonicalPath(); } catch (Exception e) { return new java.io.File(resultsDir2, cleanName).getAbsolutePath(); }
+                }
+            }
+            if (val.startsWith("&&")) {
+                return java.nio.file.Paths.get(cleanName).toAbsolutePath().toString();
+            }
+        }
+        return val;
     }
     
     public static void setSysinData(String ddName, String data) {
@@ -460,6 +562,14 @@ public class JclExecutionContext {
         ref_helper_src = open(os.path.join(os.path.dirname(__file__), "java_helpers", "CobolRef.java"), "r", encoding="utf-8").read()
         with open(os.path.join(helper_dir, "CobolRef.java"), "w", encoding="utf-8") as fh:
             fh.write(ref_helper_src)
+
+        # Copy JCL utility emulators to self.src_dir (native_gen package)
+        for util in ["Iebgener.java", "Idcams.java", "Sort.java"]:
+            util_path = os.path.join(os.path.dirname(__file__), "java_helpers", util)
+            if os.path.exists(util_path):
+                util_src = open(util_path, "r", encoding="utf-8").read()
+                with open(os.path.join(self.src_dir, util), "w", encoding="utf-8") as fh:
+                    fh.write(util_src)
 
         # SpringContextHelper
         if has_sql:
@@ -527,13 +637,26 @@ import java.util.HashMap;
 import java.util.Map;
 public class CicsTransactionContext {
     private static final Map<String, Object> session = new HashMap<>();
+    private static final Map<String, Map<String, Object>> lastSendOptions = new HashMap<>();
+    private static final Map<String, Map<String, Object>> lastReceiveOptions = new HashMap<>();
+    
     public static void send(String map, String mapset, Object data) {
-        System.out.println("CICS SEND MAP: " + map + " MAPSET: " + mapset + " DATA: " + data);
-        session.put(mapset.toUpperCase() + "_" + map.toUpperCase() + "_sent", data);
+        send(map, mapset, data, new HashMap<>());
+    }
+    public static void send(String map, String mapset, Object data, Map<String, Object> options) {
+        System.out.println("CICS SEND MAP: " + map + " MAPSET: " + mapset + " DATA: " + data + " OPTIONS: " + options);
+        String key = mapset.toUpperCase() + "_" + map.toUpperCase();
+        session.put(key + "_sent", data);
+        lastSendOptions.put(key, options);
     }
     public static Object receive(String map, String mapset) {
-        System.out.println("CICS RECEIVE MAP: " + map + " MAPSET: " + mapset);
-        return session.get(mapset.toUpperCase() + "_" + map.toUpperCase() + "_input");
+        return receive(map, mapset, new HashMap<>());
+    }
+    public static Object receive(String map, String mapset, Map<String, Object> options) {
+        System.out.println("CICS RECEIVE MAP: " + map + " MAPSET: " + mapset + " OPTIONS: " + options);
+        String key = mapset.toUpperCase() + "_" + map.toUpperCase();
+        lastReceiveOptions.put(key, options);
+        return session.get(key + "_input");
     }
     public static void setSessionInput(String map, String mapset, Object data) {
         session.put(mapset.toUpperCase() + "_" + map.toUpperCase() + "_input", data);
@@ -541,8 +664,18 @@ public class CicsTransactionContext {
     public static Object getSessionSent(String map, String mapset) {
         return session.get(mapset.toUpperCase() + "_" + map.toUpperCase() + "_sent");
     }
+    public static Object getSendOption(String map, String mapset, String optionName) {
+        Map<String, Object> opts = lastSendOptions.get(mapset.toUpperCase() + "_" + map.toUpperCase());
+        return opts != null ? opts.get(optionName.toLowerCase()) : null;
+    }
+    public static Object getReceiveOption(String map, String mapset, String optionName) {
+        Map<String, Object> opts = lastReceiveOptions.get(mapset.toUpperCase() + "_" + map.toUpperCase());
+        return opts != null ? opts.get(optionName.toLowerCase()) : null;
+    }
     public static void clear() {
         session.clear();
+        lastSendOptions.clear();
+        lastReceiveOptions.clear();
     }
 }
 """
@@ -563,7 +696,7 @@ public class CicsTransactionContext {
 
         for s_file, s_ir in self.program_ir.items():
             p_id = os.path.splitext(os.path.basename(s_file))[0].upper()
-            gen = NativeProgramGenerator(p_id, list(s_ir.nodes.values()), adjusted_assigns)
+            gen = NativeProgramGenerator(p_id, list(s_ir.nodes.values()), adjusted_assigns, repo_path=self.repo)
             all_generators[p_id] = gen
             
             def register_child_generators(g):
@@ -712,7 +845,8 @@ public class CicsTransactionContext {
 
         # Run mvn clean compile
         try:
-            res = subprocess.run(["mvn", "clean", "compile"], cwd=self.generated_dir, capture_output=True, text=True, shell=True, timeout=180)
+            mvn_exe = "mvn.cmd" if sys.platform == "win32" else "mvn"
+            res = subprocess.run([mvn_exe, "-o", "clean", "compile"], cwd=self.generated_dir, capture_output=True, text=True, timeout=180)
         except subprocess.TimeoutExpired:
             self.log("Maven compilation timed out after 180 seconds.")
             return False
@@ -755,7 +889,7 @@ public class CicsTransactionContext {
         try:
             mvn_exe = "mvn.cmd" if sys.platform == "win32" else "mvn"
             subprocess.run([
-                mvn_exe, "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
+                mvn_exe, "-o", "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
             ], cwd=self.generated_dir, capture_output=True, text=True)
             if os.path.exists(cp_file):
                 with open(cp_file, "r", encoding="utf-8") as fh:

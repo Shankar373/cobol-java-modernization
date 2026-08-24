@@ -132,11 +132,17 @@ def emit_run_event(run, event_type, message="", stage=None, status=None, **kwarg
 
 
 def start_run(run_id, restart_from):
-    run = RUNS.get(run_id)
-    if not run:
-        return False, "unknown run"
-    if run.get("status") == "running":
-        return False, "run already in progress"
+    with LOCK:
+        active = [r for r in RUNS.values() if r.get("status") == "running"]
+        if active:
+            return False, "another run is in progress"
+        run = RUNS.get(run_id)
+        if not run:
+            return False, "unknown run"
+        if run.get("status") == "running":
+            return False, "run already in progress"
+        run["status"] = "running"
+        run["started_at"] = engine.now_iso()
 
     if restart_from is not None and restart_from > 0:
         divider_msg = (
@@ -157,53 +163,52 @@ def start_run(run_id, restart_from):
         emit_run_event(run, event_type, **kwargs)
 
     def worker():
-        with LOCK:
-            run["status"] = "running"
-            run["started_at"] = engine.now_iso()
-            engine.LOG_SINK = sink
-            engine.EVENT_SINK = event_sink
-            
-            p = None
-            try:
-                run_cfg_path = os.path.join(run["repo"], "migration_config.json")
-                if os.path.exists(run_cfg_path):
-                    run_cfg = engine.load_json(run_cfg_path, {})
-                else:
-                    run_cfg = {
-                        "execution": CFG.get("execution", {}),
-                        "compare": {
-                            "output_dirs": [],
-                            "modes": {},
-                            "checks": []
-                        }
+        # Set sinks globally for this single active execution thread
+        engine.LOG_SINK = sink
+        engine.EVENT_SINK = event_sink
+        
+        p = None
+        try:
+            run_cfg_path = os.path.join(run["repo"], "migration_config.json")
+            if os.path.exists(run_cfg_path):
+                run_cfg = engine.load_json(run_cfg_path, {})
+            else:
+                run_cfg = {
+                    "execution": CFG.get("execution", {}),
+                    "compare": {
+                        "output_dirs": [],
+                        "modes": {},
+                        "checks": []
                     }
-                p = engine.Pipeline(run["repo"], run["out"], cfg=run_cfg, pull=True)
-                p.run_id = run_id
-                run["pipeline"] = p
-                
-                p.run(restart_from=restart_from)
-                
-                state = engine.load_json(os.path.join(run["out"], "state.json"), {})
-                run["last_stage"] = 12 if state.get("stages", {}).get("package", {}).get("status") == "done" else 11
-                run["verdict"] = state.get("stages", {}).get("report", {}).get("detail", "done")
-                run["status"] = "done"
-            except BaseException as e:
-                if (p and getattr(p, "cancelled", False)) or isinstance(e, KeyboardInterrupt):
-                    run["status"] = "interrupted"
-                    run["error"] = "Pipeline execution cancelled by user."
-                else:
-                    run["error"] = f"{type(e).__name__}: {e}"
-                    run["status"] = "error"
-            finally:
+                }
+            p = engine.Pipeline(run["repo"], run["out"], cfg=run_cfg, pull=True)
+            p.run_id = run_id
+            run["pipeline"] = p
+            
+            p.run(restart_from=restart_from)
+            
+            state = engine.load_json(os.path.join(run["out"], "state.json"), {})
+            run["last_stage"] = 12 if state.get("stages", {}).get("package", {}).get("status") == "done" else 11
+            run["verdict"] = state.get("stages", {}).get("report", {}).get("detail", "done")
+            run["status"] = "done"
+        except BaseException as e:
+            if (p and getattr(p, "cancelled", False)) or isinstance(e, KeyboardInterrupt):
+                run["status"] = "interrupted"
+                run["error"] = "Pipeline execution cancelled by user."
+            else:
+                run["error"] = f"{type(e).__name__}: {e}"
+                run["status"] = "error"
+        finally:
+            with LOCK:
                 run.pop("pipeline", None)
                 engine.LOG_SINK = None
                 engine.EVENT_SINK = None
                 
-                for idx, (lab, _) in enumerate(STEP_LABELS):
-                    st = engine.load_json(os.path.join(run["out"], "state.json"), {}).get("stages", {})
-                    if st.get(engine.STAGES[idx], {}).get("status") == "done":
-                        run["last_stage"] = idx
-                run["finished_at"] = engine.now_iso()
+            for idx, (lab, _) in enumerate(STEP_LABELS):
+                st = engine.load_json(os.path.join(run["out"], "state.json"), {}).get("stages", {})
+                if st.get(engine.STAGES[idx], {}).get("status") == "done":
+                    run["last_stage"] = idx
+            run["finished_at"] = engine.now_iso()
 
     t = threading.Thread(target=worker, daemon=True)
     t.start()
