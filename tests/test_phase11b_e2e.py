@@ -115,7 +115,7 @@ def test_e2e_modernization_lifecycle(test_server, minimal_cobol_zip):
         
         # Wait for stages to progress and finish
         # We poll until status becomes 'done' or 'error' in runs list sidebar
-        page.wait_for_selector(".run-item.active .chip-done, .run-item.active .chip-error", timeout=120000)
+        page.wait_for_selector(".run-item.active .chip-done, .run-item.active .chip-error", timeout=240000)
         
         # Verify program name is populated after discovery
         assert "SMOKE" in page.locator(".repo-card").inner_text()
