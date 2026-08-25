@@ -1477,7 +1477,14 @@ class CobolParser:
             
             if op in ("WRITE", "REWRITE") and self.match("KEYWORD", "FROM"):
                 from_tok = self.consume_val("Expected source identifier/literal after FROM")
-                from_source = from_tok.value
+                # Preserve literal-ness: string literals are re-quoted so the
+                # generator can distinguish them from data identifiers.
+                if from_tok.type == "LITERAL_STRING":
+                    from_source = f'"{from_tok.value}"'
+                elif from_tok.type == "NUMBER":
+                    from_source = str(from_tok.value)
+                else:
+                    from_source = from_tok.value
             elif op == "READ":
                 if self.match("KEYWORD", "NEXT"):
                     is_next = True

@@ -71,18 +71,36 @@ class TestVerdictTiers:
             "status": "PASS",
             "checks": [{"ok": True}],
             "rows": [{"verdict": "match"}],
+            "stdout_equiv_ok": True,
         })
         # No dep_audit -> stays VERIFIED
         _set_data(p, "collect", {})
         v = p._compute_verdict()
         assert v == "VERIFIED"
 
+    def test_missing_stdout_equiv_evidence_blocks_verified(self, blank_pipeline):
+        """Fail-closed: compare data lacking stdout equivalence evidence must not
+        reach VERIFIED even when all file rows match."""
+        p = blank_pipeline
+        _set_stage_done(p, "ingest")
+        _set_data(p, "transpile", {"n_ok": 1, "n_total": 1})
+        _set_data(p, "baseline_files", ["out.txt"])
+        _set_data(p, "compare", {
+            "status": "PASS",
+            "checks": [{"ok": True}],
+            "rows": [{"verdict": "match"}],
+            # stdout_equiv_ok deliberately absent -> no evidence
+        })
+        v = p._compute_verdict()
+        assert v == "FAILED"
+
     def test_native_java_verified_with_dep_audit_pass(self, blank_pipeline):
         p = blank_pipeline
         _set_stage_done(p, "ingest")
         _set_data(p, "transpile", {"n_ok": 1, "n_total": 1})
         _set_data(p, "baseline_files", ["out.txt"])
-        _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": []})
+        _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": [],
+                                 "stdout_equiv_ok": True})
         _set_data(p, "collect", {"dependency_audit": {"status": "PASS"}})
         # No generate stage done -> NATIVE_JAVA_VERIFIED
         v = p._compute_verdict()
@@ -94,12 +112,28 @@ class TestVerdictTiers:
         _set_stage_done(p, "generate")
         _set_data(p, "transpile", {"n_ok": 1, "n_total": 1})
         _set_data(p, "baseline_files", ["out.txt"])
-        _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": []})
+        _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": [],
+                                 "stdout_equiv_ok": True})
         _set_data(p, "collect", {"dependency_audit": {"status": "PASS"}})
-        _set_data(p, "generate", {})
+        _set_data(p, "generate", {"dependency_audit": {"executed": True, "status": "PASS"}})
         # execute not done -> NATIVE_SPRING_UNIFIED
         v = p._compute_verdict()
         assert v in ("NATIVE_SPRING_UNIFIED", "PRODUCTION_CANDIDATE")
+
+    def test_enterprise_gate_requires_real_audit_evidence(self, blank_pipeline):
+        """Generating a Spring project without dependency-audit evidence caps the
+        verdict at NATIVE_JAVA_VERIFIED — existence is not evidence."""
+        p = blank_pipeline
+        for s in ("ingest", "generate"):
+            _set_stage_done(p, s)
+        _set_data(p, "transpile", {"n_ok": 1, "n_total": 1})
+        _set_data(p, "baseline_files", ["out.txt"])
+        _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": [],
+                                 "stdout_equiv_ok": True})
+        _set_data(p, "collect", {"dependency_audit": {"status": "PASS"}})
+        _set_data(p, "generate", {})  # no audit evidence at all
+        v = p._compute_verdict()
+        assert v == "NATIVE_JAVA_VERIFIED"
 
     def test_production_ready_requires_all_gates(self, blank_pipeline):
         """PRODUCTION_READY must never be returned when neg_equiv is absent."""
@@ -132,12 +166,15 @@ class TestVerdictTiers:
         _set_stage_done(p, "validate")
         _set_data(p, "transpile", {"n_ok": 1, "n_total": 1})
         _set_data(p, "baseline_files", ["out.txt"])
-        _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": []})
+        _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": [],
+                                 "stdout_equiv_ok": True})
         # Phase 10: executed=True is required for both gates to reach PRODUCTION_READY.
         _set_data(p, "collect", {"dependency_audit": {
             "executed": True, "status": "PASS", "verdict": "PASS",
         }})
-        _set_data(p, "generate", {})
+        _set_data(p, "generate", {"dependency_audit": {
+            "executed": True, "status": "PASS",
+        }})
         _set_data(p, "execute", {"status": "ok"})
         _set_data(p, "validate", {"status": "passed"})
         _set_data(p, "neg_equiv", {

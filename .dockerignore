@@ -20,7 +20,9 @@ __pycache__/
 # Local dev/audit files
 *.log
 audit/
-execution/
+# NOTE: execution/ is NOT ignored — cobol_migrate.py imports the execution
+# package at runtime (baseline/execute/compare stages). Excluding it breaks
+# containerized runs with ModuleNotFoundError.
 
 # IDE
 .vscode/

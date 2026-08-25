@@ -22,6 +22,17 @@
     "modes": {
       "data/out/eod-claims-report.txt": "normalized"
     },
+    "semantic_comparators": {
+      "data/out/claim-audit.dat": {"type": "pipe_records", "note": "pipe-delimited records with numeric amount field"},
+      "data/out/eod-claims-report.txt": {
+        "type": "labeled_counts",
+        "labels": {
+          "AUDIT RECORDS": "audit",
+          "EXCEPTIONS": "exc",
+          "MANUAL REVIEWS": "review"
+        }
+      }
+    },
     "checks": [
       {
         "file": "data/out/claim-audit.dat",

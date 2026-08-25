@@ -962,14 +962,19 @@ def _convert_sql_include(match, self_name: str = "") -> str:
     return f"{indent}COPY {name}."
 
 
-def _comment_out_block(match, label: str, add_continue: bool = True) -> str:
-    """Replace an EXEC CICS/SQL procedural block with a fixed-format comment stub."""
+def _comment_out_block(match, label: str, add_continue: bool = True, fmt: str = "fixed") -> str:
+    """Replace an EXEC CICS/SQL procedural block with a comment stub.
+
+    Comment style is format-aware: fixed-format uses '*' in column 7,
+    free-format requires '*>' — a bare '*' with leading spaces is code.
+    """
     lines = match.group(0).split('\n')
     indent = match.group(1) if match.group(1) else '           '
-    result = [f"      * [PREPROCESSED: {label} stub]"]
+    marker = "*>" if fmt == "free" else "*"
+    result = [f"      {marker} [PREPROCESSED: {label} stub]"]
     for l in lines:
         if l.strip():
-            result.append(f"      * {l.strip()}")
+            result.append(f"      {marker} {l.strip()}")
     if add_continue:
         # Check if the original block ended with a period
         ends_with_period = match.group(0).rstrip().endswith('.')
@@ -1042,7 +1047,7 @@ def _inject_missing_paragraph_stubs(text: str) -> tuple:
     return text, len(missing)
 
 
-def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list) -> tuple:
+def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list, fmt: str = "fixed") -> tuple:
     """
     Create a _preprocessed/ shadow of the relevant source tree inside repo_dir.
     Returns (preprocessed_sources, preprocessed_copybook_dirs, stats_dict).
@@ -1083,6 +1088,7 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list)
             raw = open(src_path, 'rb').read()
         except OSError:
             return
+        # Capture fmt from enclosing scope (preprocess_cobol_for_cobj)
         # Decode tolerantly
         try:
             text = raw.decode('utf-8')
@@ -1194,9 +1200,14 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list)
 
 
         # 1b. Fix misplaced comment asterisks (asterisk not in col 7)
-        #     In fixed-format COBOL, comments must have '*' in exactly column 7.
-        #     If the comment has '*' or '*>' in columns 8+, cobj parses it as code and fails.
-        text = re.sub(r'^\s*\*>?', r'      *', text, flags=re.MULTILINE)
+        #     Format-aware: fixed-format requires '*' in exactly column 7;
+        #     free-format requires '> *' i.e. '*>' — a bare '*' with leading
+        #     spaces is CODE in free format and breaks cobj -free.
+        if fmt == "free":
+            text = re.sub(r'^[ \t]+\*(?![/>])', '*> ', text, flags=re.MULTILINE)
+            text = re.sub(r'^\*(?![/>])', '*> ', text, flags=re.MULTILINE)
+        else:
+            text = re.sub(r'^\s*\*>?', r'      *', text, flags=re.MULTILINE)
 
         # 2. FROM TIME STAMP → FROM TIME
         n, count = _RE_TIME_STAMP.subn('FROM TIME', text)
@@ -1254,25 +1265,25 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list)
             data_part, proc_header, proc_part = parts
             
             # Data section (no CONTINUE)
-            data_part, count_cics = _RE_EXEC_CICS.subn(lambda m: _comment_out_block(m, "CICS", add_continue=False), data_part)
+            data_part, count_cics = _RE_EXEC_CICS.subn(lambda m: _comment_out_block(m, "CICS", add_continue=False, fmt=fmt), data_part)
             stats["cics_stubbed"] += count_cics
-            data_part, count_sql = _RE_EXEC_SQL.subn(lambda m: _comment_out_block(m, "SQL", add_continue=False), data_part)
+            data_part, count_sql = _RE_EXEC_SQL.subn(lambda m: _comment_out_block(m, "SQL", add_continue=False, fmt=fmt), data_part)
             stats["sql_stubbed"] += count_sql
             
             # Procedure section (with CONTINUE)
-            proc_part, count_cics_p = _RE_EXEC_CICS.subn(lambda m: _comment_out_block(m, "CICS", add_continue=True), proc_part)
+            proc_part, count_cics_p = _RE_EXEC_CICS.subn(lambda m: _comment_out_block(m, "CICS", add_continue=True, fmt=fmt), proc_part)
             stats["cics_stubbed"] += count_cics_p
-            proc_part, count_sql_p = _RE_EXEC_SQL.subn(lambda m: _comment_out_block(m, "SQL", add_continue=True), proc_part)
+            proc_part, count_sql_p = _RE_EXEC_SQL.subn(lambda m: _comment_out_block(m, "SQL", add_continue=True, fmt=fmt), proc_part)
             stats["sql_stubbed"] += count_sql_p
             
             text = data_part + proc_header + proc_part
         else:
             # If no PROCEDURE DIVISION (like in copybooks), do not add CONTINUE
-            n, count = _RE_EXEC_CICS.subn(lambda m: _comment_out_block(m, "CICS", add_continue=False), text)
+            n, count = _RE_EXEC_CICS.subn(lambda m: _comment_out_block(m, "CICS", add_continue=False, fmt=fmt), text)
             if count:
                 text = n
                 stats["cics_stubbed"] += count
-            n, count = _RE_EXEC_SQL.subn(lambda m: _comment_out_block(m, "SQL", add_continue=False), text)
+            n, count = _RE_EXEC_SQL.subn(lambda m: _comment_out_block(m, "SQL", add_continue=False, fmt=fmt), text)
             if count:
                 text = n
                 stats["sql_stubbed"] += count
@@ -1370,8 +1381,8 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list)
                 if cb_upper in COBJ_PROC_COPYBOOKS:
                     # Run SQL/CICS preprocessor stubbing on the copybook procedures
                     raw_proc = COBJ_PROC_COPYBOOKS[cb_upper]
-                    raw_proc = _RE_EXEC_CICS.sub(lambda m: _comment_out_block(m, "CICS", add_continue=True), raw_proc)
-                    raw_proc = _RE_EXEC_SQL.sub(lambda m: _comment_out_block(m, "SQL", add_continue=True), raw_proc)
+                    raw_proc = _RE_EXEC_CICS.sub(lambda m: _comment_out_block(m, "CICS", add_continue=True, fmt=fmt), raw_proc)
+                    raw_proc = _RE_EXEC_SQL.sub(lambda m: _comment_out_block(m, "SQL", add_continue=True, fmt=fmt), raw_proc)
                     proc_additions.append(raw_proc)
             if proc_additions:
                 text = text.rstrip() + "\n\n      * [PP: Appended procedures from copybooks]\n" + "\n".join(proc_additions)
@@ -1961,7 +1972,7 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list)
 def transpile(repo_dir, sources, copybook_dirs, fmt):
     # --- Enterprise pre-processing: normalize IBM/CICS/DB2 dialect ---
     norm_sources, norm_cb_dirs, norm_dir, pp_stats = preprocess_cobol_for_cobj(
-        repo_dir, sources, copybook_dirs
+        repo_dir, sources, copybook_dirs, fmt=fmt
     )
     if any(v > 0 for v in pp_stats.values()):
         log(f"  [PREPROCESS] {pp_stats}")
@@ -1977,13 +1988,31 @@ def transpile(repo_dir, sources, copybook_dirs, fmt):
         f"cobj {' '.join(flags)} {incs} -o generated -j generated {srcs} && "
         f"cp -rf generated/* /repo/generated/ 2>/dev/null || true"
     )
-    # Ensure repo generated/ exists
+    # Ensure repo generated/ exists AND is empty: a stale <PROG>.java from a
+    # previous run must never count as a successful transpilation.
+    shutil.rmtree(os.path.join(repo_dir, "generated"), ignore_errors=True)
     os.makedirs(os.path.join(repo_dir, "generated"), exist_ok=True)
     r = docker_run(DEFAULT_COBJ_IMAGE, [(repo_dir, "/repo")], "/repo", cmd)
+
+    def _java_exists(src):
+        """cobj names outputs after PROGRAM-ID, not the source file name.
+        Accept either <source-stem>.java or <PROGRAM-ID>.java."""
+        base = os.path.splitext(os.path.basename(src))[0]
+        if os.path.exists(os.path.join(repo_dir, "generated", base + ".java")):
+            return True
+        abs_src = os.path.join(repo_dir, src)
+        try:
+            with open(abs_src, encoding="utf-8", errors="replace") as fh:
+                pid = find_program_id(fh.read())
+        except OSError:
+            pid = None
+        if pid and pid != base:
+            return os.path.exists(os.path.join(repo_dir, "generated", pid + ".java"))
+        return False
+
     status = {}
     for src in sources:
-        base = os.path.splitext(os.path.basename(src))[0]
-        status[src] = os.path.exists(os.path.join(repo_dir, "generated", base + ".java"))
+        status[src] = _java_exists(src)
     if r.returncode != 0:
         # Fallback: compile each failed program individually in a single docker run command
         fallback_cmds = []
@@ -2008,10 +2037,7 @@ def transpile(repo_dir, sources, copybook_dirs, fmt):
             )
             # Recheck status for all programs
             for src in sources:
-                base = os.path.splitext(os.path.basename(src))[0]
-                status[src] = os.path.exists(
-                    os.path.join(repo_dir, "generated", base + ".java")
-                )
+                status[src] = _java_exists(src)
     return r.returncode, status, r.stdout, r.stderr
 
 
@@ -2090,9 +2116,10 @@ def clean_outputs(repo_dir, rel_dirs, file_assigns=None, skip_paths=None):
             for a in assigns:
                 path = a.get("assign_path")
                 if path:
-                    # Skip cleaning static input files
+                    # Skip cleaning static input files (generic path-shape rules;
+                    # no fixture-specific file names).
                     p_lower = path.lower().replace("\\", "/")
-                    if "/in/" in p_lower or "/input/" in p_lower or p_lower.endswith("/input.txt") or p_lower.endswith("/interactive_input.txt") or p_lower.endswith("claims.dat") or p_lower.endswith("rundate.txt"):
+                    if "/in/" in p_lower or "/input/" in p_lower or p_lower.endswith("/input.txt") or p_lower.endswith("/interactive_input.txt"):
                         continue
                     
                     rel = path.lower().replace("\\", "/").strip("/")
@@ -2320,180 +2347,90 @@ def write_scripts(out_dir, repo_dir, entry):
         )
 
 
-def extract_business_rules_traceability(repo_path):
-    """Extracts COBOL business rules and maps them to Java implementation and tests."""
-    return [
-        {
-            "ruleId": "CC" + "PROC01-R001",
-            "program": "CC" + "PROC01",
-            "sourceLine": 75,
-            "cobolStatement": "ADD 1 TO WS-CLAIM-COUNT",
-            "businessInterpretation": "Every parsed claim increments the batch total claim counter.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> totalClaimCount++",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.approvedAmountIsClaimMinusDeductible()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R002",
-            "program": "CC" + "PROC01",
-            "sourceLine": 81,
-            "cobolStatement": "READ POLICY-MASTER / IF WS-POL-STATUS NOT = \"00\"",
-            "businessInterpretation": "If policy master key lookup fails (status != '00'), reject with P001 POLICY NOT FOUND.",
-            "nativeJavaMapping": "Business" + "Processing" + "Service.processClaim() -> policy" + "Repository.findById() == null",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.policyNotFoundRejectsP001()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R003",
-            "program": "CC" + "PROC01",
-            "sourceLine": 96,
-            "cobolStatement": "WHEN POL-STATUS NOT = \"A\"",
-            "businessInterpretation": "If policy status is not 'A' (active), reject with P002 POLICY INACTIVE OR EXPIRED.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> !'A'.equals(policy.getStatus())",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.inactivePolicyRejectsP002()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R004",
-            "program": "CC" + "PROC01",
-            "sourceLine": 100,
-            "cobolStatement": "WHEN CLM-TYPE NOT = POL-TYPE",
-            "businessInterpretation": "If claim type does not match policy type, reject with P003 CLAIM TYPE NOT COVERED BY POLICY.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> !claim.getType().equals(policy.getType())",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.typeMismatchRejectsP003()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R005",
-            "program": "CC" + "PROC01",
-            "sourceLine": 107,
-            "cobolStatement": "COMPUTE WS-APPROVED-AMOUNT = CLM-LOSS-AMOUNT - POL-DEDUCTIBLE",
-            "businessInterpretation": "Settlement amount is calculated as raw loss amount minus policy deductible.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> claim.getAmount().subtract(policy.getDeductible())",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.approvedAmountIsClaimMinusDeductible()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R006",
-            "program": "CC" + "PROC01",
-            "sourceLine": 108,
-            "cobolStatement": "IF WS-APPROVED-AMOUNT < 0 MOVE 0 TO WS-APPROVED-AMOUNT END-IF",
-            "businessInterpretation": "If deductible exceeds loss amount resulting in negative approved amount, floor at zero.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> if (approvedAmount.compareTo(ZERO) < 0) approvedAmount = ZERO",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.boundaryLossLessThanDeductible()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R007",
-            "program": "CC" + "PROC01",
-            "sourceLine": 109,
-            "cobolStatement": "IF WS-APPROVED-AMOUNT > POL-COVER-LIMIT MOVE POL-COVER-LIMIT TO WS-APPROVED-AMOUNT END-IF",
-            "businessInterpretation": "If approved amount exceeds policy cover limit, cap at policy cover limit.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> if (approvedAmount.compareTo(coverLimit) > 0) approvedAmount = coverLimit",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.boundaryApprovedGreaterThanCoverLimit()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R008",
-            "program": "CC" + "PROC01",
-            "sourceLine": 112,
-            "cobolStatement": "IF WS-APPROVED-AMOUNT > 200000 MOVE CC-REVIEW TO WS-RESULT END-IF",
-            "businessInterpretation": "If approved amount is strictly greater than 200,000, flag claim status as MANUAL_REVIEW, else APPROVED.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> approvedAmount.compareTo(200000) > 0 ? MANUAL_REVIEW : APPROVED",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.boundaryApprovedEquals200kIsApproved()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R009",
-            "program": "CC" + "PROC01",
-            "sourceLine": 89,
-            "cobolStatement": "IF WS-RESULT = CC-VALID OR WS-RESULT = CC-REVIEW PERFORM WRITE-AUDIT",
-            "businessInterpretation": "Valid and manual review claims write an audit record with approved amount and status.",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> saveAudit(claim, status, approvedAmount)",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.auditPersistedForProcessedClaims()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R010",
-            "program": "CC" + "PROC01",
-            "sourceLine": 91,
-            "cobolStatement": "ELSE PERFORM WRITE-REJECTION",
-            "businessInterpretation": "Invalid claims write an exception record with error code and reason text (no audit record).",
-            "nativeJavaMapping": "BusinessProcessingService.processClaim() -> saveException(claim, code, text)",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.invalidClaimNeverPersistsAuditRow()"
-        },
-        {
-            "ruleId": "CC" + "PROC01-R011",
-            "program": "CC" + "PROC01",
-            "sourceLine": 126,
-            "cobolStatement": "ADD 1 TO WS-REJECTED-COUNT",
-            "businessInterpretation": "Rejection handler increments batch WS-REJECTED-COUNT.",
-            "nativeJavaMapping": "BusinessProcessingService.saveException() -> rejectedCount++",
-            "mappingStatus": "MAPPED",
-            "testMapping": "BusinessProcessingServiceTest.policyNotFoundRejectsP001()"
-        },
-        {
-            "ruleId": "CC" + "REPT01-R001",
-            "program": "CC" + "REPT01",
-            "sourceLine": 40,
-            "cobolStatement": "ADD 1 TO WS-AUDIT-COUNT",
-            "businessInterpretation": "Counts total audit lines read from claim-audit.dat.",
-            "nativeJavaMapping": "EodReport_Service.countAuditRecords() -> claim_Audit_Repository.count()",
-            "mappingStatus": "MAPPED",
-            "testMapping": "EodReport_ServiceTest.reportMatchesCobolBaselineCounts()"
-        },
-        {
-            "ruleId": "CC" + "REPT01-R002",
-            "program": "CC" + "REPT01",
-            "sourceLine": 41,
-            "cobolStatement": "IF AUDIT-LINE(25:13) = \"MANUAL_REVIEW\" ADD 1 TO WS-REVIEW-COUNT",
-            "businessInterpretation": "Counts manual review claims by checking substring 'MANUAL_REVIEW' at offset 25.",
-            "nativeJavaMapping": "EodReport_Service.countManualReviews() -> claim_Audit_Repository.countByStatus('MANUAL_REVIEW')",
-            "mappingStatus": "MAPPED",
-            "testMapping": "EodReport_ServiceTest.reportMatchesCobolBaselineCounts()"
-        },
-        {
-            "ruleId": "CC" + "REPT01-R003",
-            "program": "CC" + "REPT01",
-            "sourceLine": 50,
-            "cobolStatement": "ADD 1 TO WS-EXCEPTION-COUNT",
-            "businessInterpretation": "Counts total exception lines read from claim-exceptions.dat.",
-            "nativeJavaMapping": "EodReport_Service.countExceptions() -> claim_Exception_Repository.count()",
-            "mappingStatus": "MAPPED",
-            "testMapping": "EodReport_ServiceTest.reportMatchesCobolBaselineCounts()"
-        },
-        {
-            "ruleId": "CC" + "REPT01-R004",
-            "program": "CC" + "REPT01",
-            "sourceLine": 54,
-            "cobolStatement": "MOVE ALL \"=\" TO REPORT-LINE WRITE REPORT-LINE",
-            "businessInterpretation": "Formats EOD header with 160 '=' characters.",
-            "nativeJavaMapping": "EodReport_Service.buildReport() -> Arrays.fill(buf, '=')",
-            "mappingStatus": "MAPPED",
-            "testMapping": "EodReport_ServiceTest.reportHeaderSeparatorIsExactly160Equals()"
-        },
-        {
-            "ruleId": "CC" + "REPT01-R005",
-            "program": "CC" + "REPT01",
-            "sourceLine": 57,
-            "cobolStatement": "STRING \"AUDIT RECORDS         : \" WS-AUDIT-COUNT DELIMITED BY SIZE INTO REPORT-LINE",
-            "businessInterpretation": "Overlays label and zero-padded PIC 9(7) count onto 160-char buffer, preserving trailing buffer contents.",
-            "nativeJavaMapping": "EodReport_Service.stringInto() -> format '%07d' and overlay leading bytes",
-            "mappingStatus": "MAPPED",
-            "testMapping": "EodReport_ServiceTest.reportReproducesCobolGoldenBytes()"
-        },
-        {
-            "ruleId": "CC" + "REPT01-R006",
-            "program": "CC" + "REPT01",
-            "sourceLine": 63,
-            "cobolStatement": "MOVE \"STATUS: CLAIMS BATCH COMPLETED\" TO REPORT-LINE WRITE REPORT-LINE",
-            "businessInterpretation": "Writes final batch completion status line.",
-            "nativeJavaMapping": "EodReport_Service.buildReport() -> STATUS: CLAIMS BATCH COMPLETED line",
-            "mappingStatus": "MAPPED",
-            "testMapping": "EodReport_ServiceTest.reportMatchesCobolBaselineCounts()"
-        }
-    ]
+_RULE_VERBS = re.compile(
+    r"^\s{0,20}(COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE|IF|EVALUATE|READ|WRITE|REWRITE|DELETE|START|PERFORM|STRING|UNSTRING)\b",
+    re.IGNORECASE,
+)
+
+
+def _to_java_class_name(program_id):
+    parts = re.split(r"[^A-Za-z0-9]+", program_id or "")
+    return "".join(p[:1].upper() + p[1:].lower() for p in parts if p) or "Program"
+
+
+def extract_business_rules_traceability(repo_path, mapped_classes=None):
+    """Dynamically extract business-rule candidates from the COBOL sources.
+
+    This replaces an earlier hardcoded single-benchmark rulebook. Rules are
+    derived from REAL statements in the repository sources; every entry carries
+    its true source coordinate. Mapping evidence is explicit:
+
+      - nativeJavaMapping points at the generated native class for the program;
+        mappingStatus is MAPPED only when that class file actually exists in
+        the generated enterprise project (passed via ``mapped_classes``).
+      - testMapping is NEVER fabricated: automated per-rule tests are not
+        generated by this platform, so it is honestly reported as NONE.
+
+    Returns [] when no procedural sources are found — never invented rules.
+    """
+    mapped_classes = mapped_classes or {}
+    rules = []
+    seen = 0
+    for root, dirs, files in os.walk(repo_path):
+        dirs[:] = [d for d in dirs if d not in ("generated", "bin", ".git", "__pycache__", "_preprocessed")]
+        for fname in sorted(files):
+            if not fname.upper().endswith((".COB", ".CBL")):
+                continue
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
+                    lines = fh.read().splitlines()
+            except OSError:
+                continue
+            # Program ID from source, falling back to file name.
+            prog = None
+            proc_start = None
+            for i, ln in enumerate(lines):
+                m_prog = re.match(r"(?i)\s{0,6}PROGRAM-ID\.\s+([A-Za-z0-9-]+)", ln)
+                if m_prog and prog is None:
+                    prog = m_prog.group(1)
+                if re.search(r"(?i)\bPROCEDURE\s+DIVISION\b", ln):
+                    proc_start = i
+                    break
+            if proc_start is None:
+                continue
+            prog = prog or os.path.splitext(fname)[0].upper()
+            java_class = mapped_classes.get(prog) or _to_java_class_name(prog)
+            in_decl = False
+            for i in range(proc_start + 1, len(lines)):
+                ln = lines[i]
+                if re.search(r"(?i)\bDECLARATIVES\b", ln):
+                    in_decl = True
+                    continue
+                if re.search(r"(?i)\bEND\s+DECLARATIVES\b", ln):
+                    in_decl = False
+                    continue
+                if in_decl:
+                    continue
+                stripped = ln.strip()
+                if not stripped or stripped.startswith("*"):
+                    continue
+                if _RULE_VERBS.match(ln):
+                    seen += 1
+                    rules.append({
+                        "ruleId": f"{prog}-R{seen:03d}",
+                        "program": prog,
+                        "sourceLine": i + 1,
+                        "cobolStatement": stripped[:160],
+                        "businessInterpretation": (
+                            "Statement-level extraction from PROCEDURE DIVISION "
+                            "(dynamic source analysis)"
+                        ),
+                        "nativeJavaMapping": f"native_gen.{java_class}",
+                        "mappingStatus": "MAPPED" if mapped_classes.get(prog) else "UNMAPPED",
+                        "testMapping": "NONE",
+                    })
+    return rules
 
 
 def run_hardcoded_value_scanner(java_base):
@@ -2520,115 +2457,9 @@ def run_hardcoded_value_scanner(java_base):
     }
 
 
-def generate_offline_randomized_golden_dataset(resources_dir):
-    """Generates a deterministic 100-claim randomized dataset (Option A).
-    Fixed seed = 42 for 100% reproducibility.
-    Computes exact COBOL baseline behavior rules.
-    Writes generated-input.json and generated-golden.json to test resources.
-    """
-    import random
-    random.seed(42)
-    inputs = []
-    golden = []
-
-    policies = {
-        "PL00000001": {"type": "MV", "status": "A", "cover": 500000.0, "deductible": 25000.0},
-        "PL00000002": {"type": "HE", "status": "A", "cover": 300000.0, "deductible": 10000.0},
-        "PL00000003": {"type": "PR", "status": "I", "cover": 150000.0, "deductible": 15000.0},
-        "PL00000004": {"type": "MV", "status": "E", "cover": 200000.0, "deductible": 20000.0},
-    }
-
-    loss_amounts = [0.0, 5000.0, 10000.0, 25000.0, 50000.0, 120000.0, 200000.0, 210000.0, 295000.0, 300000.0, 350000.0, 500000.0, 1000000.0, 2000000.0]
-    types = ["MV", "HE", "PR", "XX"]
-    policy_ids = ["PL00000001", "PL00000002", "PL00000003", "PL00000004", "PL99999999"]
-
-    for i in range(1, 101):
-        claim_id = f"CLM{i:09d}"
-        pol_id = random.choice(policy_ids)
-        c_type = random.choice(types)
-        loss = random.choice(loss_amounts)
-        
-        inp = {
-            "claimId": claim_id,
-            "policyId": pol_id,
-            "type": c_type,
-            "amount": loss,
-            "description": f"Randomized claim {i}"
-        }
-        inputs.append(inp)
-
-        if pol_id not in policies:
-            gold = {
-                "claimId": claim_id,
-                "outcome": "EXCEPTION",
-                "code": "P001",
-                "reasonText": "POLICY NOT FOUND",
-                "status": None,
-                "approvedAmount": None
-            }
-        else:
-            pol = policies[pol_id]
-            if pol["status"] != "A":
-                gold = {
-                    "claimId": claim_id,
-                    "outcome": "EXCEPTION",
-                    "code": "P002",
-                    "reasonText": "POLICY INACTIVE OR EXPIRED",
-                    "status": None,
-                    "approvedAmount": None
-                }
-            elif c_type != pol["type"]:
-                gold = {
-                    "claimId": claim_id,
-                    "outcome": "EXCEPTION",
-                    "code": "P003",
-                    "reasonText": "CLAIM TYPE NOT COVERED BY POLICY",
-                    "status": None,
-                    "approvedAmount": None
-                }
-            else:
-                approved = max(0.0, loss - pol["deductible"])
-                if approved > pol["cover"]:
-                    approved = pol["cover"]
-                status = "MANUAL_REVIEW" if approved > 200000.0 else "APPROVED"
-                gold = {
-                    "claimId": claim_id,
-                    "outcome": "AUDIT",
-                    "code": None,
-                    "reasonText": None,
-                    "status": status,
-                    "approvedAmount": approved
-                }
-        golden.append(gold)
-
-    input_payload = {
-        "metadata": {
-            "generator": "cobol_migrate.py (Option A Randomized Golden Generator)",
-            "seed": 42,
-            "count": len(inputs),
-            "generatedAt": now_iso()
-        },
-        "claims": inputs
-    }
-    golden_payload = {
-        "metadata": {
-            "compilerVersion": "GnuCOBOL 3.1.2.0 (COBOL baseline authority)",
-            "dockerImage": "hurriedreformist/gnucobol:3.1-builder",
-            "seed": 42,
-            "count": len(golden),
-            "generatedAt": now_iso()
-        },
-        "results": golden
-    }
-
-    # resources_dir = src/main/resources  -> go up 2 to reach src/, then test/resources
-    test_res_dir = os.path.join(os.path.dirname(os.path.dirname(resources_dir)), "test", "resources")
-    os.makedirs(test_res_dir, exist_ok=True)
-    write_json(os.path.join(test_res_dir, "generated-input.json"), input_payload)
-    write_json(os.path.join(test_res_dir, "generated-golden.json"), golden_payload)
-
-
 class ApplicationSemanticModel:
+    """Semantic model of the migrated application, inferred from discovery."""
+
     def __init__(self, entrypoint, discovered_programs, parsed_models, file_assigns, fd_maps=None, file_ops=None):
         self.entrypoint = entrypoint
         self.programs = discovered_programs or []
@@ -3265,23 +3096,10 @@ class Pipeline:
 
     # -- 4. transpile --------------------------------------------------------
     def stage_transpile(self):
+        # NOTE: --skip-legacy only skips the GnuCOBOL baseline; transpilation is
+        # always executed for real so that no fabricated success can enter the
+        # verdict chain.
         d = self.data("discover")
-        if self.skip_legacy:
-            status = {s: True for s in d["sources"]}
-            transpile_data = {
-                "all_at_once_rc": 0,
-                "status": status,
-                "stderr_tail": "",
-                "image": DEFAULT_COBJ_IMAGE,
-                "image_digest": "mock",
-                "cobj_flags": [],
-                "docker_command": "skipped",
-                "n_ok": len(d["sources"]),
-                "n_total": len(d["sources"]),
-            }
-            self.set_data("transpile", transpile_data)
-            return True, "transpilation skipped (--skip-legacy)", list(d["sources"])
-            
         if not ensure_image(DEFAULT_COBJ_IMAGE, self.pull):
             return False, "cobj image not available", []
 
@@ -3344,17 +3162,6 @@ class Pipeline:
     # -- 5. collect ----------------------------------------------------------
     def stage_collect(self):
         d = self.data("discover")
-        if self.skip_legacy:
-            os.makedirs(os.path.join(self.out, "generated"), exist_ok=True)
-            self.set_data("collect", {
-                "java_files": [],
-                "loc_generated": 0,
-                "class_files": 0,
-                "java_hashes": {},
-                "stub_flags": {},
-            })
-            return True, "collection skipped (--skip-legacy)", []
-            
         gen_src = os.path.join(self.repo, "generated")
         shutil.rmtree(os.path.join(self.out, "generated"), ignore_errors=True)
         os.makedirs(os.path.join(self.out, "generated"), exist_ok=True)
@@ -3451,28 +3258,6 @@ class Pipeline:
     # -- 6. generate ---------------------------------------------------------
     def stage_generate(self):
         d = self.data("discover")
-        if self.skip_legacy:
-            manifest = {
-                "engine": "opensource COBOL 4J",
-                "entry_point": d["entry"],
-                "format": d["format"],
-                "programs": [],
-                "runtime_dependency": {},
-                "classpath": "",
-                "output_dirs": d["output_dirs"],
-                "copy_deps": d["copy_deps"],
-                "call_graph": d["call_graph"],
-                "file_assigns": d["file_assigns"],
-            }
-            write_json(os.path.join(self.out, "manifest.json"), manifest)
-            self.set_data("preserve", {
-                "jar": "none",
-                "version": "none",
-                "size": 0,
-                "sha256": "none"
-            })
-            return True, "generation skipped (--skip-legacy)", []
-            
         tr = self.data("transpile")
         co = self.data("collect")
 
@@ -3542,9 +3327,18 @@ class Pipeline:
     def stage_baseline(self):
         d = self.data("discover")
         if self.skip_legacy:
-            load_snapshot_dir(os.path.join(self.out, "baseline", "legacy"))
-            self.set_data("legacy", {"skipped": True})
-            return True, "baseline reused (--skip-legacy)", []
+            bl = load_snapshot_dir(os.path.join(self.out, "baseline", "legacy"))
+            self.set_data("legacy", {
+                "skipped": True,
+                "seeded_baseline_files": sorted(bl),
+            })
+            self.set_data("baseline_files", sorted(bl))
+            if bl:
+                self.log(f"  baseline reused (--skip-legacy): {len(bl)} pre-seeded output file(s)")
+            else:
+                self.log("  [WARN] --skip-legacy set but no pre-seeded baseline found "
+                         "— equivalence will be UNVERIFIED, never PASS")
+            return True, "baseline reused (--skip-legacy)", sorted(bl)
         if not ensure_image(DEFAULT_GNUCOBOL_IMAGE, self.pull):
             return False, "GnuCOBOL image not available", []
 
@@ -3697,6 +3491,7 @@ class Pipeline:
             "gcc_version": gcc[0] if gcc else "?",
             "execution_mode": "interactive-scripted" if mode != "NON_INTERACTIVE" else "non-interactive",
             "interactivity": mode,
+            "termination_status": term_status,
         })
         if run_rc != 0:
             self.set_data("legacy", leg)
@@ -3712,17 +3507,8 @@ class Pipeline:
         return True, f"baseline produced {len(bl)} output files", sorted(bl)
 
     def stage_execute(self):
-        if self.skip_legacy:
-            self.set_data("execute", {
-                "status": "skipped",
-                "skipped": True,
-                "rc": 0,
-                "command": "skipped",
-                "stdout_tail": "",
-                "stderr_tail": ""
-            })
-            return True, "execution skipped (--skip-legacy)", []
-            
+        # NOTE: --skip-legacy never fabricates execution evidence; the transpiled
+        # Java is always executed for real (or the stage fails honestly).
         d = self.data("discover")
         input_paths = set()
         file_ops = d.get("file_ops", {})
@@ -3737,6 +3523,11 @@ class Pipeline:
                             if path:
                                 input_paths.add(path)
         clean_outputs(self.repo, d["output_dirs"], d.get("file_assigns"), skip_paths=input_paths)
+
+        # Ensure all output directories exist (mirrors stage_baseline) so file
+        # writes do not fail on missing parents.
+        for od in d["output_dirs"]:
+            os.makedirs(os.path.join(self.repo, od), exist_ok=True)
 
         from execution.models import ExecutionScenario, ExecutionTimeout, OutputLimitExceeded
         from execution import run_java_with_scenario
@@ -3767,6 +3558,8 @@ class Pipeline:
                 "command": exec_result.command,
                 "scenario_id": scenario.scenario_id,
                 "execution_mode": "interactive-scripted",
+                "termination_status": exec_result.termination_status,
+                "duration_seconds": exec_result.duration_seconds,
             }
         else:
             # Non-interactive path: run with watchdog protection (repository-agnostic)
@@ -3798,6 +3591,8 @@ class Pipeline:
                 "stderr_tail": jerr[-2000:],
                 "command": cmd_str,
                 "execution_mode": "non-interactive",
+                "termination_status": term_status,
+                "duration_seconds": duration,
             }
 
         self.set_data("execute", ex)
@@ -3814,10 +3609,8 @@ class Pipeline:
 
     # -- 8. compare ----------------------------------------------------------
     def stage_compare(self):
-        if self.skip_legacy:
-            self.set_data("compare", {"status": "PASS", "checks": [], "rows": [], "verdict_counts": {"MATCH": 0}})
-            return True, "comparison skipped (--skip-legacy)", []
-            
+        # NOTE: --skip-legacy with pre-seeded baseline data runs a REAL
+        # comparison; without seeded data the honest outcome below is UNVERIFIED.
         from execution import ExecutionObservation, ExecutionContract, EquivalenceEngine, ComparisonResult, NormalizationRules
         from execution.topology import detect_topology, observable_summary
         d = self.data("discover")
@@ -3876,14 +3669,16 @@ class Pipeline:
             
         obs_cobol = ExecutionObservation(
             scenario_id=sc_id,
-            exit_code=self.data("legacy", {}).get("run_rc", 0),
+            # Fail-closed: missing execution evidence is None (UNVERIFIED), never 0.
+            exit_code=self.data("legacy", {}).get("run_rc")
+            if self.data("legacy", {}).get("run_rc") is not None else -1,
             stdout=stdout_baseline,
             stderr=stderr_baseline,
             files=cobol_obs_files,
             file_contents=cobol_obs_contents,
             file_sizes=cobol_obs_sizes,
             record_counts=cobol_obs_records,
-            execution_status=self.data("legacy", {}).get("execution_mode", "non-interactive"),
+            execution_status=self.data("legacy", {}).get("termination_status", "unknown"),
             duration=round(self.data("legacy", {}).get("duration_seconds", 0.0), 3)
         )
         
@@ -3905,14 +3700,15 @@ class Pipeline:
             
         obs_java = ExecutionObservation(
             scenario_id=sc_id,
-            exit_code=self.data("execute", {}).get("rc", 0),
+            exit_code=self.data("execute", {}).get("rc")
+            if self.data("execute", {}).get("rc") is not None else -1,
             stdout=stdout_execute,
             stderr=stderr_execute,
             files=java_obs_files,
             file_contents=java_obs_contents,
             file_sizes=java_obs_sizes,
             record_counts=java_obs_records,
-            execution_status=self.data("execute", {}).get("execution_mode", "non-interactive"),
+            execution_status=self.data("execute", {}).get("termination_status", "unknown"),
             duration=round(self.data("execute", {}).get("duration_seconds", 0.0), 3)
         )
         
@@ -3965,6 +3761,10 @@ class Pipeline:
             expected_modes.append("EXPECTED_NO_OUTPUT")
         elif baseline_files:
             expected_modes.append("EXPECTED_FILES")
+        # Stderr parity is verified whenever stderr was actually captured from
+        # at least one side — a one-sided stream is a genuine divergence signal.
+        if (stderr_baseline or stderr_execute) and "EXPECTED_STDERR" not in expected_modes:
+            expected_modes.append("EXPECTED_STDERR")
             
         required_files = list(baseline_files.keys())
         expected_empty = [f for f, content in baseline_files.items() if len(content) == 0]
@@ -4001,6 +3801,19 @@ class Pipeline:
         
         # Compare observations
         result = EquivalenceEngine.compare(obs_cobol, obs_java, contract)
+
+        # A missing baseline means INCOMPARABLE, not UNEQUAL: downgrade FAIL
+        # to UNVERIFIED so the pipeline continues and reports honestly.
+        # The verdict ladder maps this to EQUIVALENCE_UNVERIFIED — never PASS.
+        if not baseline_files and result.status == "FAIL":
+            result.status = "UNVERIFIED"
+            result.checks["file_contents"] = "UNVERIFIED"
+            result.differences.append({
+                "type": "no_baseline_available",
+                "reason": ("No GnuCOBOL baseline was produced or seeded; "
+                           "outputs cannot be compared. UNVERIFIED — "
+                           "this is never treated as equivalence.")
+            })
         
         # Run additional validation checks if requested
         checks = run_checks(results_files, comp_cfg.get("checks", []))
@@ -4102,9 +3915,13 @@ class Pipeline:
 
         is_ok = (result.status == "PASS")
         # DIFF is not a pipeline abort — it's a valid, informative result.
-        pipeline_ok = result.status != "FAIL" or not result.differences or all(
-            d.get("type") in ("content_difference", "record_count_mismatch", "stdout_mismatch")
-            for d in result.differences
+        # However a FAIL carrying NO diagnostic evidence is never acceptable.
+        pipeline_ok = result.status != "FAIL" or (
+            bool(result.differences)
+            and all(
+                d.get("type") in ("content_difference", "record_count_mismatch", "stdout_mismatch")
+                for d in result.differences
+            )
         )
 
         # Negative equivalence dispatch — topology-aware.
@@ -4266,10 +4083,12 @@ class Pipeline:
             self.log(f"    [PASS] neg equiv: all {len(detected)} mutations detected")
 
     def _run_neg_equiv_console(self):
-        """Prove mutation sensitivity for console programs.
-        If an execution scenario exists with stdin inputs, we can mutate the stdin,
-        rerun, and check that the divergence is caught. If no stdin/input fixture is
-        available, it is objectively untestable, so status = UNVERIFIED.
+        """Prove mutation sensitivity for console programs — with REAL evidence.
+
+        Mutates the discovered stdin scenario, re-executes the transpiled Java
+        with the mutated input, and verifies the output divergence is actually
+        detected by the normalizer. Any execution failure yields UNVERIFIED —
+        never a fabricated PASS.
         """
         scenario_dict = self.data("execution_scenario")
         if not scenario_dict or not scenario_dict.get("input_values"):
@@ -4284,21 +4103,127 @@ class Pipeline:
             self.log("    [UNVERIFIED] neg equiv: no stdin/input fixture available to mutate")
             return
 
-        # Attempt to run mutations on stdin
-        # We can implement a simple stdin mutation strategy:
-        # 1. Truncate stdin input
-        # 2. Modify stdin values (e.g. replace numbers/letters)
-        # We run the mutated inputs, compare the baseline and java outputs to check divergence.
-        # Since this is an E2E execution check, let's implement the contract requirements.
+        from execution.models import ExecutionScenario, ExecutionTimeout, OutputLimitExceeded
+        from execution import run_java_with_scenario
+
+        try:
+            scenario = ExecutionScenario.from_dict(scenario_dict)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.set_data("neg_equiv", {
+                "executed": True,
+                "status": "UNVERIFIED",
+                "mode": "CONSOLE_OUTPUT",
+                "reason": f"malformed execution scenario evidence: {exc!r}",
+                "mutations_tested": 0,
+                "mutations_caught": 0
+            })
+            self.log("    [UNVERIFIED] neg equiv: malformed scenario evidence")
+            return
+
+        ref_stdout = (self.data("execute", {}) or {}).get("stdout_tail", "")
+        if not ref_stdout:
+            # Fall back to the persisted execution artifact if present.
+            art = os.path.join(
+                self.out, "execution", scenario.scenario_id, "stdout_execute.txt")
+            if os.path.isfile(art):
+                try:
+                    with open(art, "r", encoding="utf-8", errors="replace") as fh:
+                        ref_stdout = fh.read()
+                except OSError:
+                    ref_stdout = ""
+        if not ref_stdout:
+            self.set_data("neg_equiv", {
+                "executed": True,
+                "status": "UNVERIFIED",
+                "mode": "CONSOLE_OUTPUT",
+                "reason": "no reference java stdout available to compare mutations against",
+                "mutations_tested": 0,
+                "mutations_caught": 0
+            })
+            self.log("    [UNVERIFIED] neg equiv: no reference stdout captured")
+            return
+
+        def _norm(text):
+            lines = [ln.rstrip(" \t\r\n\x00") for ln in text.splitlines()]
+            while lines and not lines[-1]:
+                lines.pop()
+            return "\n".join(lines).strip()
+
+        # Deterministic stdin mutations.
+        original_inputs = list(scenario.input_values)
+        mutated_variants = []
+        truncated = [ln[:-1] for ln in original_inputs if ln]
+        if any(t != o for t, o in zip(truncated, original_inputs)):
+            mutated_variants.append(("stdin_truncation", truncated))
+        flipped = []
+        for ln in original_inputs:
+            mut = "".join("9" if ch.isdigit() else ch for ch in ln)
+            if mut != ln:
+                ln = mut
+            flipped.append(ln)
+        if flipped != original_inputs:
+            mutated_variants.append(("stdin_value_flipping", flipped))
+
+        if not mutated_variants:
+            self.set_data("neg_equiv", {
+                "executed": True,
+                "status": "UNVERIFIED",
+                "mode": "CONSOLE_OUTPUT",
+                "reason": "stdin inputs too short to mutate meaningfully",
+                "mutations_tested": 0,
+                "mutations_caught": 0
+            })
+            self.log("    [UNVERIFIED] neg equiv: stdin not mutable")
+            return
+
+        tested, caught, failed_exec = [], [], []
+        for name, values in mutated_variants:
+            mut_scenario = ExecutionScenario(
+                entrypoint=scenario.entrypoint,
+                input_source=f"neg-equiv-mutation:{name}",
+                input_values=values,
+                stdin_path="",
+                expected_termination=scenario.expected_termination,
+                timeout_seconds=scenario.timeout_seconds,
+                max_output_bytes=scenario.max_output_bytes,
+            )
+            try:
+                exec_result = run_java_with_scenario(
+                    self.repo, mut_scenario, self.data("discover"), self.out,
+                    self.cfg, cobj_image=DEFAULT_COBJ_IMAGE,
+                    entry_args=self.entry_args,
+                )
+            except (ExecutionTimeout, OutputLimitExceeded) as exc:
+                failed_exec.append({"mutation": name, "reason": str(exc)})
+                continue
+            except Exception as exc:  # noqa: BLE001 — evidence, never fabrication
+                failed_exec.append({"mutation": name, "reason": repr(exc)})
+                continue
+            tested.append(name)
+            if _norm(exec_result.stdout) != _norm(ref_stdout):
+                caught.append(name)
+
+        status = "PASS" if (tested and len(caught) == len(tested)) else (
+            "FAIL" if tested else "UNVERIFIED"
+        )
         self.set_data("neg_equiv", {
             "executed": True,
-            "status": "PASS",
+            "status": status,
             "mode": "CONSOLE_OUTPUT",
-            "reason": "console inputs mutated and divergence successfully verified",
-            "mutations_tested": 1,
-            "mutations_caught": 1
+            "mutations_tested": len(tested),
+            "mutations_caught": len(caught),
+            "mutations_detected": caught,
+            "mutations_missed": [m for m in tested if m not in caught],
+            "failed_executions": failed_exec,
+            "reference_stdout_sha256": sha256_bytes(ref_stdout.encode("utf-8")),
         })
-        self.log("    [PASS] neg equiv: console mutation verified")
+        if status == "PASS":
+            self.log(f"    [PASS] neg equiv: {len(caught)}/{len(tested)} console stdin mutations detected")
+        elif status == "FAIL":
+            missed = [m for m in tested if m not in caught]
+            self.log(f"    [FAIL] neg equiv: mutations not detected: {missed}")
+        else:
+            self.log("    [UNVERIFIED] neg equiv: mutation executions could not run")
 
     # -- 10. refactor --------------------------------------------------------
     def stage_refactor(self):
@@ -4473,6 +4398,13 @@ class Pipeline:
         # stage (so validate can still run). _compute_verdict() will refuse
         # PRODUCTION_READY if audit did not pass.
         self._run_dependency_audit(mod_dir)
+        # Expose the SAME audited evidence under the "generate" data key so the
+        # enterprise dependency gate reads real audit results instead of
+        # inferring success from project existence.
+        self.set_data("generate", {
+            "dependency_audit": self.data("collect", {}).get("dependency_audit", {}),
+            "spring_project_generated": True,
+        })
         return True, compile_status, [os.path.join(self.out, "modernized")]
 
     # -- 10. validate --------------------------------------------------------
@@ -4663,15 +4595,17 @@ class Pipeline:
                     time.sleep(0.5)
 
                 if job_completed:
-                    # Gate 2 semantic comparison:
-                    # claim-audit.dat: decode COMP-3 baseline vs Spring Boot decimal text
-                    # eod-claims-report.txt and others: normalized text comparison
+                    # Gate 2 semantic comparison — CONFIG-DRIVEN.
+                    # Comparators come from migration_config.json
+                    # (compare.semantic_comparators); the engine contains NO
+                    # fixture-specific file names. Files without a configured
+                    # comparator use normalized text comparison.
                     baseline_dir = os.path.join(self.out, "baseline", "legacy")
                     baseline_files_list = self.data("baseline_files") or []
                     mismatches = []
 
-                    def _decode_audit_java(path):
-                        """Parse Spring Boot claim-audit.dat (plain text format)."""
+                    def _decode_pipe_records(path):
+                        """Parse pipe-delimited records with numeric amount field."""
                         records = []
                         try:
                             with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -4705,6 +4639,16 @@ class Pipeline:
                         except Exception:
                             return content_bytes
 
+                    semantic_cfg = (self.cfg.get("compare", {}) or {}).get(
+                        "semantic_comparators", {})
+
+                    def _match_comparator(rel_path):
+                        for key, spec in semantic_cfg.items():
+                            k = key.replace("\\", "/")
+                            if posix(rel_path) == k or posix(rel_path).endswith(k):
+                                return spec
+                        return None
+
                     for rel_path in baseline_files_list:
                         if "data/work" in posix(rel_path):
                             continue
@@ -4716,10 +4660,10 @@ class Pipeline:
                         if not os.path.isfile(b_file):
                             continue
 
-                        # Semantic comparison for claim-audit.dat (has COMP-3 amounts)
-                        if posix(rel_path).endswith("claim-audit.dat"):
+                        comparator = _match_comparator(rel_path)
+                        if comparator and comparator.get("type") == "pipe_records":
                             b_records = decode_audit_baseline(b_file)
-                            j_records = _decode_audit_java(j_file)
+                            j_records = _decode_pipe_records(j_file)
                             if len(b_records) != len(j_records):
                                 mismatches.append(f"{rel_path}: record count mismatch ({len(b_records)} vs {len(j_records)})")
                                 continue
@@ -4730,21 +4674,16 @@ class Pipeline:
                                 if br["amount"] is not None and jr["amount"] is not None:
                                     if abs(br["amount"] - jr["amount"]) > 0.01:
                                         mismatches.append(f"{rel_path}: record {i} amount mismatch ({br['amount']} vs {jr['amount']})")
-                        elif posix(rel_path).endswith("eod-claims-report.txt"):
-                            # Semantic comparison: extract only the 3 count integers.
-                            # Baseline has COBOL formatting artifacts (===header, REPORT suffix,
-                            # 7-digit zero-padding, LF endings) while Spring Boot emits plain text.
-                            import re as _re
+                        elif comparator and comparator.get("type") == "labeled_counts":
+                            labels = comparator.get("labels") or {}
                             def _extract_counts(path):
                                 try:
                                     text = open(path, "rb").read().decode("utf-8", errors="replace")
                                 except OSError:
                                     return None
                                 counts = {}
-                                for label, key in [("AUDIT RECORDS", "audit"),
-                                                   ("EXCEPTIONS", "exc"),
-                                                   ("MANUAL REVIEWS", "review")]:
-                                    m = _re.search(rf"{label}\s*:\s*(\d+)", text)
+                                for label, key in labels.items():
+                                    m = re.search(rf"{re.escape(label)}\s*:\s*(\d+)", text)
                                     if m:
                                         counts[key] = int(m.group(1))
                                 return counts
@@ -4753,13 +4692,13 @@ class Pipeline:
                             if b_counts is None or j_counts is None:
                                 mismatches.append(f"{rel_path}: could not parse counts")
                             else:
-                                for key in ("audit", "exc", "review"):
+                                for key in set(list(b_counts) + list(j_counts)):
                                     bv = b_counts.get(key)
                                     jv = j_counts.get(key)
                                     if bv != jv:
                                         mismatches.append(f"{rel_path}: {key} count mismatch ({bv} vs {jv})")
                         else:
-                            # Text normalization for other files
+                            # Default: text normalization comparison
                             with open(b_file, "rb") as fh:
                                 b_content = fh.read()
                             with open(j_file, "rb") as fh:
@@ -4769,11 +4708,11 @@ class Pipeline:
 
                     if mismatches:
                         success = False
-                        detail = "Gate 2 FAIL — generic output mismatch: " + "; ".join(mismatches)
+                        detail = "Gate 2 FAIL — output mismatch: " + "; ".join(mismatches)
                         self.log(f"    [FAIL] {detail}")
                     else:
                         success = True
-                        detail = "Gate 2 PASS — generic output matched baseline"
+                        detail = "Gate 2 PASS — output matched baseline"
                         self.log(f"    [PASS] {detail}")
                 self.set_data("validate", {"status": "done" if success else "failed", "detail": detail, "gate2_passed": success})
                 return success, detail, []
@@ -4844,7 +4783,9 @@ class Pipeline:
                     amount_field = "lossAmount"
                 baseline_audit = os.path.join(
                     self.out, "baseline", "legacy", "data", "out", "claim-audit.dat")
+                baseline_compared = False
                 if os.path.isfile(baseline_audit):
+                    baseline_compared = True
                     expected = decode_audit_baseline(baseline_audit)
                     expected_processed = [r for r in expected
                                           if not r["status"].startswith("REJECTED")]
@@ -4873,7 +4814,10 @@ class Pipeline:
                                 parity_issues.append(
                                     f"{cid}: approvedAmount {amt} != baseline {rec['amount']:.2f}")
                 else:
-                    self.log("    [WARN] no baseline audit file; Gate 2 falling back to count-only")
+                    self.log("    [WARN] no baseline audit file; record-level parity "
+                             "CANNOT be verified — Gate 2 cannot PASS without a baseline")
+                    parity_issues.append(
+                        "no GnuCOBOL baseline audit file available for comparison")
 
                 baseline_exc = os.path.join(
                     self.out, "baseline", "legacy", "data", "out", "claim-exceptions.dat")
@@ -4982,7 +4926,7 @@ class Pipeline:
                         "fail": sum(1 for r in per_claim_matrix if r["result"] == "FAIL"),
                     })
 
-                if len(processed) > 0 and not parity_issues:
+                if len(processed) > 0 and not parity_issues and baseline_compared:
                     detail = (f"Gate 2 PASS — exact parity with GnuCOBOL baseline "
                               f"({len(processed)} processed {item_name}, {exc_count} exceptions)")
                     self.log(f"    [PASS] {detail}")
@@ -5078,6 +5022,12 @@ class Pipeline:
                 elif f.endswith((".jcl", ".JCL")):
                     has_jcl = True
 
+        # --- Database verification status (evidence-based) ---
+        # H2_VERIFIED: emulated SQL executed under the local H2/SQLite fallback.
+        # REAL_DB2_VERIFIED requires actual query execution against a real DB2;
+        # a TCP port probe alone NEVER qualifies as verification.
+        h2_verified = bool(self.data("validate", {}).get("h2_executed")
+                           or self.data("compare", {}).get("database_state"))
         db2_status = "NOT_VERIFIED"
         if has_sql:
             db2_url = os.environ.get("DB2_URL")
@@ -5089,11 +5039,13 @@ class Pipeline:
                         host, port = match.group(1), int(match.group(2))
                         s = socket.create_connection((host, port), timeout=3)
                         s.close()
-                        db2_status = "REAL_DB2_VERIFIED"
+                        # Reachability only. Real verification requires executing
+                        # and comparing SQL against this server (not implemented).
+                        db2_status = "REAL_DB2_NOT_VERIFIED_REACHABLE"
                     else:
-                        db2_status = "REAL_DB2_FAILED"
+                        db2_status = "REAL_DB2_INVALID_URL"
                 except Exception:
-                    db2_status = "REAL_DB2_FAILED"
+                    db2_status = "REAL_DB2_UNREACHABLE"
             else:
                 db2_status = "REAL_DB2_NOT_CONFIGURED"
 
@@ -5107,7 +5059,7 @@ class Pipeline:
                     port = int(cics_host.split(":")[1]) if ":" in cics_host else 3270
                     s = socket.create_connection((host, port), timeout=3)
                     s.close()
-                    cics_status = "CICS_VERIFIED"
+                    cics_status = "CICS_EMULATED_TARGET_REACHABLE"
                 except Exception:
                     cics_status = "CICS_EMULATED"
             else:
@@ -5130,6 +5082,13 @@ class Pipeline:
         report["data"]["db2_status"] = db2_status
         report["data"]["cics_status"] = cics_status
         report["data"]["jcl_status"] = jcl_status
+        report["data"]["h2_verified"] = bool(h2_verified)
+        report["data"]["db2_env_configured"] = {
+            "DB2_URL": bool(os.environ.get("DB2_URL")),
+            "DB2_USERNAME": bool(os.environ.get("DB2_USERNAME")),
+            "DB2_PASSWORD": bool(os.environ.get("DB2_PASSWORD")),
+            "DB2_SCHEMA": bool(os.environ.get("DB2_SCHEMA")),
+        }
         verdict = self._compute_verdict()
         report["verdict"] = verdict
         write_json(os.path.join(self.out, "migration-report.json"), report)
@@ -5206,7 +5165,11 @@ class Pipeline:
             }
         }
         
-        # Populate mappings dynamically from discovered copybooks/models
+        # Populate mappings dynamically from discovered copybooks/models.
+        # Validation evidence is derived from actual pipeline state — never
+        # hardcoded PASS strings.
+        _refactor_data = self.data("refactor", {})
+        _spring_compile_ok = "compiled successfully" in (_refactor_data.get("compile_status") or "").lower()
         entrypoint_id = d.get("entry", "program").upper()
         traceability_manifest["mappings"].append({
             "source_coordinate": f"{entrypoint_id}.cob:1",
@@ -5215,9 +5178,11 @@ class Pipeline:
             "application_semantic_model": "Spring Batch Job Launcher",
             "java_class": "com.systema.modernized.ModernizedApplication",
             "java_method": "main",
-            "validation_evidence": "Spring Boot Compile check: PASS"
+            "validation_evidence": (
+                f"Spring Boot compile status: {_refactor_data.get('compile_status', 'NOT_RUN')}"
+            )
         })
-        
+
         models_list = self.data("refactor", {}).get("models") or []
         for mname in models_list:
             traceability_manifest["mappings"].append({
@@ -5227,7 +5192,9 @@ class Pipeline:
                 "application_semantic_model": "Domain Model",
                 "java_class": f"com.systema.modernized.domain.{mname}",
                 "java_method": "constructor",
-                "validation_evidence": "Transpiled compilation check: PASS"
+                "validation_evidence": (
+                    f"Model parsed ({len(models_list)} total); spring_compile_ok={_spring_compile_ok}"
+                )
             })
             
         # Write to target/generated/traceability_manifest.json
@@ -5239,28 +5206,40 @@ class Pipeline:
         os.makedirs(gen_dir_local, exist_ok=True)
         write_json(os.path.join(gen_dir_local, "traceability_manifest.json"), traceability_manifest)
 
-        # Emit Business-Rule Traceability (Phase 2 & Phase 12)
-        rules = extract_business_rules_traceability(self.repo)
+        # --- Business-rule traceability (emitted exactly once) ---
+        # Evidence-based mapping: a program's rules are MAPPED only when its
+        # native Java class actually exists in the generated project.
+        _native_gen_dir = os.path.join(
+            self.out, "modernized", "src", "main", "java", "com", "systema", "modernized", "native_gen")
+        _mapped = {}
+        if os.path.isdir(_native_gen_dir):
+            for src_item in d.get("sources", []):
+                pid = d.get("program_ids", {}).get(src_item) or os.path.splitext(os.path.basename(src_item))[0].upper()
+                cls = _to_java_class_name(pid)
+                if os.path.isfile(os.path.join(_native_gen_dir, cls + ".java")):
+                    _mapped[pid] = cls
+        rules = extract_business_rules_traceability(self.repo, mapped_classes=_mapped)
+        mapped_rules = [r for r in rules if r["mappingStatus"] == "MAPPED"]
+        unmapped_rules = [r for r in rules if r["mappingStatus"] == "UNMAPPED"]
         write_json(os.path.join(self.out, "business-rule-traceability.json"), {
             "generatedAt": now_iso(),
             "ruleCount": len(rules),
-            "mappedRules": len([r for r in rules if r["mappingStatus"] == "MAPPED"]),
-            "unmappedRules": len([r for r in rules if r["mappingStatus"] == "UNMAPPED"]),
+            "mappedRules": len(mapped_rules),
+            "unmappedRules": len(unmapped_rules),
             "rules": rules
         })
-        
-        # Write Markdown Traceability matrix
+
         md_lines = [
             "# COBOL -> Native Java Business-Rule Traceability Matrix",
             f"**Generated:** {now_iso()}  ",
-            f"**Total Rules:** {len(rules)} | **Mapped:** {len([r for r in rules if r['mappingStatus'] == 'MAPPED'])} | **Unmapped:** 0",
+            f"**Total Rules:** {len(rules)} | **Mapped:** {len(mapped_rules)} | **Unmapped:** {len(unmapped_rules)}",
             "",
             "| Rule ID | Program | Source Line | COBOL Statement | Business Interpretation | Native Java Mapping | Status | Test Mapping |",
             "|---|---|---|---|---|---|---|---|",
         ]
         for r in rules:
             md_lines.append(f"| `{r['ruleId']}` | `{r['program']}` | L{r['sourceLine']} | `{r['cobolStatement']}` | {r['businessInterpretation']} | `{r['nativeJavaMapping']}` | **{r['mappingStatus']}** | `{r['testMapping']}` |")
-        
+
         with open(os.path.join(self.out, "business-rule-traceability.md"), "w", encoding="utf-8") as fh:
             fh.write("\n".join(md_lines) + "\n")
         self.log(f"    business-rule traceability: {os.path.join(self.out, 'business-rule-traceability.md')}")
@@ -5269,177 +5248,74 @@ class Pipeline:
         hardcoded_res = run_hardcoded_value_scanner(os.path.join(self.out, "modernized", "src", "main", "java", "com", "systema", "modernized"))
         write_json(os.path.join(self.out, "hardcoded-value-scan.json"), hardcoded_res)
 
-        # Emit Final Acceptance Report V2 (Phase 20, 21, 22)
-        final_verdict = "PARTIAL" # Platform verdict: PARTIAL due to BankCore source deferral; ClaimsCore modernized application verdict = FULL PASS
-        report_v2_md = [
-            "# COBOL -> Native Java Modernization Final Acceptance Report V2",
-            f"### ClaimsCore Enterprise Verification — {now_iso()}",
-            "",
-            "## 1. Source Integrity",
-            "All COBOL sources and copybooks confirmed IMMUTABLE since ingest.",
-            "",
-            "## 2. Program Coverage",
-            "5/5 COBOL programs discovered and mapped (100% coverage).",
-            "",
-            "## 3. COPYBOOK Coverage",
-            "4/4 copybooks parsed and mapped to JPA domain entities.",
-            "",
-            "## 4. CALL Graph Coverage",
-            "100% call-graph sequence parity (C_CMAIN01 -> C_CLOAD01, C_CPROC01, C_CREPT01 matched to DataSeedRunner -> SpringBatch -> EodReport_Service).",
-            "",
-            "## 5. File/Dataset Coverage",
-            "All input, output, and indexed file datasets mapped and verified.",
-            "",
-            "## 6. OpenSource COBOL 4J Provenance",
-            "Engine: `opensourcecobol/opensourcecobol4j:2.0.0` (Digest: `sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a`).",
-            "",
-            "## 7. COBOL <-> 4J Parity",
-            "Gate 1: PASS (exact parity on all 3 critical output files).",
-            "",
-            "## 8. COBOL <-> Native Java Parity",
-            "Gate 2: PASS (4/4 claims processed, 3/3 exceptions caught, exact EOD report match).",
-            "",
-            "## 9. Business-Rule Traceability",
-            "17/17 extracted business rules fully MAPPED to native Java services and verified by automated JUnit tests.",
-            "",
-            "## 10. Boundary Test Results",
-            "ALL 9 settlement boundary tests PASS (deductible floor, zero settlement, cover limit cap, strict > 200,000 threshold).",
-            "",
-            "## 11. Property-Based / Randomized Golden Test Results",
-            "100/100 deterministic randomized claims PASS exact parity comparison against GnuCOBOL golden dataset.",
-            "",
-            "## 12. Exception Parity",
-            "Exact semantic exception parity verified (P001 POLICY NOT FOUND, P002 POLICY INACTIVE OR EXPIRED, P003 CLAIM TYPE NOT COVERED).",
-            "",
-            "## 13. Audit Parity",
-            "Audit record persistence verified via `/api/process/audits` (approvedAmount matched).",
-            "",
-            "## 14. EOD Report Parity",
-            "Semantic & byte-exact parity verified (160 `=` header separator, PIC 9(7) zero-padding, title line, buffer tail reuse).",
-            "",
-            "## 15. API Contract Tests",
-            "REST API contract tests PASS (`/claims`, `/audits`, `/exceptions`, `/report`), verifying separation of `lossAmount` vs `approvedAmount`.",
-            "",
-            "## 16. Database/Data Parity",
-            "Field-level copybook to JPA entity column mapping verified.",
-            "",
-            "## 17. Runtime Independence",
-            "CONFIRMED: Native Spring Boot application contains ZERO dependencies on `libcobj.jar` or `opensourcecobol` runtime classes.",
-            "",
-            "## 18. Unmapped COBOL Functionality",
-            "0 UNMAPPED business-significant COBOL statements.",
-            "",
-            "## 19. BankCore Status",
-            "DEFERRED — BankCore source (`BCPROC01.cob`) is unavailable in current workspace. BankCore phases will run when source is supplied.",
-            "",
-            "## 20. Final Verdict",
-            "**ClaimsCore Modernized Application Verdict:** **FULL PASS** (100% verified)  ",
-            "**Overall Platform Verdict:** **PARTIAL** (due to BankCore source deferral)  "
-        ]
-        with open(os.path.join(self.out, "COBOL_TO_NATIVE_JAVA_FINAL_ACCEPTANCE.md"), "w", encoding="utf-8") as fh:
-            fh.write("\n".join(report_v2_md) + "\n")
-        self.log(f"    final acceptance report v2: {os.path.join(self.out, 'COBOL_TO_NATIVE_JAVA_FINAL_ACCEPTANCE.md')}")
+        # --- Final Acceptance Report (evidence-driven; no fabricated claims) ---
+        _tr_data = self.data("transpile", {})
+        _cmp_acc = cmp.get("rows", [])
+        _val_acc = val
+        _dep_audit_acc = self.data("collect", {}).get("dependency_audit", {})
+        _neg_acc = self.data("neg_equiv", {})
+        _imm_acc = immutability
+        n_sources = len(d.get("sources", []))
+        n_transpiled = sum(1 for p in programs if p.get("transpiled"))
+        exact_rows = [r for r in _cmp_acc if r.get("verdict") == "exact"]
+        logical_rows = [r for r in _cmp_acc if (r.get("logical") or {}).get("verdict") == "LOGICAL_MATCH"]
+        mismatch_rows = [r for r in _cmp_acc if (r.get("logical") or {}).get("verdict") == "LOGICAL_MISMATCH"]
 
-        # Emit Business-Rule Traceability (Phase 2 & Phase 12)
-        rules = extract_business_rules_traceability(self.repo)
-        write_json(os.path.join(self.out, "business-rule-traceability.json"), {
-            "generatedAt": now_iso(),
-            "ruleCount": len(rules),
-            "mappedRules": len([r for r in rules if r["mappingStatus"] == "MAPPED"]),
-            "unmappedRules": len([r for r in rules if r["mappingStatus"] == "UNMAPPED"]),
-            "rules": rules
-        })
-        
-        # Write Markdown Traceability matrix
-        md_lines = [
-            "# COBOL -> Native Java Business-Rule Traceability Matrix",
+        def _gate_line(label, ok, detail):
+            state = "PASS" if ok is True else ("FAIL" if ok is False else "NOT_VERIFIED")
+            return f"- **{label}:** {state} — {detail}"
+
+        acc_md = [
+            "# COBOL -> Java Modernization Final Acceptance Report",
             f"**Generated:** {now_iso()}  ",
-            f"**Total Rules:** {len(rules)} | **Mapped:** {len([r for r in rules if r['mappingStatus'] == 'MAPPED'])} | **Unmapped:** 0",
+            f"**Repository:** {posix(self.repo)}  ",
             "",
-            "| Rule ID | Program | Source Line | COBOL Statement | Business Interpretation | Native Java Mapping | Status | Test Mapping |",
-            "|---|---|---|---|---|---|---|---|",
-        ]
-        for r in rules:
-            md_lines.append(f"| `{r['ruleId']}` | `{r['program']}` | L{r['sourceLine']} | `{r['cobolStatement']}` | {r['businessInterpretation']} | `{r['nativeJavaMapping']}` | **{r['mappingStatus']}** | `{r['testMapping']}` |")
-        
-        with open(os.path.join(self.out, "business-rule-traceability.md"), "w", encoding="utf-8") as fh:
-            fh.write("\n".join(md_lines) + "\n")
-        self.log(f"    business-rule traceability: {os.path.join(self.out, 'business-rule-traceability.md')}")
-
-        # Scanner check: hardcoded output literal scanner (Phase 18)
-        hardcoded_res = run_hardcoded_value_scanner(os.path.join(self.out, "modernized", "src", "main", "java", "com", "systema", "modernized"))
-        write_json(os.path.join(self.out, "hardcoded-value-scan.json"), hardcoded_res)
-
-        # Emit Final Acceptance Report V2 (Phase 20, 21, 22)
-        final_verdict = "PARTIAL" # Platform verdict: PARTIAL due to BankCore source deferral; ClaimsCore modernized application verdict = FULL PASS
-        report_v2_md = [
-            "# COBOL -> Native Java Modernization Final Acceptance Report V2",
-            f"### ClaimsCore Enterprise Verification — {now_iso()}",
+            "Every statement below is derived from this run's recorded pipeline evidence.",
             "",
-            "## 1. Source Integrity",
-            "All COBOL sources and copybooks confirmed IMMUTABLE since ingest.",
+            "## Source Integrity",
+            f"- Files modified since ingest: {len([r for r in _imm_acc if r['status'] == 'MODIFIED'])} of {len(_imm_acc)}",
             "",
-            "## 2. Program Coverage",
-            "5/5 COBOL programs discovered and mapped (100% coverage).",
+            "## Coverage",
+            f"- Programs discovered: {n_sources}",
+            f"- Programs transpiled: {n_transpiled}",
+            f"- Copybooks parsed: {len(models_list)}",
             "",
-            "## 3. COPYBOOK Coverage",
-            "4/4 copybooks parsed and mapped to JPA domain entities.",
+            "## Equivalence Evidence",
+            _gate_line(
+                "Gate 1 (COBOL baseline vs transpiled Java)",
+                bool(exact_rows) and not mismatch_rows and not [
+                    r for r in _cmp_acc if r.get("verdict") in ("differ", "baseline-only", "java-only")
+                ],
+                f"{len(exact_rows)}/{len(_cmp_acc)} output files exact"),
+            _gate_line(
+                "Logical indexed-file parity",
+                None if not logical_rows and not mismatch_rows else (not mismatch_rows),
+                f"{len(logical_rows)} LOGICAL_MATCH, {len(mismatch_rows)} LOGICAL_MISMATCH"),
+            "- Negative equivalence (mutation sensitivity): "
+            f"{_neg_acc.get('status', 'NOT_RUN')} ({_neg_acc.get('mutations_caught', 0)}/"
+            f"{_neg_acc.get('mutations_tested', 0)} mutations detected)",
+            "- Dependency audit: "
+            f"{_dep_audit_acc.get('status', 'NOT_RUN')} ({_dep_audit_acc.get('scanned_files_count', 0)} files scanned)",
+            f"- Spring Boot validation: {_val_acc.get('status', 'NOT_RUN')}"
+            + (f" (gate2_passed={_val_acc.get('gate2_passed')})" if _val_acc else ""),
             "",
-            "## 4. CALL Graph Coverage",
-            "100% call-graph sequence parity (C_CMAIN01 -> C_CLOAD01, C_CPROC01, C_CREPT01 matched to DataSeedRunner -> SpringBatch -> EodReport_Service).",
+            "## Runtime Independence",
+            _gate_line(
+                "No libcobj/jp.osscons dependency in enterprise project",
+                _dep_audit_acc.get("status") == "PASS",
+                f"{len(_dep_audit_acc.get('forbidden_found', []))} forbidden references found"),
             "",
-            "## 5. File/Dataset Coverage",
-            "All input, output, and indexed file datasets mapped and verified.",
+            "## Unsupported / Deferred Features",
+            f"- DB2 status: {db2_status}",
+            f"- CICS status: {cics_status}",
+            f"- JCL status: {jcl_status}",
             "",
-            "## 6. OpenSource COBOL 4J Provenance",
-            "Engine: `opensourcecobol/opensourcecobol4j:2.0.0` (Digest: `sha256:446bc5abb67cd103b257c2c75909e51395b771ea499034bf512c46bf1796223a`).",
-            "",
-            "## 7. COBOL <-> 4J Parity",
-            "Gate 1: PASS (exact parity on all 3 critical output files).",
-            "",
-            "## 8. COBOL <-> Native Java Parity",
-            "Gate 2: PASS (4/4 claims processed, 3/3 exceptions caught, exact EOD report match).",
-            "",
-            "## 9. Business-Rule Traceability",
-            "17/17 extracted business rules fully MAPPED to native Java services and verified by automated JUnit tests.",
-            "",
-            "## 10. Boundary Test Results",
-            "ALL 9 settlement boundary tests PASS (deductible floor, zero settlement, cover limit cap, strict > 200,000 threshold).",
-            "",
-            "## 11. Property-Based / Randomized Golden Test Results",
-            "100/100 deterministic randomized claims PASS exact parity comparison against GnuCOBOL golden dataset.",
-            "",
-            "## 12. Exception Parity",
-            "Exact semantic exception parity verified (P001 POLICY NOT FOUND, P002 POLICY INACTIVE OR EXPIRED, P003 CLAIM TYPE NOT COVERED).",
-            "",
-            "## 13. Audit Parity",
-            "Audit record persistence verified via `/api/process/audits` (approvedAmount matched).",
-            "",
-            "## 14. EOD Report Parity",
-            "Semantic & byte-exact parity verified (160 `=` header separator, PIC 9(7) zero-padding, title line, buffer tail reuse).",
-            "",
-            "## 15. API Contract Tests",
-            "REST API contract tests PASS (`/claims`, `/audits`, `/exceptions`, `/report`), verifying separation of `lossAmount` vs `approvedAmount`.",
-            "",
-            "## 16. Database/Data Parity",
-            "Field-level copybook to JPA entity column mapping verified.",
-            "",
-            "## 17. Runtime Independence",
-            "CONFIRMED: Native Spring Boot application contains ZERO dependencies on `libcobj.jar` or `opensourcecobol` runtime classes.",
-            "",
-            "## 18. Unmapped COBOL Functionality",
-            "0 UNMAPPED business-significant COBOL statements.",
-            "",
-            "## 19. BankCore Status",
-            "DEFERRED — BankCore source (`BCPROC01.cob`) is unavailable in current workspace. BankCore phases will run when source is supplied.",
-            "",
-            "## 20. Final Verdict",
-            "**ClaimsCore Modernized Application Verdict:** **FULL PASS** (100% verified)  ",
-            "**Overall Platform Verdict:** **PARTIAL** (due to BankCore source deferral)  "
+            f"## Overall Verdict",
+            f"**{verdict}**",
         ]
         with open(os.path.join(self.out, "COBOL_TO_NATIVE_JAVA_FINAL_ACCEPTANCE.md"), "w", encoding="utf-8") as fh:
-            fh.write("\n".join(report_v2_md) + "\n")
-        self.log(f"    final acceptance report v2: {os.path.join(self.out, 'COBOL_TO_NATIVE_JAVA_FINAL_ACCEPTANCE.md')}")
+            fh.write("\n".join(acc_md) + "\n")
+        self.log(f"    final acceptance report: {os.path.join(self.out, 'COBOL_TO_NATIVE_JAVA_FINAL_ACCEPTANCE.md')}")
         self.log(f"    transpilation provenance: {os.path.join(self.out, 'transpilation-provenance.json')}")
 
         # --- pipeline_execution_manifest.json ---
@@ -5588,17 +5464,20 @@ class Pipeline:
             try:
                 with open(diag_path, "r", encoding="utf-8") as fh:
                     diags = json.load(fh)
-                    for d in diags:
-                        if d.get("status") == "NATIVE_TRANSLATION_BLOCKED" or d.get("severity") == "ERROR":
-                            return "UNSUPPORTED"
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 — corrupt evidence fails CLOSED
+                self.log(f"  [FAIL] native_translation_diagnostics.json unreadable ({exc}) "
+                         f"— treating translation as UNSUPPORTED")
+                return "UNSUPPORTED"
+            for d in diags:
+                if d.get("status") == "NATIVE_TRANSLATION_BLOCKED" or d.get("severity") == "ERROR":
+                    return "UNSUPPORTED"
 
         legacy = self.data("legacy", {})
         if legacy.get("status") == "BASELINE_UNPRODUCIBLE":
             return "BASELINE_UNPRODUCIBLE"
-        if legacy.get("skipped"):
-            return "VERIFIED"
+        # NOTE: legacy.get("skipped") (--skip-legacy) intentionally does NOT
+        # shortcut to VERIFIED here. A skipped baseline can only proceed up the
+        # ladder through real comparison evidence (pre-seeded baseline files).
 
         tr = self.data("transpile", {})
         cmp = self.data("compare", {})
@@ -5634,7 +5513,8 @@ class Pipeline:
         if not all(c["ok"] for c in checks):
             gate1_ok = False
 
-        stdout_equiv_ok = cmp_ev.get("stdout_equiv_ok", True)
+        # Fail-closed: missing stdout-equivalence evidence fails the gate
+        # (single conservative read; absence of evidence is never a pass).
         if not stdout_equiv_ok:
             gate1_ok = False
 
@@ -5697,12 +5577,13 @@ class Pipeline:
         if not spring_generated:
             return "NATIVE_JAVA_VERIFIED"
 
-        # Check enterprise dep audit (generate stage evidence)
+        # Check enterprise dep audit (generate stage evidence).
+        # Fail-closed: merely having generated a Spring project is NOT evidence
+        # that its dependency audit passed.
         generate_data = self.data("generate", {})
         enterprise_dep_ok = (
             generate_data.get("dependency_audit", {}).get("status") == "PASS"
             or generate_data.get("dep_audit_status") == "PASS"
-            or spring_generated  # spring generated implies enterprise project exists
         )
         if not enterprise_dep_ok:
             return "NATIVE_JAVA_VERIFIED"

@@ -193,6 +193,25 @@ def _kill_tree(proc: subprocess.Popen, force: bool = False) -> None:
 # Docker command builder
 # ---------------------------------------------------------------------------
 
+_SHELL_SAFE_RE = re.compile(r"^[A-Za-z0-9_./=$,:\x2b@%-]+$")
+
+
+def shell_safe(token: str, what: str = "value") -> str:
+    """Validate a repo-derived token before it is interpolated into the
+    container's `sh -c` string.
+
+    Repo-derived values (program IDs, config paths, CLI args) must never be
+    able to inject shell metacharacters into container command execution.
+    """
+    token = (token or "").strip()
+    if not token or len(token) > 512 or not _SHELL_SAFE_RE.match(token):
+        raise ValueError(
+            f"UNSAFE_{what.upper()}: {token!r} contains characters that are not "
+            f"permitted in container command interpolation"
+        )
+    return token
+
+
 def _docker_cmd(image: str, mounts: list, workdir: str, inner_cmd: str) -> list:
     """Build a docker run command list."""
     full = ["docker", "run", "--rm"]
@@ -253,7 +272,7 @@ def run_cobol_with_scenario(
     out_dir: str,
     cfg: dict,
     gnucobol_image: str = None,
-    exe_name: str = "bin/claims_core.exe",
+    exe_name: str = None,
 ) -> ExecutionResult:
     """Run the pre-built GnuCOBOL binary with the scripted scenario.
 
@@ -262,12 +281,18 @@ def run_cobol_with_scenario(
 
     Args:
         exe_name:   Relative path inside the container's /repo mount.
-                    Defaults to the name used by stage_baseline.
+                    Defaults to a name derived from the scenario entrypoint.
     """
     image = gnucobol_image or _DEFAULT_GNUCOBOL
     exec_cfg = cfg.get("execution", {})
     timeout = scenario.timeout_seconds
     max_out = scenario.max_output_bytes
+
+    if not exe_name:
+        entry_id = (scenario.entrypoint or "program").lower().replace("-", "_")
+        exe_name = f"{entry_id}.exe"
+    # SECURITY: repo-derived executable path is shell-interpolated below.
+    exe_name = shell_safe(exe_name, "executable name")
 
     # Ensure stdin file exists (may have been cleaned up between runs)
     stdin_path_host = restore_stdin_file(scenario, out_dir)
@@ -353,7 +378,11 @@ def run_java_with_scenario(
 
     stdin_guest = "/execution_input/interactive_input.txt"
     java_cp = "/target/generated:/target/libcobj.jar"
+    # SECURITY: repo-derived identifiers are shell-interpolated below.
+    entry = shell_safe(entry, "entry point")
     args_str = entry_args.strip()
+    if args_str:
+        args_str = shell_safe(args_str, "entry arguments")
     inner_cmd = (
         f"cd /repo && export COB_PACKAGE_PATH=com.systema.modernized.generated && java -cp '{java_cp}' {entry}"
         + (f" {args_str}" if args_str else "")

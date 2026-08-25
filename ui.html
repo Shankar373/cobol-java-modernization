@@ -894,7 +894,15 @@ function escapeHtml(s) {
 }
 
 function escapeJs(s) {
-  return String(s).replace(/'/g, "\\'").replace(/"/g, '\\"');
+  // HTML-attribute-context safe escaping: raw quotes/backslashes/angle brackets
+  // must never survive, otherwise uploaded filenames can break out of the
+  // attribute and execute script. encodeURIComponent neutralizes all
+  // structural characters; the decode side uses decodeURIComponent.
+  return encodeURIComponent(String(s));
+}
+
+function decodeJs(s) {
+  try { return decodeURIComponent(String(s)); } catch (e) { return String(s); }
 }
 
 // Ingestion handlers
@@ -1008,6 +1016,7 @@ async function stopPipeline() {
 
 // Select Workspaces
 function selectRun(runId) {
+  runId = decodeJs(runId); // onclick handlers pass encoded values (XSS-safe)
   if (logSource) {
     closeLogStream();
   }
@@ -1173,6 +1182,7 @@ async function loadArtifactsExplorer() {
 }
 
 async function viewArtifactContent(path, el) {
+  path = decodeJs(path); // onclick handlers pass encoded values (XSS-safe)
   document.querySelectorAll('.tree-node').forEach(node => node.classList.remove('active'));
   if (el) el.classList.add('active');
   
@@ -1898,9 +1908,9 @@ function renderRuns(state) {
     let chipClass = `chip chip-${r.status}`;
     let doneCount = r.stages.filter(s => s.status === 'done').length;
     return `
-      <div class="run-item ${r.run_id === sel ? 'active' : ''}" onclick="selectRun('${r.run_id}')">
+      <div class="run-item ${r.run_id === sel ? 'active' : ''}" onclick="selectRun('${escapeJs(r.run_id)}')">
         <div class="run-title">${escapeHtml(r.name || r.run_id)} <span class="${chipClass}">${r.status}</span></div>
-        <div class="run-meta">${doneCount}/${r.stages.length} stages · ${r.verdict || 'UNVERIFIED'}</div>
+        <div class="run-meta">${doneCount}/${r.stages.length} stages · ${escapeHtml(r.verdict || 'UNVERIFIED')}</div>
       </div>`;
   }).join('');
 }

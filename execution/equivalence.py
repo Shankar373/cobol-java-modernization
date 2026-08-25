@@ -31,17 +31,38 @@ class EquivalenceEngine:
             "java_status": obs_java.execution_status
         }
 
-        # Initialize all checks to PASS by default. Only expected checks will be evaluated.
+        # 1a. Baseline-side abnormal termination can never yield PASS.
+        # A crashed/timed-out baseline run is not evidence of equivalence.
+        ABNORMAL = ("timeout", "crashed", "killed", "error", "output_limit")
+        baseline_abnormal = (obs_cobol.execution_status or "").lower() in ABNORMAL
+        java_abnormal = (obs_java.execution_status or "").lower() in ABNORMAL
+
+        # Initialize checks to NOT_APPLICABLE by default: only contract-enabled
+        # or evidence-backed checks may be upgraded. A mode missing from the
+        # contract is explicitly NOT_APPLICABLE; a mode requested by the
+        # contract but lacking evidence is UNVERIFIED — never a silent PASS.
         result.checks = {
-            "output_presence": "PASS",
-            "file_set": "PASS",
-            "file_contents": "PASS",
-            "record_counts": "PASS",
-            "stdout": "PASS",
-            "stderr": "PASS",
-            "exit_code": "PASS",
-            "database_state": "PASS",
+            "output_presence": "NOT_APPLICABLE",
+            "file_set": "NOT_APPLICABLE",
+            "file_contents": "NOT_APPLICABLE",
+            "record_counts": "NOT_APPLICABLE",
+            "stdout": "NOT_APPLICABLE",
+            "stderr": "NOT_APPLICABLE",
+            "exit_code": "NOT_APPLICABLE",
+            "database_state": "NOT_APPLICABLE",
         }
+
+        if baseline_abnormal or java_abnormal:
+            result.checks["exit_code"] = "FAIL"
+            result.differences.append({
+                "type": "abnormal_termination",
+                "baseline_status": obs_cobol.execution_status,
+                "java_status": obs_java.execution_status,
+                "reason": "Baseline or Java execution terminated abnormally; "
+                          "no comparison can be trusted."
+            })
+            result.status = "FAIL"
+            return result
 
         expected_modes = contract.expected_output_modes
 
@@ -161,6 +182,13 @@ class EquivalenceEngine:
 
                     if b_status == "MISSING" or j_status == "MISSING":
                         content_fail = True
+                        result.differences.append({
+                            "file": key,
+                            "type": "file_missing_on_one_side",
+                            "expected": f"baseline: {b_status}",
+                            "actual": f"java: {j_status}",
+                            "reason": "Output file missing on one side; contents not comparable."
+                        })
                         continue
 
                     if key in contract.expected_empty_files:
@@ -261,37 +289,96 @@ class EquivalenceEngine:
                     "reason": "Stdout print mismatch."
                 })
 
-        # 5. Database state comparison
+        # 4a. Stderr comparison (contract-enabled; evidence-gated).
+        if "EXPECTED_STDERR" in expected_modes:
+            result.checks["stderr"] = "UNVERIFIED"
+            b_stderr = obs_cobol.stderr
+            j_stderr = obs_java.stderr
+            norm_err = NormalizationRules(contract.normalization_rules)
+            b_err_norm = norm_err.normalize(b_stderr, "stderr", result.normalizations)
+            j_err_norm = norm_err.normalize(j_stderr, "stderr", result.normalizations)
+
+            if b_err_norm == j_err_norm:
+                result.checks["stderr"] = "PASS"
+            else:
+                result.checks["stderr"] = "FAIL"
+                result.differences.append({
+                    "type": "stderr_mismatch",
+                    "expected": b_err_norm[-500:],
+                    "actual": j_err_norm[-500:],
+                    "reason": "Stderr output mismatch after normalization."
+                })
+
+        # 5. Database state comparison — includes row counts, key sets,
+        # before/after state and transaction status when captured.
         if "EXPECTED_DATABASE_STATE" in expected_modes:
             result.checks["database_state"] = "UNVERIFIED"
-            
+
             db_fail = False
+
+            def _record_db_diff(diff_type, expected, actual, reason, key):
+                nonlocal db_fail
+                db_fail = True
+                result.differences.append({
+                    "file": key,
+                    "type": diff_type,
+                    "expected": expected,
+                    "actual": actual,
+                    "reason": reason,
+                })
+
             for key in sorted(cobol_db_state.keys() | java_db_state.keys()):
                 b_db = cobol_db_state.get(key, {})
                 j_db = java_db_state.get(key, {})
                 if b_db.get("db_type") != j_db.get("db_type"):
-                    db_fail = True
-                    result.differences.append({
-                        "file": key,
-                        "type": "database_type_mismatch",
-                        "expected": b_db.get("db_type"),
-                        "actual": j_db.get("db_type"),
-                        "reason": "Database vendor type mismatch."
-                    })
-                
+                    _record_db_diff(
+                        "database_type_mismatch",
+                        b_db.get("db_type"), j_db.get("db_type"),
+                        "Database vendor type mismatch.", key)
+
                 if b_db.get("affected_tables") != j_db.get("affected_tables"):
-                    db_fail = True
-                    result.differences.append({
-                        "file": key,
-                        "type": "database_tables_mismatch",
-                        "expected": b_db.get("affected_tables"),
-                        "actual": j_db.get("affected_tables"),
-                        "reason": "Database affected tables mismatch."
-                    })
+                    _record_db_diff(
+                        "database_tables_mismatch",
+                        b_db.get("affected_tables"), j_db.get("affected_tables"),
+                        "Database affected tables mismatch.", key)
+
+                # Deep state comparison: only when both sides captured data.
+                b_rows = b_db.get("row_counts") or {}
+                j_rows = j_db.get("row_counts") or {}
+                if b_rows and j_rows and b_rows != j_rows:
+                    _record_db_diff(
+                        "database_row_counts_mismatch",
+                        b_rows, j_rows,
+                        "Database row counts mismatch.", key)
+
+                b_keys = b_db.get("relevant_keys") or {}
+                j_keys = j_db.get("relevant_keys") or {}
+                if b_keys and j_keys and b_keys != j_keys:
+                    _record_db_diff(
+                        "database_keys_mismatch",
+                        b_keys, j_keys,
+                        "Database relevant key sets mismatch.", key)
+
+                b_state = b_db.get("before_after_state") or {}
+                j_state = j_db.get("before_after_state") or {}
+                if b_state and j_state and b_state != j_state:
+                    _record_db_diff(
+                        "database_state_mismatch",
+                        str(b_state)[:500], str(j_state)[:500],
+                        "Database before/after state mismatch.", key)
+
+                b_txn = (b_db.get("transaction_status") or "").lower()
+                j_txn = (j_db.get("transaction_status") or "").lower()
+                if b_txn and j_txn and b_txn != j_txn:
+                    _record_db_diff(
+                        "database_transaction_mismatch",
+                        b_db.get("transaction_status"), j_db.get("transaction_status"),
+                        "Database transaction status mismatch.", key)
 
             result.checks["database_state"] = "FAIL" if db_fail else "PASS"
 
         # 6. Overall Status Verdict
+        # FAIL dominates, then UNVERIFIED; NOT_APPLICABLE never masks either.
         any_fail = any(v == "FAIL" for v in result.checks.values())
         any_unverified = any(v == "UNVERIFIED" for v in result.checks.values())
 

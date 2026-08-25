@@ -21,7 +21,11 @@ def blank_pipeline(tmp_path):
     p.set_data("transpile", {"n_ok": 1, "n_total": 1})
     p.set_data("execute", {"status": "ok"})
     p.set_data("validate", {"status": "done", "gate2_passed": True})
-    p.set_data("generate", {"status": "done"})
+    # Enterprise dependency audit evidence is REQUIRED for elevated tiers
+    # (fail-closed: generating a Spring project alone is not evidence).
+    p.set_data("generate", {"status": "done", "dependency_audit": {
+        "executed": True, "status": "PASS",
+    }})
     p.set_data("collect", {"dependency_audit": {
         "executed": True, "status": "PASS", "verdict": "PASS",
     }})

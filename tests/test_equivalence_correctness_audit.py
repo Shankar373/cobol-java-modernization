@@ -162,7 +162,8 @@ def test_verdict_h_unresolved_schema_metadata(blank_pipeline):
     _set_stage_done(p, "generate")
     _set_data(p, "transpile", {"n_ok": 1, "n_total": 1})
     _set_data(p, "baseline_files", ["out.txt"])
-    _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": []})
+    _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": [],
+                             "stdout_equiv_ok": True})
     _set_data(p, "collect", {"dependency_audit": {"status": "PASS", "executed": True}})
     
     # Set semantic model input record confidence to UNRESOLVED

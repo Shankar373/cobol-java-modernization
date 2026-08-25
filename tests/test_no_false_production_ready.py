@@ -25,10 +25,13 @@ def base_pipeline(tmp_path):
         "checks": [{"ok": True}],
         "rows": [{"verdict": "exact", "logical": None}],
         "topology": "FILE_OUTPUT",
+        "stdout_equiv_ok": True,
     })
     p.set_data("execute", {"status": "ok"})
     p.set_data("validate", {"status": "done", "gate2_passed": True})
-    p.set_data("generate", {"status": "done"})
+    p.set_data("generate", {"status": "done", "dependency_audit": {
+        "executed": True, "status": "PASS",
+    }})
     p.set_data("legacy", {})
     p._save_state = lambda: None
     return p

@@ -79,6 +79,12 @@ def mock_ui_env(tmp_path, monkeypatch):
                     "status": "PASS"
                 }
             },
+            "generate": {
+                "dependency_audit": {
+                    "executed": True,
+                    "status": "PASS"
+                }
+            },
             "validate": {
                 "gate2_passed": True
             }

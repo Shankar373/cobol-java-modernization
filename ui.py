@@ -16,6 +16,7 @@ No third-party dependencies. Run:  python ui.py [--port 8787]
 
 import argparse
 import base64
+import hmac
 import io
 import json
 import os
@@ -38,8 +39,40 @@ CFG = engine.load_json(os.path.join(ROOT, "migration_config.json"), {}) or {}
 GIT = shutil.which("git")
 
 POT = {"ip": "127.0.0.1"}
-RUNS = {}               # run_id -> dict
-LOCK = threading.Lock()  # guards starting runs (one active run at a time)
+RUNS = {}                 # run_id -> dict
+LOCK = threading.Lock()   # guards run-start gating AND all RUNS mutations/iteration
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+# Upload/decompression limits (defense against zip bombs / disk exhaustion)
+MAX_UPLOAD_BYTES = 30 * 1024 * 1024          # request body cap
+MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024     # total extracted bytes cap (512 MB)
+MAX_ZIP_ENTRIES = 20000                      # entry-count cap
+ALLOWED_GIT_SCHEMES = ("https://", "http://")
+
+
+def valid_run_id(run_id):
+    """A run_id is safe iff it matches the ingest sanitizer's output charset.
+    Anything else must never reach filesystem operations."""
+    return isinstance(run_id, str) and bool(RUN_ID_RE.match(run_id))
+
+
+def sanitize_run_id(suffix):
+    """Same normalization used at ingest time. Collapses dot-runs so no
+    sanitized id can ever contain '..' (defense-in-depth vs traversal)."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "-", str(suffix))[:128]
+    cleaned = re.sub(r"\.{2,}", ".", cleaned).strip(".")
+    return cleaned or "run"
+
+
+def redact_url(url):
+    """Strip embedded credentials before storing or displaying a git URL."""
+    return re.sub(r"((?:https?|ssh)://)([^/@\s]+)@", r"\1<redacted>@", url)
+
+
+def scrub_git_output(text):
+    """Remove any credential-bearing URL fragments from git output."""
+    if not text:
+        return ""
+    return redact_url(text)[-300:]
 
 def secure_resolve_path(base_dir, relative_path):
     norm_rel = relative_path.replace("\\", "/").strip("/")
@@ -86,6 +119,7 @@ def run_id_of(ws):
 
 def restore_workspaces():
     os.makedirs(WORKSPACE, exist_ok=True)
+    restored = {}
     for name in sorted(os.listdir(WORKSPACE)):
         ws = os.path.join(WORKSPACE, name)
         if not os.path.isdir(ws):
@@ -103,7 +137,7 @@ def restore_workspaces():
         status = "done" if st.get("package", {}).get("status") == "done" else "interrupted"
         # Restore name/source from persisted meta.json if available
         meta = engine.load_json(os.path.join(ws, "meta.json"), {})
-        RUNS[name] = {
+        restored[name] = {
             "run_id": name, "status": status,
             "repo": os.path.join(ws, "repo"), "out": os.path.join(ws, "target"),
             "last_stage": last, "log": [],
@@ -112,6 +146,8 @@ def restore_workspaces():
             "events": [],
             "seq": 0,
         }
+    with LOCK:
+        RUNS.update(restored)
 
 
 def emit_run_event(run, event_type, message="", stage=None, status=None, **kwargs):
@@ -128,7 +164,12 @@ def emit_run_event(run, event_type, message="", stage=None, status=None, **kwarg
         "status": status,
         **kwargs
     }
-    run["events"].append(event)
+    events = run["events"]
+    events.append(event)
+    # Cap in-memory growth: SSE consumers only need the tail; the full log
+    # lives in the per-run pipeline log (also capped).
+    if len(events) > 4000:
+        del events[:len(events) - 2000]
 
 
 def start_run(run_id, restart_from):
@@ -221,6 +262,7 @@ def re_abs(name):
 def safe_extract_zip(data, dest):
     zf = zipfile.ZipFile(io.BytesIO(data))
     names = []
+    total_uncompressed = 0
     for info in zf.infolist():
         name = info.filename.replace("\\", "/")
         parts = name.split("/")
@@ -228,7 +270,13 @@ def safe_extract_zip(data, dest):
             continue
         if any(p in ("..", ".") for p in parts) or name.startswith("/") or re_abs(name):
             continue
+        total_uncompressed += info.file_size
         names.append(info)
+        # Zip-bomb protection: caps on aggregate size and entry count.
+        if total_uncompressed > MAX_ZIP_UNCOMPRESSED:
+            raise zipfile.LargeZipFile("aggregate uncompressed size exceeds limit")
+        if len(names) > MAX_ZIP_ENTRIES:
+            raise zipfile.LargeZipFile("entry count exceeds limit")
 
     # Detect common top-level directory prefix (if all files share it)
     common_prefix = None
@@ -268,17 +316,21 @@ def safe_extract_zip(data, dest):
 def ingest(payload):
     source = payload.get("source")
     suffix = payload.get("name") or time.strftime("run-%Y%m%d-%H%M%S")
-    run_id = re.sub(r"[^A-Za-z0-9._-]", "-", suffix)
-    ws = os.path.join(WORKSPACE, run_id)
-    if os.path.exists(ws):
-        ini = 2
-        while os.path.exists(os.path.join(WORKSPACE, f"{run_id}-{ini}")):
-            ini += 1
-        run_id = f"{run_id}-{ini}"
+    run_id = sanitize_run_id(suffix)
+    if not valid_run_id(run_id):
+        return False, "invalid project name"
+    # TOCTOU guard: serialize workspace-name allocation.
+    with LOCK:
         ws = os.path.join(WORKSPACE, run_id)
-    os.makedirs(ws, exist_ok=True)
-    repo = os.path.join(ws, "repo")
-    os.makedirs(repo, exist_ok=True)
+        if os.path.exists(ws):
+            ini = 2
+            while os.path.exists(os.path.join(WORKSPACE, f"{run_id}-{ini}")):
+                ini += 1
+            run_id = f"{run_id}-{ini}"
+            ws = os.path.join(WORKSPACE, run_id)
+        os.makedirs(ws, exist_ok=True)
+        repo = os.path.join(ws, "repo")
+        os.makedirs(repo, exist_ok=True)
     if source == "zip":
         try:
             data = base64.b64decode(payload.get("data", ""))
@@ -288,11 +340,17 @@ def ingest(payload):
         if not data:
             shutil.rmtree(ws, ignore_errors=True)
             return False, "empty zip payload"
+        if len(data) > MAX_UPLOAD_BYTES:
+            shutil.rmtree(ws, ignore_errors=True)
+            return False, f"zip payload exceeds maximum limit of {MAX_UPLOAD_BYTES // (1024 * 1024)}MB"
         try:
             n = safe_extract_zip(data, repo)
         except zipfile.BadZipFile:
             shutil.rmtree(ws, ignore_errors=True)
             return False, "not a valid zip file"
+        except zipfile.LargeZipFile:
+            shutil.rmtree(ws, ignore_errors=True)
+            return False, "zip exceeds decompression limits"
         if n == 0:
             shutil.rmtree(ws, ignore_errors=True)
             return False, "zip contained no files"
@@ -307,6 +365,9 @@ def ingest(payload):
         if url.startswith("-"):
             shutil.rmtree(ws, ignore_errors=True)
             return False, "invalid git url (cannot start with -)"
+        if not url.startswith(ALLOWED_GIT_SCHEMES):
+            shutil.rmtree(ws, ignore_errors=True)
+            return False, "invalid git url (only http:// and https:// are allowed)"
         cmd = [GIT, "clone", "--depth", "1"]
         branch = (payload.get("branch") or "").strip()
         if branch:
@@ -322,27 +383,45 @@ def ingest(payload):
             return False, "git clone timed out after 30 seconds"
         if r.returncode != 0:
             shutil.rmtree(ws, ignore_errors=True)
-            return False, "git clone failed: " + (r.stderr or r.stdout)[-300:]
+            return False, "git clone failed: " + scrub_git_output(r.stderr or r.stdout)
     else:
         return False, "unknown source"
-    RUNS[run_id] = {"run_id": run_id, "status": "ready",
-                    "repo": repo, "out": os.path.join(ws, "target"),
-                    "last_stage": -1, "log": [], "source": source,
-                    "name": payload.get("name") or ("git: " + url if source == "git" else "zip-package"),
-                    "events": [], "seq": 0}
-    # Persist source + name so they survive server restarts
-    engine.write_json(os.path.join(ws, "meta.json"), {
-        "source": RUNS[run_id]["source"],
-        "name": RUNS[run_id]["name"],
-    })
+    display_name = payload.get("name") or (
+        "git: " + redact_url(url) if source == "git" else "zip-package")
+    with LOCK:
+        RUNS[run_id] = {"run_id": run_id, "status": "ready",
+                        "repo": repo, "out": os.path.join(ws, "target"),
+                        "last_stage": -1, "log": [], "source": source,
+                        "name": display_name,
+                        "events": [], "seq": 0}
+        # Persist source + name so they survive server restarts
+        engine.write_json(os.path.join(ws, "meta.json"), {
+            "source": RUNS[run_id]["source"],
+            "name": RUNS[run_id]["name"],
+        })
     return True, run_id
 
 
 # ---------------------------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
+    # Socket-level read timeout: mitigates slowloris-style idle connections.
+    timeout = 300
+
     def check_auth(self):
         auth_env = os.environ.get("UI_AUTH_CREDENTIALS")
         if not auth_env:
+            # Fail-closed for non-loopback bindings: a network-exposed instance
+            # without configured credentials refuses all requests.
+            host, _ = self.server.server_address[:2]
+            if str(host) not in ("127.0.0.1", "::1", "localhost"):
+                self.send_response(503)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                message = (b"Authentication required: set UI_AUTH_CREDENTIALS "
+                           b"before binding to a non-loopback interface.")
+                self.send_header("Content-Length", str(len(message)))
+                self.end_headers()
+                self.wfile.write(message)
+                return False
             return True
         auth_hdr = self.headers.get("Authorization")
         if not auth_hdr or not auth_hdr.startswith("Basic "):
@@ -353,7 +432,7 @@ class Handler(BaseHTTPRequestHandler):
             return False
         try:
             auth_val = base64.b64decode(auth_hdr[6:].encode("ascii")).decode("ascii")
-            if auth_val == auth_env:
+            if hmac.compare_digest(auth_val, auth_env):
                 return True
         except Exception:
             pass
@@ -393,7 +472,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/log-stream":
             q = urllib.parse.parse_qs(u.query)
             rid = q.get("run_id", [""])[0]
-            run = RUNS.get(rid)
+            with LOCK:
+                run = RUNS.get(rid)
             if not run:
                 self.send_error(404, "unknown run")
                 return
@@ -402,20 +482,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
-            sent_idx = 0
+            last_seq = 0
+            stream_deadline = time.time() + 3600  # cap stream lifetime (1h)
             try:
                 while True:
-                    run_events = run.get("events", [])
-                    events_len = len(run_events)
-                    if sent_idx < events_len:
-                        for i in range(sent_idx, events_len):
-                            event = run_events[i]
+                    events = run.get("events", [])
+                    pending = [e for e in events if e.get("seq", 0) > last_seq]
+                    if pending:
+                        for event in pending:
                             self.wfile.write(f"data: {json.dumps(event)}\n\n".encode("utf-8"))
                         self.wfile.flush()
-                        sent_idx = events_len
-                    if run.get("status") in ("done", "error", "interrupted") and sent_idx >= len(run.get("events", [])):
+                        last_seq = pending[-1].get("seq", last_seq)
+                    terminal = run.get("status") in ("done", "error", "interrupted")
+                    if terminal and not any(e.get("seq", 0) > last_seq for e in events):
                         self.wfile.write(b"event: end\ndata: {}\n\n")
                         self.wfile.flush()
+                        break
+                    if time.time() > stream_deadline or run.get("status") == "ready":
                         break
                     time.sleep(0.2)
             except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
@@ -613,9 +696,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.check_auth():
             return
         u = urllib.parse.urlparse(self.path)
-        length = int(self.headers.get("Content-Length", 0))
-        if length > 30 * 1024 * 1024:
-            self._json({"ok": False, "error": "payload exceeds maximum limit of 20MB"}, 400)
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            self._json({"ok": False, "error": "invalid content-length"}, 400)
+            return
+        if length > MAX_UPLOAD_BYTES:
+            self._json({"ok": False,
+                        "error": f"payload exceeds maximum limit of {MAX_UPLOAD_BYTES // (1024 * 1024)}MB"}, 400)
             return
         body = self.rfile.read(length)
         try:
@@ -643,15 +731,33 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/reset":
             run_id = payload.get("run_id")
-            run = RUNS.pop(run_id, None)
+            # SECURITY: validate before any filesystem operation. Arbitrary or
+            # absolute values must never reach rmtree (path traversal).
+            if not valid_run_id(run_id):
+                self._json({"ok": False, "error": "invalid run id"}, 400)
+                return
+            with LOCK:
+                run = RUNS.get(run_id)
+                if run and run.get("status") == "running":
+                    self._json({"ok": False,
+                                "error": "cannot reset a running job; stop it first"}, 409)
+                    return
+                RUNS.pop(run_id, None)
             ws = os.path.join(WORKSPACE, run_id)
-            shutil.rmtree(ws, ignore_errors=True)
+            resolved_ws = os.path.realpath(ws)
+            if resolved_ws != os.path.realpath(WORKSPACE) and \
+                    resolved_ws.startswith(os.path.realpath(WORKSPACE) + os.sep):
+                shutil.rmtree(resolved_ws, ignore_errors=True)
+            else:
+                self._json({"ok": False, "error": "workspace path escaped containment"}, 400)
+                return
             self._json({"ok": True})
             return
         if u.path == "/api/stop":
             run_id = payload.get("run_id")
-            run = RUNS.get(run_id)
-            if not run:
+            with LOCK:
+                run = RUNS.get(run_id)
+            if not valid_run_id(run_id) or not run:
                 self._json({"ok": False, "error": "unknown run"}, 404)
                 return
             p = run.get("pipeline")
@@ -670,8 +776,10 @@ class Handler(BaseHTTPRequestHandler):
 # ponytail: state.json read per-run per-poll; acceptable for single-user local tool.
 # For multi-user scale, cache with mtime invalidation.
 def build_state():
+    with LOCK:
+        runs_snapshot = [(rid, dict(run)) for rid, run in RUNS.items()]
     runs = []
-    for rid, run in RUNS.items():
+    for rid, run in runs_snapshot:
         state_path = os.path.join(run["out"], "state.json")
         state = engine.load_json(state_path, {})
         stages = []
@@ -710,8 +818,8 @@ def build_state():
             "data": state.get("data", {}),
             "events": run.get("events", []),
         })
-    active = [r for r in RUNS.values() if r.get("status") == "running"]
-    return {"runs": runs, "active": bool(active), "git_available": bool(GIT)}
+    active = any(r.get("status") == "running" for _, r in runs_snapshot)
+    return {"runs": runs, "active": active, "git_available": bool(GIT)}
 
 
 def main():

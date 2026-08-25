@@ -1349,9 +1349,15 @@ class NativeStatementTranslator:
                 
             lines = []
             if from_source:
-                java_src = to_java_var(from_source)
+                # Literal sources (quoted strings / numerics) pass through
+                # verbatim — never mangled into a variable name.
+                if (from_source.startswith("'") or from_source.startswith('"')
+                        or re.fullmatch(r"[0-9]+(\.[0-9]+)?", str(from_source))):
+                    java_src = from_source
+                else:
+                    java_src = to_java_var(from_source)
                 lines.append(self.generate_assignment(tgt, java_src))
-                
+
             if org == "INDEXED" and (invalid_key_nodes or not_invalid_key_nodes):
                 lines.append(f"if (!write_{java_tgt}()) {{")
                 for node in invalid_key_nodes:
@@ -1383,10 +1389,14 @@ class NativeStatementTranslator:
                 
             lines = []
             if from_source:
-                java_src = to_java_var(from_source)
+                if (from_source.startswith("'") or from_source.startswith('"')
+                        or re.fullmatch(r"[0-9]+(\.[0-9]+)?", str(from_source))):
+                    java_src = from_source
+                else:
+                    java_src = to_java_var(from_source)
                 java_rec = to_java_var(tgt)
                 lines.append(f"{java_rec} = {java_src};")
-                
+
             if org == "INDEXED" and (invalid_key_nodes or not_invalid_key_nodes):
                 lines.append(f"if (!rewrite_{java_tgt}()) {{")
                 for node in invalid_key_nodes:
@@ -3213,8 +3223,11 @@ class NativeProgramGenerator:
                     "organization": org
                 }
                 
-        # Determine is_input based on OPEN statements and SORT/MERGE statements
+        # Determine is_input based on OPEN statements and SORT/MERGE statements.
+        # All modes are tracked so files reopened in a DIFFERENT mode can be
+        # flagged explicitly (only one IO method family is generated today).
         file_io_modes = {}
+        file_all_modes = {}
         for n in sorted_nodes:
             if n.kind == "STATEMENT" and n.properties.get("statement_type") == "OPEN":
                 targets = n.properties.get("targets", [])
@@ -3224,16 +3237,20 @@ class NativeProgramGenerator:
                         curr_mode = t
                     else:
                         file_io_modes[t.upper()] = curr_mode
+                        file_all_modes.setdefault(t.upper(), set()).add(curr_mode)
             elif n.kind == "STATEMENT" and n.properties.get("statement_type") in ("SORT", "MERGE"):
                 using_files = n.properties.get("using_files", [])
                 giving_files = n.properties.get("giving_files", [])
                 for uf in using_files:
                     file_io_modes[uf.upper()] = "INPUT"
+                    file_all_modes.setdefault(uf.upper(), set()).add("INPUT")
                 for gf in giving_files:
                     file_io_modes[gf.upper()] = "OUTPUT"
+                    file_all_modes.setdefault(gf.upper(), set()).add("OUTPUT")
 
         self.select_files = select_files
         self.file_io_modes = file_io_modes
+        self.file_all_modes = file_all_modes
         
         # No mutation of shared self.file_assigns list
 
@@ -4110,6 +4127,21 @@ class NativeProgramGenerator:
             assign_name = self.select_files.get(logical, {}).get("assign_name", "")
             path = ""
             is_input = (self.file_io_modes.get(logical, "INPUT") != "OUTPUT")
+            all_modes = sorted(self.file_all_modes.get(logical.upper(), set()))
+            if len(all_modes) > 1:
+                # KNOWN LIMITATION: only one IO method family is generated per
+                # file. Emit an explicit diagnostic — never fail silently.
+                self.diagnostics.append({
+                    "construct": "FILE-REOPEN-DIFFERENT-MODE",
+                    "source_coordinate": f"{logical}",
+                    "severity": "WARNING",
+                    "status": "NATIVE_TRANSLATION_LIMITED",
+                    "reason": (
+                        f"file '{logical}' opened in multiple modes {all_modes}; "
+                        f"only '{'INPUT' if is_input else 'OUTPUT'}'-mode IO "
+                        f"methods were generated"
+                    ),
+                })
             for assign in self.file_assigns:
                 if assign.get("logical_name", "").upper() in (logical.upper(), assign_name.upper()):
                     path = assign.get("assign_path") or assign.get("physical_path") or ""

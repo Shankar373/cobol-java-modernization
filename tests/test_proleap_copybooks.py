@@ -77,7 +77,7 @@ def _proleap_jars_available() -> bool:
     return all(os.path.exists(p) for p in required)
 
 
-@pytest.mark.skipif(not _proleap_jars_available(), reason="ProLeap runtime JARs not in .m2 cache — run 'mvn dependency:resolve' first")
+@ pytest.mark.skipif(not _proleap_jars_available(), reason="ProLeap runtime JARs not in .m2 cache. Seed with: mvn -f docker/maven-proleap-seed-pom.xml dependency:resolve")
 def test_copybook_adapter_missing_fails_cleanly():
     with tempfile.TemporaryDirectory() as tmpdir:
         cob_path = os.path.join(tmpdir, "main.cob")

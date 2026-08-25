@@ -26,10 +26,12 @@ COPY *.py              ./
 COPY requirements.txt  ./
 
 # Pre-warm the Maven local repo with common dependencies so first pipeline run
-# doesn't hit network. Uses offline-capable seed pom.
-# ponytail: seed pom only covers spring-boot 3.x + h2; DB2 profile still needs network on first use.
+# doesn't hit network. Uses offline-capable seed poms.
+# ponytail: seed poms cover spring-boot 3.x + h2 + proleap deps; DB2 profile still needs network on first use.
 COPY docker/maven-seed-pom.xml /tmp/seed-pom.xml
+COPY docker/maven-proleap-seed-pom.xml /tmp/proleap-seed-pom.xml
 RUN mvn -f /tmp/seed-pom.xml dependency:resolve -q 2>/dev/null || true
+RUN mvn -f /tmp/proleap-seed-pom.xml dependency:resolve -q 2>/dev/null || true
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 EXPOSE 8787

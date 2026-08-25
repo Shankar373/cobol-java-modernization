@@ -21,21 +21,54 @@ def blank_pipeline(tmp_path):
     return p
 
 
-def test_neg_equiv_console_with_stdin(blank_pipeline):
-    """If stdin input values exist, console neg-equiv passes and registers mutation tested."""
+def test_neg_equiv_console_with_stdin_never_fabricates_pass(blank_pipeline):
+    """REGRESSION: the old implementation wrote status=PASS, mutations_tested=1,
+    mutations_caught=1 WITHOUT executing anything. Console negative equivalence
+    must never report PASS without real mutation executions and comparisons.
+    With a stdin scenario but no reference execution evidence (blank pipeline),
+    the honest result is UNVERIFIED."""
     p = blank_pipeline
     p.set_data("execution_scenario", {
         "type": "non_interactive",
         "input_values": ["line1", "line2"]
     })
-
+    # No execute data -> no reference stdout -> cannot verify mutations
     p._run_neg_equiv_console()
     ne = p.data("neg_equiv")
     assert ne["executed"] is True
-    assert ne["status"] == "PASS"
+    assert ne["status"] != "PASS", (
+        "Console neg-equiv must not fabricate PASS without real executions"
+    )
+    assert ne["status"] == "UNVERIFIED"
     assert ne["mode"] == "CONSOLE_OUTPUT"
-    assert ne["mutations_tested"] == 1
-    assert ne["mutations_caught"] == 1
+    assert ne["mutations_tested"] == 0
+
+
+def test_neg_equiv_console_failed_execution_is_unverified_not_pass(blank_pipeline):
+    """When mutation re-execution fails (no Docker / no artifacts), the result
+    must be UNVERIFIED with failed_executions evidence — never PASS."""
+    p = blank_pipeline
+    p.set_data("execution_scenario", {
+        "entrypoint": "PROG1",
+        "input_source": "test",
+        "input_values": ["123", "456"],
+        "stdin_path": "",
+        "expected_termination": "normal",
+        "timeout_seconds": 5,
+        "max_output_bytes": 1024 * 1024,
+        "scenario_id": "fake",
+    })
+    p.set_data("execute", {"stdout_tail": "RESULT: 123"})
+    # run_java_with_scenario will fail without a real repo/Docker; both paths
+    # must end UNVERIFIED or FAIL — never PASS.
+    try:
+        p._run_neg_equiv_console()
+    except Exception:
+        pytest.fail("_run_neg_equiv_console must not raise; it records evidence instead")
+    ne = p.data("neg_equiv")
+    assert ne["executed"] is True
+    assert ne["status"] in ("UNVERIFIED", "FAIL")
+    assert ne.get("mutations_tested", 0) == 0 or ne.get("failed_executions")
 
 
 def test_neg_equiv_console_without_stdin(blank_pipeline):

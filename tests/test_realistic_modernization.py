@@ -223,31 +223,27 @@ def test_realistic_pipeline_lifecycle():
         with open(os.path.join(repo_dir, "data", "customer.sql"), "w", encoding="utf-8") as fh:
             fh.write("INSERT INTO customer (cust_id, cust_name) VALUES (101, 'TEST CUSTOMER');\n")
             
-        # 8. Instantiate and execute the Pipeline orchestrator
+        # 8. Instantiate and execute the Pipeline orchestrator.
+        # HONEST MODE: no --skip-legacy and NO hand-seeded baseline. Earlier
+        # versions of this test seeded fabricated "golden" outputs which did
+        # NOT match the real program behavior — the hardened equivalence engine
+        # correctly rejects them. A realistic lifecycle must produce its own
+        # GnuCOBOL baseline and compare against it for real.
+        from cobol_migrate import docker_available
+        if not docker_available():
+            pytest.skip("ENVIRONMENT_BLOCKED: Docker required to build the "
+                        "GnuCOBOL baseline and transpile via cobj")
         p = Pipeline(repo_dir, out_dir, cfg=config)
         p.pull = False
-        p.skip_legacy = True
-        
-        # Pre-seed expected legacy baseline files
-        legacy_dir = os.path.join(out_dir, "baseline", "legacy")
-        os.makedirs(os.path.join(legacy_dir, "data", "out"), exist_ok=True)
-        os.makedirs(os.path.join(legacy_dir, "data", "work"), exist_ok=True)
-        
-        with open(os.path.join(legacy_dir, "stdout.txt"), "w", encoding="utf-8") as fh:
-            fh.write("ODD KEY: 1001\nEVEN KEY: 1002\n")
-            
-        with open(os.path.join(legacy_dir, "data", "out", "seqoutput.dat"), "w", encoding="utf-8") as fh:
-            fh.write("1001PREFIX-FIRST CUSTOME001200110550OD\n1002PREFIX-SECOND CUSTOM002000010550EV\n")
-            
-        with open(os.path.join(legacy_dir, "data", "work", "indexedfile.dat"), "w", encoding="utf-8") as fh:
-            fh.write("1001PREFIX-FIRST CUSTOME001200110550OD\n1002PREFIX-SECOND CUSTOM002000010550EV\n")
-            
+
         p.run()
-        
+
         # Verify the final certification verdict
         verdict = p._compute_verdict()
-        assert verdict in ("VERIFIED", "VERIFIED_WITH_LIMITATIONS", "NATIVE_JAVA_VERIFIED", "NATIVE_SPRING_UNIFIED")
-        
+        assert verdict in ("VERIFIED", "VERIFIED_WITH_LIMITATIONS",
+                           "NATIVE_JAVA_VERIFIED", "NATIVE_SPRING_UNIFIED"), (
+            f"unexpected verdict {verdict}")
+
         # Verify stages are all executed successfully
         for stage in p.state["stages"].values():
             assert stage["status"] in ("done", "skipped")

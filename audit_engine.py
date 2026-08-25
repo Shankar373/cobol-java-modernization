@@ -219,7 +219,8 @@ def audit_behavioral_comparison(state):
     rows = cmp.get("rows", [])
 
     exact = sum(1 for r in rows if r["verdict"] == "exact")
-    normalized = sum(1 for r in rows if r["verdict"] == "normalized")
+    baseline_only = sum(1 for r in rows if r["verdict"] == "baseline-only")
+    java_only = sum(1 for r in rows if r["verdict"] == "java-only")
     differ = sum(1 for r in rows if r["verdict"] == "differ")
     logical_match = sum(1 for r in rows
                        if r.get("logical", {}) and
@@ -230,7 +231,8 @@ def audit_behavioral_comparison(state):
 
     return {
         "exact_matches": exact,
-        "normalized_matches": normalized,
+        "baseline_only": baseline_only,
+        "java_only": java_only,
         "differs": differ,
         "logical_matches": logical_match,
         "semantic_checks_pass": checks_pass,
@@ -272,6 +274,13 @@ def compute_final_verdict(state, imm_status, java_inventory, beh):
                       not (r.get("logical") and r.get("logical", {}).get("verdict") == "LOGICAL_MATCH")]
     if hard_differs:
         issues.append(f"{len(hard_differs)} output file(s) differ with no logical equivalence")
+
+    # File-set mismatches: an output file present on only one side means the
+    # migration dropped or invented an artifact — never GREEN.
+    if beh.get("baseline_only"):
+        issues.append(f"{beh['baseline_only']} baseline output file(s) missing from Java results")
+    if beh.get("java_only"):
+        issues.append(f"{beh['java_only']} Java-only output file(s) not produced by baseline")
 
     if not issues:
         verdict = "AUTOMATED AND VERIFIED"
@@ -544,8 +553,8 @@ def write_audit_report(out_dir, audit_data):
             # PASS reflects discovery AND (when attempted) transpile + execute.
             ok_flags = [disc_ok]
             if tr.get("ok") is not None:
-                ok_flags.append(bool(tr.get("ok"))
-                                and (not tr.get("n_ok") or tr.get("n_ok", 0) > 0))
+                # Transpile counts as OK only when it ran AND produced Java.
+                ok_flags.append(bool(tr.get("ok")) and (tr.get("n_ok", 0) > 0))
             if exec_ok is not None:
                 ok_flags.append(bool(exec_ok))
             result_icon = "✅" if all(ok_flags) else "❌"
@@ -557,14 +566,17 @@ def write_audit_report(out_dir, audit_data):
         md.append("_Synthetic tests not run. Use `--run-synthetic` flag._")
     md.append("")
 
-    # N. Remaining limitations
+    # N. Remaining limitations (evidence-driven; repo-specific facts are
+    # reported from the immutability audit rather than hardcoded narratives)
     md.append("## N. Remaining Limitations\n")
     md.append("- Dynamic CALL targets cannot be statically resolved (require runtime analysis)")
     md.append("- Physical byte comparison of indexed files is excluded (different backends)")
-    md.append("- GnuCOBOL 4.0 incompatible with this source — baseline pinned to 3.1.x")
-    md.append("- CCPROC01.cob contains a **MANUAL SOURCE MODIFICATION** (missing MOVE added)")
-    md.append("  - Status: documented; original source no longer preserved in this sandbox")
-    md.append("  - Recommendation: maintain `original/` and `patched/` layers for future repos")
+    if imm_rows and any(r.get("status") == "MODIFIED" for r in imm_rows):
+        for r in imm_rows:
+            if r.get("status") == "MODIFIED":
+                md.append(f"- `{r.get('file', '?')}` contains a **MANUAL SOURCE MODIFICATION** "
+                          f"(detected by ingest hash comparison)")
+        md.append("  - Recommendation: maintain `original/` and `patched/` layers for future repos")
     md.append("- libcobj.jar runtime tied to COBOL 4J 2.0.0 Docker image")
     md.append("- No JCL/utility (SORT, IDCAMS) support in cobj transpiler")
     md.append("")
