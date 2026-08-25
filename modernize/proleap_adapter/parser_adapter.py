@@ -26,12 +26,19 @@ def resolve_copybooks_recursively(file_path, search_dirs, visited=None):
         
     copy_pattern = re.compile(r'\bCOPY\s+["\']?([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?)["\']?', re.IGNORECASE)
     copybooks = copy_pattern.findall(content)
-    
+
+    # Extension set must be a SUPERSET of cobol_migrate.COPYBOOK_EXTENSIONS
+    # (".cpy", ".CPY", ".copy", ".COPY"): the two resolvers previously drifted,
+    # so a copybook named X.copy resolved for the cobj pipeline but was
+    # reported missing by the ProLeap adapter. tests/test_hardening_parity_and_ui.py
+    # enforces agreement.
+    copybook_exts = ["", ".cpy", ".CPY", ".copy", ".COPY", ".cob", ".COB", ".cbl", ".CBL"]
+
     missing = []
     for cb in copybooks:
         found_path = None
         for sdir in search_dirs:
-            for ext in ["", ".cpy", ".cob", ".cbl"]:
+            for ext in copybook_exts:
                 p = os.path.join(sdir, cb + ext)
                 if os.path.exists(p) and os.path.isfile(p):
                     found_path = p
@@ -51,6 +58,42 @@ class ProLeapParserAdapter:
         self.diagnostics = []
         self.status = "SUCCESS"
 
+    @staticmethod
+    def required_proleap_jars() -> list:
+        """Absolute paths of every JAR the adapter needs on the classpath.
+
+        Single source of truth: availability guards (tests, doctor tooling)
+        MUST call this instead of maintaining a parallel list — a partial
+        guard previously let a half-seeded environment reach parse() and
+        fail with the wrong diagnostic.
+        """
+        m2_repo = os.path.join(os.path.expanduser("~"), ".m2", "repository")
+        project_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        proleap_jar = os.path.join(
+            project_root, "third_party", "proleap", "artifact",
+            "proleap-cobol-parser-4.0.0.jar")
+        poc_jar = os.path.join(
+            project_root, "third_party", "proleap", "artifact",
+            "proleap-poc-1.0.0.jar")
+        jackson_databind = os.path.join(
+            m2_repo, "com", "fasterxml", "jackson", "core", "jackson-databind",
+            "2.15.2", "jackson-databind-2.15.2.jar")
+        jackson_annotations = os.path.join(
+            m2_repo, "com", "fasterxml", "jackson", "core", "jackson-annotations",
+            "2.15.2", "jackson-annotations-2.15.2.jar")
+        jackson_core = os.path.join(
+            m2_repo, "com", "fasterxml", "jackson", "core", "jackson-core",
+            "2.15.2", "jackson-core-2.15.2.jar")
+        antlr_runtime = os.path.join(
+            m2_repo, "org", "antlr", "antlr4-runtime",
+            "4.7.2", "antlr4-runtime-4.7.2.jar")
+        slf4j_api = os.path.join(
+            m2_repo, "org", "slf4j", "slf4j-api",
+            "2.0.9", "slf4j-api-2.0.9.jar")
+        return [proleap_jar, poc_jar, jackson_databind,
+                jackson_annotations, jackson_core, antlr_runtime, slf4j_api]
+
     def parse(self) -> SemanticIR:
         batch_results = self.parse_batch([self.file_path])
         res = batch_results.get(self.file_path)
@@ -67,20 +110,11 @@ class ProLeapParserAdapter:
     @classmethod
     def parse_batch(cls, file_paths: list) -> dict:
         results = {}
-        m2_repo = os.path.join(os.path.expanduser("~"), ".m2", "repository")
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        
-        # 1. Resolve Classpath Jars
-        proleap_jar = os.path.join(project_root, "third_party", "proleap", "artifact", "proleap-cobol-parser-4.0.0.jar")
-        poc_jar = os.path.join(project_root, "third_party", "proleap", "artifact", "proleap-poc-1.0.0.jar")
-        jackson_databind = os.path.join(m2_repo, "com", "fasterxml", "jackson", "core", "jackson-databind", "2.15.2", "jackson-databind-2.15.2.jar")
-        jackson_annotations = os.path.join(m2_repo, "com", "fasterxml", "jackson", "core", "jackson-annotations", "2.15.2", "jackson-annotations-2.15.2.jar")
-        jackson_core = os.path.join(m2_repo, "com", "fasterxml", "jackson", "core", "jackson-core", "2.15.2", "jackson-core-2.15.2.jar")
-        antlr_runtime = os.path.join(m2_repo, "org", "antlr", "antlr4-runtime", "4.7.2", "antlr4-runtime-4.7.2.jar")
-        slf4j_api = os.path.join(m2_repo, "org", "slf4j", "slf4j-api", "2.0.9", "slf4j-api-2.0.9.jar")
-        
-        required_jars = [proleap_jar, poc_jar, jackson_databind, jackson_annotations, jackson_core, antlr_runtime, slf4j_api]
+        required_jars = cls.required_proleap_jars()
         missing_jars = [r for r in required_jars if not os.path.exists(r)]
+        # Legacy-copybook fallback root for search_dirs below.
+        project_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         to_parse = []
         
@@ -138,8 +172,10 @@ class ProLeapParserAdapter:
         if not to_parse:
             return results
             
-        # 2. Run Java Parser in a single batch process invocation
-        classpath = ";".join(required_jars)
+        # 2. Run Java Parser in a single batch process invocation.
+        # os.pathsep: ';' on Windows, ':' on Linux/containers — the previous
+        # hardcoded ';' made the adapter silently unusable under Docker.
+        classpath = os.pathsep.join(required_jars)
         cmd = ["java", "-cp", classpath, "com.systema.proleappoc.ProLeapPoc"]
         
         temp_files = {} # fp_abs -> temp_json_path

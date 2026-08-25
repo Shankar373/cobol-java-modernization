@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Nightly full lane (includes Docker-dependent suites).
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  fast:
+    name: Fast lane (no Docker images required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Seed Maven cache deterministically
+        run: |
+          mvn -B -f docker/maven-seed-pom.xml dependency:resolve
+          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve
+
+      - name: Verify seeded artifacts individually (AGENTS.md §10)
+        run: |
+          M2="$HOME/.m2/repository"
+          MISSING=0
+          for rel in \
+            com/fasterxml/jackson/core/jackson-databind/2.15.2/jackson-databind-2.15.2.jar \
+            com/fasterxml/jackson/core/jackson-annotations/2.15.2/jackson-annotations-2.15.2.jar \
+            com/fasterxml/jackson/core/jackson-core/2.15.2/jackson-core-2.15.2.jar \
+            org/antlr/antlr4-runtime/4.7.2/antlr4-runtime-4.7.2.jar \
+            org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar \
+            org/springframework/boot/spring-boot/3.2.5/spring-boot-3.2.5.jar \
+            org/springframework/boot/spring-boot-starter-web/3.2.5/spring-boot-starter-web-3.2.5.pom \
+            com/h2database/h2/2.2.224/h2-2.2.224.jar ; do
+            [ -s "$M2/$rel" ] || { echo "MISSING ARTIFACT: $rel"; MISSING=1; }
+          done
+          exit $MISSING
+
+      - name: Run fast test lane
+        # Docker-dependent E2E suites are excluded here and covered by nightly.
+        run: |
+          python -m pytest -q --tb=short \
+            --ignore=tests/logical_audit_test.py \
+            --ignore=tests/test_realistic_modernization.py \
+            --ignore=tests/test_validation_nobypass.py \
+            --ignore=tests/test_generic_refactoring.py
+
+  nightly-full:
+    name: Nightly full regression (Docker included)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          playwright install chromium
+
+      - name: Seed Maven cache
+        run: |
+          mvn -B -f docker/maven-seed-pom.xml dependency:resolve
+          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve
+
+      - name: Pull compiler containers
+        run: |
+          docker pull opensourcecobol/opensourcecobol4j:2.0.0
+          docker pull hurriedreformist/gnucobol:3.1-builder
+
+      - name: Full regression
+        run: python -m pytest -q --tb=short

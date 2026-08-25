@@ -25,6 +25,12 @@ class NativePipeline:
         self.out = os.path.abspath(out)
         self.parser_choice = parser_choice
         self.generated_dir = os.path.join(self.out, "native")
+
+        # Run-scoped artifact sinks. Writing anywhere under the repository
+        # root (e.g. <repo>/target/generated) lets concurrent runs corrupt
+        # each other's evidence; everything lands inside this run's out dir.
+        self.artifacts_dir = os.path.join(self.out, "generated")
+        self.reports_dir = os.path.join(self.out, "reports")
         self.src_dir = os.path.join(self.generated_dir, "src", "main", "java", "com", "systema", "modernized", "native_gen")
         
         # Discovered info
@@ -413,8 +419,7 @@ class NativePipeline:
                 "selection_reason": f"Discovered optimal supported constructs score {best_score}/5",
                 "confidence": "HIGH" if best_score >= 4 else "MEDIUM"
             }
-            os.makedirs(os.path.join(ROOT, "target", "generated"), exist_ok=True)
-            with open(os.path.join(ROOT, "target", "generated", "native_slice_selection.json"), "w", encoding="utf-8") as fh:
+            with open(self._artifact_file("native_slice_selection.json"), "w", encoding="utf-8") as fh:
                 json.dump(sel, fh, indent=2)
 
         return best_src
@@ -752,7 +757,7 @@ public class CicsTransactionContext {
                 "variables": {k: v for k, v in selected_gen.var_types.items()} if selected_gen else {},
                 "statements_count": len([n for n in ir.nodes.values() if n.kind == "STATEMENT"])
             }
-        with open(os.path.join(ROOT, "target", "generated", "native_ir_mapping.json"), "w", encoding="utf-8") as fh:
+        with open(self._artifact_file("native_ir_mapping.json"), "w", encoding="utf-8") as fh:
             json.dump(mapping, fh, indent=2)
 
         # 4. native_translation_diagnostics.json
@@ -800,7 +805,7 @@ public class CicsTransactionContext {
                     "status": diag.get("status", "NATIVE_TRANSLATION_BLOCKED"),
                     "reason": diag.get("reason") or diag.get("detail") or "UNKNOWN"
                 })
-        with open(os.path.join(ROOT, "target", "generated", "native_translation_diagnostics.json"), "w", encoding="utf-8") as fh:
+        with open(self._artifact_file("native_translation_diagnostics.json"), "w", encoding="utf-8") as fh:
             json.dump(diagnostics, fh, indent=2)
 
         self.log("Java model and service logic generated successfully.")
@@ -832,11 +837,21 @@ public class CicsTransactionContext {
             "scanned_files": scanned_files
         }
         
-        with open(os.path.join(ROOT, "target", "generated", "native_java_dependency_audit.json"), "w", encoding="utf-8") as fh:
+        with open(self._artifact_file("native_java_dependency_audit.json"), "w", encoding="utf-8") as fh:
             json.dump(audit, fh, indent=2)
 
         self.log(f"Dependency gate: scanned {len(scanned_files)} files. Failures: {len(found_dependencies)}")
         return len(found_dependencies) == 0
+
+    def _artifact_file(self, name: str) -> str:
+        """Run-scoped artifact path (created on demand)."""
+        os.makedirs(self.artifacts_dir, exist_ok=True)
+        return os.path.join(self.artifacts_dir, name)
+
+    def _report_file(self, name: str) -> str:
+        """Run-scoped human-readable report path (created on demand)."""
+        os.makedirs(self.reports_dir, exist_ok=True)
+        return os.path.join(self.reports_dir, name)
 
     def stage_build_gate(self) -> bool:
         self.log("Building native Java project via Maven...")
@@ -929,7 +944,7 @@ public class CicsTransactionContext {
             "executed_at": now_iso()
         }
         
-        with open(os.path.join(ROOT, "target", "generated", "native_execution_observation.json"), "w", encoding="utf-8") as fh:
+        with open(self._artifact_file("native_execution_observation.json"), "w", encoding="utf-8") as fh:
             json.dump(obs, fh, indent=2)
 
         self.log(f"Execution finished with exit code {res.returncode}. Output files: {out_files}")
@@ -976,7 +991,7 @@ public class CicsTransactionContext {
             "compared_at": now_iso()
         }
         
-        with open(os.path.join(ROOT, "target", "generated", "native_equivalence_result.json"), "w", encoding="utf-8") as fh:
+        with open(self._artifact_file("native_equivalence_result.json"), "w", encoding="utf-8") as fh:
             json.dump(res, fh, indent=2)
 
         self.log(f"Equivalence verdict: {verdict}. Matches: {len(matched)}, Mismatches: {len(mismatches)}")
@@ -1113,11 +1128,10 @@ public class CicsTransactionContext {
             }
         }
         
-        with open(os.path.join(ROOT, "target", "generated", "native_traceability.json"), "w", encoding="utf-8") as fh:
+        with open(self._artifact_file("native_traceability.json"), "w", encoding="utf-8") as fh:
             json.dump(trace, fh, indent=2)
 
     def stage_reports(self, verdict: str):
-        os.makedirs(os.path.join(ROOT, "audit", "phase5"), exist_ok=True)
         
         # NATIVE_JAVA_TRANSLATION_REPORT.md
         r1 = f"""# Native Java Translation Report
@@ -1136,7 +1150,7 @@ public class CicsTransactionContext {
 - OPEN/CLOSE/READ/WRITE
 - GOBACK/STOP RUN
 """
-        with open(os.path.join(ROOT, "audit", "phase5", "NATIVE_JAVA_TRANSLATION_REPORT.md"), "w", encoding="utf-8") as fh:
+        with open(self._report_file("NATIVE_JAVA_TRANSLATION_REPORT.md"), "w", encoding="utf-8") as fh:
             fh.write(r1)
 
         # PHASE5_VALIDATION_REPORT.md
@@ -1150,7 +1164,7 @@ public class CicsTransactionContext {
 ## 2. Equivalence Parity
 - Output files match GnuCOBOL baseline byte-for-byte.
 """
-        with open(os.path.join(ROOT, "audit", "phase5", "PHASE5_VALIDATION_REPORT.md"), "w", encoding="utf-8") as fh:
+        with open(self._report_file("PHASE5_VALIDATION_REPORT.md"), "w", encoding="utf-8") as fh:
             fh.write(r2)
 
 if __name__ == "__main__":

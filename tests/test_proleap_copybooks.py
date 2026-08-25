@@ -68,16 +68,24 @@ def test_resolve_invalid_copybook():
         assert "BAD" in missing
 
 def _proleap_jars_available() -> bool:
-    m2 = os.path.join(os.path.expanduser("~"), ".m2", "repository")
-    required = [
-        os.path.join(m2, "com", "fasterxml", "jackson", "core", "jackson-databind",
-                     "2.15.2", "jackson-databind-2.15.2.jar"),
-        os.path.join(m2, "org", "antlr", "antlr4-runtime", "4.7.2", "antlr4-runtime-4.7.2.jar"),
-    ]
+    """Guard MUST mirror the adapter's exact requirement list.
+
+    REGRESSION: this previously checked only 2 of the 7 required JARs, so a
+    half-seeded environment ran the test and failed inside parse() with
+    PROLEAP_UNAVAILABLE instead of exercising the missing-copybook path.
+    The list now comes from the adapter itself (single source of truth).
+    """
+    required = ProLeapParserAdapter.required_proleap_jars()
     return all(os.path.exists(p) for p in required)
 
 
-@ pytest.mark.skipif(not _proleap_jars_available(), reason="ProLeap runtime JARs not in .m2 cache. Seed with: mvn -f docker/maven-proleap-seed-pom.xml dependency:resolve")
+@pytest.mark.skipif(
+    not _proleap_jars_available(),
+    reason=(
+        "ENVIRONMENT_BLOCKED: ProLeap runtime JARs not in .m2 cache. "
+        "Seed deterministically with: mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve"
+    ),
+)
 def test_copybook_adapter_missing_fails_cleanly():
     with tempfile.TemporaryDirectory() as tmpdir:
         cob_path = os.path.join(tmpdir, "main.cob")

@@ -45,25 +45,17 @@ def test_native_pipeline_stage_traceability(tmpdir):
     )
     p.program_ir["tests/repos/MULTIFILE01/MULTIFILE01.cob"] = ir
     
-    # We must patch ROOT in native_pipeline to point to out_dir
-    import modernize.native_pipeline
-    original_root = modernize.native_pipeline.ROOT
-    try:
-        modernize.native_pipeline.ROOT = out_dir
-        os.makedirs(os.path.join(out_dir, "target", "generated"), exist_ok=True)
-        
-        p.stage_traceability("tests/repos/MULTIFILE01/MULTIFILE01.cob")
-        
-        trace_file = os.path.join(out_dir, "target", "generated", "native_traceability.json")
-        assert os.path.exists(trace_file)
-        with open(trace_file, "r") as fh:
-            data = json.load(fh)
-            assert data["schema_version"] == "1.0"
-            assert len(data["mappings"]) == 1
-            mapping = data["mappings"][0]
-            assert mapping["source_coordinate"] == "MULTIFILE01.cob:5"
-            assert mapping["lexer_token"] == "MOVE"
-            assert mapping["semantic_ir_node"] == "node_1"
-            assert mapping["java_class"] == "com.systema.modernized.native_gen.Multifile01"
-    finally:
-        modernize.native_pipeline.ROOT = original_root
+    p.stage_traceability("tests/repos/MULTIFILE01/MULTIFILE01.cob")
+
+    # Artifacts are run-scoped: written under this pipeline's out directory.
+    trace_file = os.path.join(out_dir, "generated", "native_traceability.json")
+    assert os.path.exists(trace_file)
+    with open(trace_file, "r") as fh:
+        data = json.load(fh)
+        assert data["schema_version"] == "1.0"
+        assert len(data["mappings"]) == 1
+        mapping = data["mappings"][0]
+        assert mapping["source_coordinate"] == "MULTIFILE01.cob:5"
+        assert mapping["lexer_token"] == "MOVE"
+        assert mapping["semantic_ir_node"] == "node_1"
+        assert mapping["java_class"] == "com.systema.modernized.native_gen.Multifile01"

@@ -171,6 +171,37 @@ def write_json(path, obj):
         json.dump(obj, fh, indent=2)
 
 
+def classify_db2_status(has_sql: bool) -> str:
+    """Classify DB2 verification status from environment evidence.
+
+    States (honest ladder):
+      NOT_VERIFIED                     - repo has no embedded SQL
+      REAL_DB2_NOT_CONFIGURED          - SQL present, DB2_URL unset
+      REAL_DB2_INVALID_URL             - DB2_URL not jdbc:db2://host:port
+      REAL_DB2_NOT_VERIFIED_REACHABLE  - TCP reachable; reachability is NOT
+                                         verification (no query executed)
+      REAL_DB2_UNREACHABLE             - connection attempt failed
+    """
+    if not has_sql:
+        return "NOT_VERIFIED"
+    db2_url = os.environ.get("DB2_URL")
+    if not db2_url:
+        return "REAL_DB2_NOT_CONFIGURED"
+    match = re.search(r'jdbc:db2://([^:/]+):(\d+)', db2_url)
+    if not match:
+        return "REAL_DB2_INVALID_URL"
+    import socket
+    try:
+        host, port = match.group(1), int(match.group(2))
+        s = socket.create_connection((host, port), timeout=3)
+        s.close()
+    except Exception:
+        return "REAL_DB2_UNREACHABLE"
+    # Reachability only. Real verification requires executing and comparing
+    # SQL against this server (not implemented).
+    return "REAL_DB2_NOT_VERIFIED_REACHABLE"
+
+
 # ---------------------------------------------------------------------------
 # Pre-compiled regex patterns (module-level — compiled once at import)
 # ---------------------------------------------------------------------------
@@ -1150,22 +1181,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                         shifted_lines.append("       " + line)
                 text = "".join(shifted_lines)
 
-        # 1a. Early file-specific preprocessing fixes (before step 1d/1e parsing):
-        #     - Fix missing FD for DB2-STATS in UTLMON00.cbl.
-        if not is_copybook and "UTLMON00" in text:
-            text = text.replace("COPY DB2STAT.", "FD  DB2-STATS.\n            COPY DB2STAT.")
-        #     - Fix missing FDs and long paragraph names in UTLVAL00.cbl.
-        if not is_copybook and "UTLVAL00" in text:
-            text = text.replace("COPY POSREC.", "FD  POSITION-MASTER.\n            COPY POSREC.")
-            text = text.replace("COPY TRNREC.", "FD  TRANSACTION-HISTORY.\n            COPY TRNREC.")
-            text = text.replace("2220-CHECK-TRANSACTION-INTEGRITY", "2220-CHECK-TRAN-INTEGRITY")
-        #     - Fix literal / condition argument inside CALL statement of error-handling.cbl.
-        if not is_copybook and "error-handling" in dest_path:
-            text = text.replace(
-                "CALL 'CEE3ABD' USING RC-CRITICAL, 3",
-                "MOVE 16 TO WS-NUM-1\n            MOVE 3 TO WS-NUM-2\n            CALL 'CEE3ABD' USING WS-NUM-1, WS-NUM-2"
-            )
-
         # 1d. Fix missing FD declarations in FILE SECTION:
         #     If we have COPY statements directly under FILE SECTION without FD,
         #     we map them to the corresponding SELECT files and inject FD statements.
@@ -1224,37 +1239,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
         )
         if count:
             text = n
-
-        # 1e. Fix nested level-01 COPY imports:
-        #     If we have 01 PARENT-VAR. followed immediately by COPY CHILD-COPY,
-        #     where CHILD-COPY defines a level-01 variable at its root, we delete the
-        #     outer 01 declaration and rename parent references to match the child.
-        if not is_copybook:
-            CB_01_MAP = {
-                "RTNCODE": "RETURN-CODE-AREA",
-                "DBTBLS": "POSHIST-RECORD",
-                # ERRHND and INQCOM intentionally excluded: their parent wrapper vars
-                # (WS-ERROR-AREA, WS-COMMAREA) are used in MOVE statements.
-                # Stripping the 01 wrapper breaks qualification (e.g., INQCOM-FUNCTION OF WS-COMMAREA).
-                # Steps 6i / 6w handle these cases correctly via COPY REPLACING.
-                "PORTFLIO": "PORT-RECORD",
-                "DB2REQ": "DB2-REQUEST-AREA",
-                "POSREC": "POSITION-RECORD",
-                "SQLPOS": "SQLPOS-STUB-DATA",
-                "TRNREC": "TRANSACTION-RECORD",
-            }
-            for cb_name, child_var in CB_01_MAP.items():
-                pat = r'(01\s+([A-Z0-9][-A-Z0-9]*)\s*\.\s*\n\s*)COPY\s+' + re.escape(cb_name) + r'\b'
-                m = re.search(pat, text, re.IGNORECASE)
-                if m:
-                    parent_var = m.group(2)
-                    text = re.sub(pat, f'            COPY {cb_name}', text, count=1, flags=re.IGNORECASE)
-                    text = re.sub(
-                        r'(?<![-_a-zA-Z0-9])' + re.escape(parent_var) + r'(?![_-a-zA-Z0-9])',
-                        child_var,
-                        text,
-                        flags=re.IGNORECASE
-                    )
 
         # 3b & 4. Process EXEC CICS and EXEC SQL blocks.
         # We split the program into Data Division and Procedure Division sections.
@@ -1325,9 +1309,9 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                     cleaned.append(line)
             text = ''.join(cleaned)
 
-        # 5c. Synthesize missing SQLCA and BCHCTL variables in copybooks
-        #     SQLCA needs SQLCODE/SQLSTATE variables defined since cobj does not automatically
-        #     define them (it's not an ESQL precompiler). BCHCTL needs missing batch stat counters.
+        # 5c. Synthesize missing standard copybook variables.
+        #     SQLCA needs SQLCODE/SQLSTATE variables defined since cobj does not
+        #     automatically define them (it is not an ESQL precompiler).
         if is_copybook:
             stem = os.path.splitext(os.path.basename(src_path))[0].upper()
             if stem == "SQLCA":
@@ -1337,37 +1321,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                     "            05  SQLSTATE            PIC X(5) VALUE '00000'.\n"
                 )
                 text = text.rstrip() + sqlca_vars
-            elif stem == "BCHCTL":
-                text = re.sub(
-                    r'(\b05\s+BCT-STATISTICS\s*\.)',
-                    r'\1\n            10  BCT-RECORDS-READ     PIC 9(9) COMP VALUE 0.\n'
-                    r'            10  BCT-RECORDS-WRITTEN  PIC 9(9) COMP VALUE 0.',
-                    text,
-                    flags=re.IGNORECASE
-                )
-            elif stem == "AUDITLOG":
-                text = re.sub(
-                    r'(01\s+AUDIT-RECORD\s*\.)',
-                    r'\1\n            05  AUD-KEY             PIC X(26) VALUE SPACES.',
-                    text,
-                    flags=re.IGNORECASE
-                )
-            elif stem == "ERRHAND":
-                text = re.sub(
-                    r'(01\s+ERR-MESSAGE\s*\.)',
-                    r'\1\n            05  ERR-KEY             PIC X(26) VALUE SPACES.',
-                    text,
-                    flags=re.IGNORECASE
-                )
-            elif stem == "POSREC":
-                text = re.sub(
-                    r'(01\s+POSITION-RECORD\s*\.)',
-                    r'\1\n            05  POS-DESCRIPTION     PIC X(30) VALUE SPACES.\n'
-                    r'            05  POS-CURRENT-VALUE   PIC S9(13)V9(2) COMP-3 VALUE ZERO.\n'
-                    r'            05  POS-PREVIOUS-VALUE  PIC S9(13)V9(2) COMP-3 VALUE ZERO.',
-                    text,
-                    flags=re.IGNORECASE
-                )
 
         # 6e. Append procedures from copybooks (programs only, not copybooks)
         #     If the program imports a copybook (like DBPROC) that defines procedure
@@ -1386,36 +1339,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                     proc_additions.append(raw_proc)
             if proc_additions:
                 text = text.rstrip() + "\n\n      * [PP: Appended procedures from copybooks]\n" + "\n".join(proc_additions)
-
-        # 6f. Fix TRANSACTION-HISTORY/HISTREC mismatch in HISTLD00.
-        #     The original program references TH- fields but copies HISTREC which
-        #     defines HIST- fields (and lacks most variables). We replace COPY HISTREC.
-        #     with a fully synthesized record description that compiles under cobj.
-        if not is_copybook and "RECORD KEY IS TH-KEY" in text:
-            synthesized_histrec = (
-                "       01  TRANSACTION-HISTORY-RECORD.\n"
-                "           05  TH-KEY.\n"
-                "               10  TH-PORTFOLIO-ID      PIC X(10).\n"
-                "               10  TH-TRANS-DATE        PIC X(10).\n"
-                "           05  TH-ACCOUNT-NO            PIC X(8).\n"
-                "           05  TH-TRANS-TIME            PIC X(8).\n"
-                "           05  TH-TRANS-TYPE            PIC X(2).\n"
-                "           05  TH-SECURITY-ID           PIC X(12).\n"
-                "           05  TH-QUANTITY              PIC S9(12)V9(3) COMP-3.\n"
-                "           05  TH-PRICE                 PIC S9(12)V9(3) COMP-3.\n"
-                "           05  TH-AMOUNT                PIC S9(13)V9(2) COMP-3.\n"
-                "           05  TH-FEES                  PIC S9(13)V9(2) COMP-3.\n"
-                "           05  TH-TOTAL-AMOUNT          PIC S9(13)V9(2) COMP-3.\n"
-                "           05  TH-COST-BASIS            PIC S9(13)V9(2) COMP-3.\n"
-                "           05  TH-GAIN-LOSS             PIC S9(13)V9(2) COMP-3."
-            )
-            # Replace under the FD section
-            text = re.sub(
-                r'\bFD\s+TRANSACTION-HISTORY\s*\.\s*\n?\s*COPY\s+HISTREC\s*\.',
-                'FD  TRANSACTION-HISTORY.\n' + synthesized_histrec,
-                text,
-                flags=re.IGNORECASE
-            )
 
         # Fix missing periods on paragraph names in Procedure Division
         if not is_copybook and "PROCEDURE DIVISION" in text:
@@ -1436,60 +1359,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
         if not is_copybook:
             text, n_para = _inject_missing_paragraph_stubs(text)
             stats["missing_paras_injected"] += n_para
-
-        # 6b. Fix duplicate/ambiguous copybook imports in FILE SECTION vs LINKAGE SECTION.
-        #     If the CKPRST program imports COPY CKPRST twice, we rewrite the first copy
-        #     under FD using standard COPY REPLACING to avoid ambiguous field definitions (like CKR-KEY).
-        if not is_copybook:
-            text = re.sub(
-                r'\bRECORD\s+KEY\s+IS\s+CKR-KEY\b',
-                'RECORD KEY IS FD-CKR-KEY OF FD-CHECKPOINT-RECORD',
-                text,
-                flags=re.IGNORECASE
-            )
-            text = re.sub(
-                r'(FD\s+CHECKPOINT-FILE\b.*?)\bCOPY\s+CKPRST\b\.',
-                r'\1COPY CKPRST REPLACING\n'
-                r'               CHECKPOINT-CONTROL BY FD-CHECKPOINT-CONTROL\n'
-                r'               CHECKPOINT-RECORD BY FD-CHECKPOINT-RECORD\n'
-                r'               CKR-KEY BY FD-CKR-KEY.',
-                text,
-                flags=re.IGNORECASE | re.DOTALL
-            )
-
-        # 6c. Fix missing entry point conditional definitions (like ENTRY-POINT-INIT)
-        #     by injecting a dummy 88-level group under WORKING-STORAGE SECTION.
-        if not is_copybook and "ENTRY-POINT-INIT" in text:
-            dummy_eps = (
-                "\n       01  DUMMY-ENTRY-POINTS          PIC X(1) VALUE ' '.\n"
-                "           88  ENTRY-POINT-INIT        VALUE 'I'.\n"
-                "           88  ENTRY-POINT-TAKE        VALUE 'T'.\n"
-                "           88  ENTRY-POINT-COMMIT      VALUE 'C'.\n"
-                "           88  ENTRY-POINT-RESTART     VALUE 'R'.\n"
-            )
-            text = re.sub(
-                r'(\bWORKING-STORAGE\s+SECTION\s*\.)',
-                r'\1' + dummy_eps,
-                text,
-                flags=re.IGNORECASE
-            )
-
-        # 6d. Fix USING clause parameter level-05 group errors.
-        #     cobj requires parameters to be level-01 or level-77. If the code passes
-        #     a level-05 field like RETURN-STATUS, we change it to the level-01 group RETURN-HANDLING.
-        if not is_copybook:
-            text = re.sub(
-                r'\bUSING\s+CHECKPOINT-CONTROL\s+RETURN-STATUS\b',
-                'USING CHECKPOINT-CONTROL RETURN-HANDLING',
-                text,
-                flags=re.IGNORECASE
-            )
-            text = re.sub(
-                r'\bUSING\s+CHECKPOINT-CONTROL\s*\n?\s*RETURN-STATUS\b',
-                'USING CHECKPOINT-CONTROL\n                               RETURN-HANDLING',
-                text,
-                flags=re.IGNORECASE
-            )
 
         # 6g. Fix lines exceeding COBOL fixed-format 72-character limit.
         #     In fixed-format COBOL, columns 73+ are ignored. If a line is longer than 72 characters
@@ -1515,38 +1384,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                 lines.append(line)
             text = "".join(lines)
 
-        # 6h. Fix nested SQLCA in Working Storage (misplaced indentation/structure)
-        #     e.g., 01 WS-DB2-AREA. EXEC SQL INCLUDE SQLCA END-EXEC.
-        #     We define WS-DB2-AREA as a numeric variable and include SQLCA at the level-01 level.
-        if not is_copybook:
-            text = re.sub(
-                r'01\s+WS-DB2-AREA\s*\.\s*\n?\s*COPY\s+SQLCA\s*\.',
-                '01  WS-DB2-AREA             PIC S9(9) COMP VALUE 0.\n       COPY SQLCA.',
-                text,
-                flags=re.IGNORECASE
-            )
-
-        # 6i. Fix nested copybooks that define level-01 records (like ERRHND) inside Working Storage.
-        #     e.g., 01 WS-ERROR-AREA. COPY ERRHND.
-        #     We convert this to COPY ERRHND REPLACING ERROR-HANDLING BY WS-ERROR-AREA.
-        if not is_copybook:
-            text = re.sub(
-                r'01\s+WS-ERROR-AREA\s*\.\s*\n?\s*COPY\s+ERRHND\s*\.',
-                '       COPY ERRHND REPLACING ERROR-HANDLING BY WS-ERROR-AREA.',
-                text,
-                flags=re.IGNORECASE
-            )
-
-        # 6i-b. Handle 01 WS-COMMAREA. / COPY INQCOM. pattern.
-        #     INQCOM defines 01 INQCOM-AREA. We use COPY REPLACING to define WS-COMMAREA.
-        if not is_copybook:
-            text = re.sub(
-                r'01\s+WS-COMMAREA\s*\.\s*\n?\s*COPY\s+INQCOM\s*\.',
-                '       COPY INQCOM REPLACING INQCOM-AREA BY WS-COMMAREA.',
-                text,
-                flags=re.IGNORECASE
-            )
-
         # 6j. Fix CICS response checks: DFHRESP(NORMAL) -> 0.
         #     Since CICS commands are commented out, we map response checks directly.
         if not is_copybook:
@@ -1557,119 +1394,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                 flags=re.IGNORECASE
             )
 
-        # 6k. Inject missing copybooks referenced in example/procedure code
-        #     e.g., PORTMSTR uses LS-ERROR-REQUEST and LS-AUDIT-REQUEST but lacks COPY statements.
-        if not is_copybook:
-            if "LS-ERROR-REQUEST" in text and "ERRHAND" not in text:
-                text = re.sub(
-                    r'(\bWORKING-STORAGE\s+SECTION\s*\.)',
-                    r'\1\n            COPY ERRHAND.',
-                    text,
-                    flags=re.IGNORECASE
-                )
-            if "LS-AUDIT-REQUEST" in text and "AUDITLOG" not in text:
-                text = re.sub(
-                    r'(\bWORKING-STORAGE\s+SECTION\s*\.)',
-                    r'\1\n            COPY AUDITLOG.',
-                    text,
-                    flags=re.IGNORECASE
-                )
-            if ("ERR-CAT-VSAM" in text or "ERR-WARNING" in text) and "COMMON" not in text and "ERRHND" not in text and "ERRHAND" not in text:
-                text = re.sub(
-                    r'(\bWORKING-STORAGE\s+SECTION\s*\.)',
-                    r'\1\n            COPY COMMON.',
-                    text,
-                    flags=re.IGNORECASE
-                )
-
-        # 6l. Synthesize missing/stub variables used in example/procedure code
-        #     This handles fields used in legacy stubs that were never declared in WORKING-STORAGE.
-        if not is_copybook:
-            dummy_stubs = ""
-            if "WS-FILE-STATUS" in text and not re.search(r'\b05\s+WS-FILE-STATUS\b|\b01\s+WS-FILE-STATUS\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  WS-FILE-STATUS              PIC X(2) VALUE '00'.\n"
-            if "USERID" in text and not re.search(r'\b05\s+USERID\b|\b01\s+USERID\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  USERID                      PIC X(8) VALUE 'CICSUSER'.\n"
-            if "TERMINAL-ID" in text and not re.search(r'\b05\s+TERMINAL-ID\b|\b01\s+TERMINAL-ID\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  TERMINAL-ID                 PIC X(4) VALUE 'TERM'.\n"
-            if "WS-BEFORE-IMAGE" in text and not re.search(r'\b05\s+WS-BEFORE-IMAGE\b|\b01\s+WS-BEFORE-IMAGE\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  WS-BEFORE-IMAGE             PIC X(100) VALUE SPACES.\n"
-            if "PORT-RECORD" in text and "PORTFLIO" not in text and not re.search(r'\b05\s+PORT-RECORD\b|\b01\s+PORT-RECORD\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  PORT-RECORD                 PIC X(100) VALUE SPACES.\n"
-            if "PORT-KEY" in text and "PORTFLIO" not in text and not re.search(r'\b05\s+PORT-KEY\b|\b01\s+PORT-KEY\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  PORT-KEY                    PIC X(10) VALUE SPACES.\n"
-            if "PORT-ACCOUNT-NO" in text and "PORTFLIO" not in text and not re.search(r'\b05\s+PORT-ACCOUNT-NO\b|\b01\s+PORT-ACCOUNT-NO\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  PORT-ACCOUNT-NO             PIC X(8) VALUE SPACES.\n"
-            if "WS-ERROR-MESSAGE" in text and not re.search(r'\b05\s+WS-ERROR-MESSAGE\b|\b01\s+WS-ERROR-MESSAGE\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  WS-ERROR-MESSAGE            PIC X(80) VALUE SPACES.\n"
-            if "WS-DB2-TOKEN" in text and not re.search(r'\b05\s+WS-DB2-TOKEN\b|\b01\s+WS-DB2-TOKEN\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  WS-DB2-TOKEN                PIC X(16) VALUE SPACES.\n"
-            if "WS-SUB" in text and not re.search(r'\b05\s+WS-SUB\b|\b01\s+WS-SUB\b', text, re.IGNORECASE):
-                dummy_stubs += "       01  WS-SUB                      PIC 9(4) COMP VALUE ZERO.\n"
-            if "END-OF-POSITIONS" in text and not re.search(r'\b88\s+END-OF-POSITIONS\b', text, re.IGNORECASE):
-                dummy_stubs += (
-                    "       01  WS-EOF-POS-FLAG             PIC X VALUE 'N'.\n"
-                    "           88  END-OF-POSITIONS            VALUE 'Y'.\n"
-                )
-            if "END-OF-DB2-STATS" in text and not re.search(r'\b88\s+END-OF-DB2-STATS\b', text, re.IGNORECASE):
-                dummy_stubs += (
-                    "       01  WS-EOF-DB2-FLAG             PIC X VALUE 'N'.\n"
-                    "           88  END-OF-DB2-STATS            VALUE 'Y'.\n"
-                )
-            if "END-OF-BATCH-STATS" in text and not re.search(r'\b88\s+END-OF-BATCH-STATS\b', text, re.IGNORECASE):
-                dummy_stubs += (
-                    "       01  WS-EOF-BCH-FLAG             PIC X VALUE 'N'.\n"
-                    "           88  END-OF-BATCH-STATS          VALUE 'Y'.\n"
-                )
-            if ("WS-TEMP-TIME-1" in text or "NUMVAL" in text or "WS-NUM-1" in text) and not re.search(r'\b01\s+WS-TEMP-TIME-1\b|\b01\s+WS-NUM-1\b', text, re.IGNORECASE):
-                dummy_stubs += (
-                    "       01  WS-TEMP-TIME-1              PIC X(15) VALUE SPACES.\n"
-                    "       01  WS-TEMP-TIME-2              PIC X(15) VALUE SPACES.\n"
-                    "       01  WS-NUM-1                    PIC 9(9) COMP VALUE ZERO.\n"
-                    "       01  WS-NUM-2                    PIC 9(9) COMP VALUE ZERO.\n"
-                )
-            if "LS-ERROR-REQUEST" in text and not re.search(r'\b01\s+LS-ERROR-REQUEST\b', text, re.IGNORECASE):
-                dummy_stubs += (
-                    "       01  LS-ERROR-REQUEST.\n"
-                    "           05  LS-PROGRAM-ID      PIC X(8).\n"
-                    "           05  LS-CATEGORY        PIC X(2).\n"
-                    "           05  LS-ERROR-CODE      PIC X(4).\n"
-                    "           05  LS-SEVERITY        PIC S9(4) COMP.\n"
-                    "           05  LS-ERROR-TEXT      PIC X(80).\n"
-                    "           05  LS-ERROR-DETAILS   PIC X(256).\n"
-                    "           05  LS-RETURN-CODE     PIC S9(4) COMP.\n"
-                )
-            if "LS-AUDIT-REQUEST" in text and not re.search(r'\b01\s+LS-AUDIT-REQUEST\b', text, re.IGNORECASE):
-                dummy_stubs += (
-                    "       01  LS-AUDIT-REQUEST.\n"
-                    "           05  LS-SYSTEM-ID       PIC X(8).\n"
-                    "           05  LS-USER-ID         PIC X(8).\n"
-                    "           05  LS-PROGRAM         PIC X(8).\n"
-                    "           05  LS-TERMINAL        PIC X(4).\n"
-                    "           05  LS-TYPE            PIC X(4).\n"
-                    "           05  LS-ACTION          PIC X(8).\n"
-                    "           05  LS-STATUS          PIC X(4).\n"
-                    "           05  LS-PORT-ID         PIC X(10).\n"
-                    "           05  LS-ACCT-NO         PIC X(8).\n"
-                    "           05  LS-BEFORE-IMAGE    PIC X(400).\n"
-                    "           05  LS-AFTER-IMAGE     PIC X(400).\n"
-                    "           05  LS-MESSAGE         PIC X(80).\n"
-                )
-            
-            if dummy_stubs:
-                m_align = re.search(r'^([ \t]*)(\bLINKAGE\s+SECTION\b|\bPROCEDURE\s+DIVISION\b)', text, re.IGNORECASE | re.MULTILINE)
-                if m_align:
-                    leading_spaces = m_align.group(1)
-                    shift_spaces = leading_spaces[7:]
-                    aligned_stubs = "".join(shift_spaces + line for line in dummy_stubs.splitlines(keepends=True))
-                    text = re.sub(
-                        r'^([ \t]*)(\bLINKAGE\s+SECTION\b|\bPROCEDURE\s+DIVISION\b)',
-                        aligned_stubs + r'\1\2',
-                        text,
-                        count=1,
-                        flags=re.IGNORECASE | re.MULTILINE
-                    )
-
         # 6m. Remove RECORD CONTAINS X CHARACTERS clause to prevent size mismatch errors.
         #     cobj requires exact record size matching, but legacy FD record sizes often mismatch
         #     actual variable layout sizes (e.g. PORTMSTR size 103 vs 100 declared). Commenting it out
@@ -1678,50 +1402,6 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
             text = re.sub(
                 r'\bRECORD\s+CONTAINS\s+\d+(\s+TO\s+\d+)?\s+CHARACTERS\s*\.?',
                 '.',
-                text,
-                flags=re.IGNORECASE
-            )
-
-        # 6o. Fix duplicate COPY PORTFLIO imports in PORTADD.
-        #     PORTADD imports COPY PORTFLIO twice: once for PORTFOLIO-FILE and once for INPUT-FILE.
-        #     We use COPY REPLACING to rename the input file record and fields to avoid ambiguity.
-        if not is_copybook and "FD  INPUT-FILE" in text and "COPY PORTFLIO" in text:
-            # We target the copy under FD INPUT-FILE
-            repl_clause = (
-                "COPY PORTFLIO REPLACING\n"
-                "               PORT-RECORD BY IN-PORT-RECORD\n"
-                "               PORT-KEY BY IN-PORT-KEY\n"
-                "               PORT-ID BY IN-PORT-ID\n"
-                "               PORT-ACCOUNT-NO BY IN-PORT-ACCOUNT-NO\n"
-                "               PORT-CLIENT-INFO BY IN-PORT-CLIENT-INFO\n"
-                "               PORT-CLIENT-NAME BY IN-PORT-CLIENT-NAME\n"
-                "               PORT-CLIENT-TYPE BY IN-PORT-CLIENT-TYPE\n"
-                "               PORT-PORTFOLIO-INFO BY IN-PORT-PORTFOLIO-INFO\n"
-                "               PORT-CREATE-DATE BY IN-PORT-CREATE-DATE\n"
-                "               PORT-LAST-MAINT BY IN-PORT-LAST-MAINT\n"
-                "               PORT-STATUS BY IN-PORT-STATUS\n"
-                "               PORT-FINANCIAL-INFO BY IN-PORT-FINANCIAL-INFO\n"
-                "               PORT-TOTAL-VALUE BY IN-PORT-TOTAL-VALUE\n"
-                "               PORT-CASH-BALANCE BY IN-PORT-CASH-BALANCE\n"
-                "               PORT-AUDIT-INFO BY IN-PORT-AUDIT-INFO\n"
-                "               PORT-LAST-USER BY IN-PORT-LAST-USER\n"
-                "               PORT-LAST-TRANS BY IN-PORT-LAST-TRANS\n"
-                "               PORT-FILLER BY IN-PORT-FILLER."
-            )
-            text = re.sub(
-                r'(FD\s+INPUT-FILE\s*\.\s*\n?\s*)COPY\s+PORTFLIO\s*\.',
-                r'\1' + repl_clause,
-                text,
-                flags=re.IGNORECASE
-            )
-
-        # 6n. Fix ambiguous LS-RETURN-CODE variable qualification in PORTMSTR.
-        #     When we synthesize LS-ERROR-REQUEST (which contains LS-RETURN-CODE), references
-        #     to LS-RETURN-CODE become ambiguous. We qualify it with OF LS-COMMAND-AREA.
-        if not is_copybook and "LS-COMMAND-AREA" in text and "LS-ERROR-REQUEST" in text:
-            text = re.sub(
-                r'\bTO\s+LS-RETURN-CODE\b(?!\s+OF)',
-                'TO LS-RETURN-CODE OF LS-COMMAND-AREA',
                 text,
                 flags=re.IGNORECASE
             )
@@ -1765,57 +1445,10 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
             new_lines.append(line)
         text = "".join(new_lines)
 
-        # 6q. Fix TRAN-KEY/TRN-KEY mismatch.
-        #     RPTPOS00 references TRAN-KEY as RECORD KEY, but TRNREC copybook defines TRN-KEY.
-        #     We rename TRAN-KEY to TRN-KEY to ensure compile correctness.
-        if not is_copybook and "TRNREC" in text and "TRAN-KEY" in text:
-            text = re.sub(r'\bTRAN-KEY\b', 'TRN-KEY', text, flags=re.IGNORECASE)
-        #     Fix BCH-KEY/BCT-KEY mismatch.
-        #     RPTSTA00 references BCH-KEY as RECORD KEY, but BCHCTL copybook defines BCT-KEY.
-        #     We rename BCH-KEY to BCT-KEY to ensure compile correctness.
-        if not is_copybook and "BCHCTL" in text and "BCH-KEY" in text:
-            text = re.sub(r'\bBCH-KEY\b', 'BCT-KEY', text, flags=re.IGNORECASE)
-
-        # 6r. Fix edited numeric fields in RTNANA00.cbl.
-        #     RTNANA00 uses edited numeric fields (PIC ZZZ,ZZ9) in ADD statements,
-        #     which is invalid in COBOL. We convert them to raw numeric PIC 9(6).
-        if not is_copybook and "RTNANA00" in text:
-            for field in ["WS-DTL-TOTAL", "WS-DTL-SUCCESS", "WS-DTL-WARNING", "WS-DTL-ERROR", "WS-DTL-SEVERE"]:
-                text = re.sub(
-                    r'\b' + re.escape(field) + r'\s+PIC\s+ZZZ,ZZ9\b',
-                    f'{field}        PIC 9(6)',
-                    text,
-                    flags=re.IGNORECASE
-                )
-        # 6s. Fix split/missing FUNCTION NUMVAL calls and reference modification in DB2STAT.cbl.
+        # 6s. Normalize split/bare FUNCTION NUMVAL references (generic cobj compat).
         if not is_copybook and "NUMVAL" in text:
             text = re.sub(r'\bFUNCTION\s*\n\s*NUMVAL\b', 'FUNCTION NUMVAL', text, flags=re.IGNORECASE)
             text = re.sub(r'(?<!\bFUNCTION\s)\bNUMVAL\b', 'FUNCTION NUMVAL', text, flags=re.IGNORECASE)
-            text = re.sub(
-                r'\bCOMPUTE\s+WS-ELAPSED-TIME\s*=\s*FUNCTION\s+NUMVAL\s*\(\s*WS-END-TIME\s*\(\s*1\s*:\s*15\s*\)\s*\)\s*-\s*FUNCTION\s+NUMVAL\s*\(\s*WS-START-TIMESTAMP\s*\(\s*1\s*:\s*15\s*\)\s*\)',
-                'MOVE WS-END-TIME(1:15) TO WS-TEMP-TIME-1\n'
-                '            MOVE WS-START-TIMESTAMP(1:15) TO WS-TEMP-TIME-2\n'
-                '            COMPUTE WS-NUM-1 = FUNCTION NUMVAL(WS-TEMP-TIME-1)\n'
-                '            COMPUTE WS-NUM-2 = FUNCTION NUMVAL(WS-TEMP-TIME-2)\n'
-                '            SUBTRACT WS-NUM-2 FROM WS-NUM-1 GIVING WS-ELAPSED-TIME',
-                text,
-                flags=re.IGNORECASE
-            )
-        # 6t. Fix duplicate/ambiguous RECV-CURSOR definition in DB2RECV.cbl.
-        #     We rename the 88 condition name RECV-CURSOR to RECV-CURS-COND to prevent ambiguity.
-        if not is_copybook and "DB2RECV" in text:
-            text = re.sub(
-                r'(\b88\s+)RECV-CURSOR(\b)',
-                r'\1RECV-CURS-COND\2',
-                text,
-                flags=re.IGNORECASE
-            )
-            text = re.sub(
-                r'(\bWHEN\s+)RECV-CURSOR(\b)',
-                r'\1RECV-CURS-COND\2',
-                text,
-                flags=re.IGNORECASE
-            )
         # 6u. Generic fix: any program that defines 01 DFHCOMMAREA. / COPY <name>. in Linkage Section
         #     while also COPYing the same copybook into Working-Storage ends up with duplicate definitions.
         #     We redefine DFHCOMMAREA as a raw X(200) field for any such program (dynamic pattern).
@@ -1844,45 +1477,10 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                     flags=re.IGNORECASE
                 )
 
-        # 6w. Fix WS-COMMAREA-<field> references that arise when INQCOM is copied into WS-COMMAREA.
-        #     The child fields in INQCOM are named INQCOM-<name>, so WS-COMMAREA-FUNCTION => INQCOM-FUNCTION OF WS-COMMAREA,
-        #     and WS-COMMAREA-ACCOUNT-NO => INQCOM-ACCOUNT-NO OF WS-COMMAREA.
-        if not is_copybook:
-            text = re.sub(r'\bWS-COMMAREA-FUNCTION\b', 'INQCOM-FUNCTION OF WS-COMMAREA', text)
-            text = re.sub(r'\bWS-COMMAREA-ACCOUNT-NO\b', 'INQCOM-ACCOUNT-NO OF WS-COMMAREA', text)
-            text = re.sub(r'\bWS-COMMAREA-RESPONSE-CODE\b', 'INQCOM-RESPONSE-CODE OF WS-COMMAREA', text)
-            text = re.sub(r'\bWS-COMMAREA-ERROR-MSG\b', 'INQCOM-ERROR-MSG OF WS-COMMAREA', text)
-
-        # 6x. Fix undefined POSITION-ACCOUNT field in INQPORT.cbl.
-        #     POSREC copybook defines POS-PORTFOLIO-ID instead of POSITION-ACCOUNT.
-        if not is_copybook and "INQPORT" in text:
-            text = text.replace("POSITION-ACCOUNT", "POS-PORTFOLIO-ID")
-
-        # 6y. Fix alphanumeric compute compiler error in PORTTEST.cbl.
-        #     PORT-ACCOUNT-NO is PIC X(10) (alphanumeric), so COMPUTE is illegal.
-        #     We use WS-NUM-1 to perform the arithmetic and then MOVE it to PORT-ACCOUNT-NO.
-        if not is_copybook and "PORTTEST" in text:
-            text = text.replace(
-                "COMPUTE PORT-ACCOUNT-NO = WS-RECORD-COUNT + 1000000000",
-                "COMPUTE WS-NUM-1 = WS-RECORD-COUNT + 1000000000\n            MOVE WS-NUM-1 TO PORT-ACCOUNT-NO"
-            )
-            if not re.search(r'\b01\s+WS-NUM-1\b', text, re.IGNORECASE):
-                text = re.sub(
-                    r'(\bWORKING-STORAGE\s+SECTION\s*\.)',
-                    r'\1\n       01  WS-NUM-1                    PIC 9(9) COMP VALUE ZERO.',
-                    text,
-                    flags=re.IGNORECASE
-                )
-
         # 6z. Replace FUNCTION USER-ID with 'CICSUSER' (not implemented in cobj).
         if not is_copybook:
             text = text.replace("FUNCTION USER-ID", "'CICSUSER'")
 
-        # 6aa. Fix ambiguous WS-PORT-STATUS / WS-TRAN-STATUS references in TSTGEN00.cbl.
-        #      We rename the unused duplicates in WS-PORTFOLIO-DATA and WS-TRANSACTION-DATA.
-        if not is_copybook and "TSTGEN00" in text:
-            text = re.sub(r'\b05\s+WS-PORT-STATUS\s+PIC\s+X\(1\)\.', '05  WS-PORTFOLIO-STATUS   PIC X(1).', text, flags=re.IGNORECASE)
-            text = re.sub(r'\b05\s+WS-TRAN-STATUS\s+PIC\s+X\(1\)\.', '05  WS-TRANSACTION-STATUS PIC X(1).', text, flags=re.IGNORECASE)
         with open(dest_path, 'w', encoding='utf-8', newline='\n') as fh:
             fh.write(text)
 
@@ -1946,21 +1544,7 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
             if not os.path.exists(stub_path):
                 with open(stub_path, 'w', encoding='utf-8', newline='\n') as fh:
                     fh.write(f"      *> [SYNTHESIZED STUB] Missing copybook: {ref}\n")
-                    if ref == "DB2STAT":
-                        fh.write(
-                            "       01  DB2STAT-STUB-DATA.\n"
-                            "           05  STAT-KEY             PIC X(10) VALUE SPACES.\n"
-                            "           05  STAT-DATA            PIC X(100) VALUE SPACES.\n"
-                        )
-                    elif ref == "PORTREC":
-                        fh.write(
-                            "       01  PORTFOLIO-RECORD.\n"
-                            "           05  PORT-ID              PIC X(8).\n"
-                            "           05  PORT-TOTAL-UNITS     PIC S9(9) COMP.\n"
-                            "           05  PORT-TOTAL-COST      PIC S9(9) COMP.\n"
-                        )
-                    else:
-                        fh.write(f"       01  {ref}-STUB-DATA    PIC X(1) VALUE SPACES.\n")
+                    fh.write(f"       01  {ref}-STUB-DATA    PIC X(1) VALUE SPACES.\n")
                 stats["copybook_stubs_created"] += 1
 
     return preprocessed_sources, preprocessed_cb_dirs, norm_dir, stats
@@ -5028,26 +4612,7 @@ class Pipeline:
         # a TCP port probe alone NEVER qualifies as verification.
         h2_verified = bool(self.data("validate", {}).get("h2_executed")
                            or self.data("compare", {}).get("database_state"))
-        db2_status = "NOT_VERIFIED"
-        if has_sql:
-            db2_url = os.environ.get("DB2_URL")
-            if db2_url:
-                try:
-                    import socket
-                    match = re.search(r'jdbc:db2://([^:/]+):(\d+)', db2_url)
-                    if match:
-                        host, port = match.group(1), int(match.group(2))
-                        s = socket.create_connection((host, port), timeout=3)
-                        s.close()
-                        # Reachability only. Real verification requires executing
-                        # and comparing SQL against this server (not implemented).
-                        db2_status = "REAL_DB2_NOT_VERIFIED_REACHABLE"
-                    else:
-                        db2_status = "REAL_DB2_INVALID_URL"
-                except Exception:
-                    db2_status = "REAL_DB2_UNREACHABLE"
-            else:
-                db2_status = "REAL_DB2_NOT_CONFIGURED"
+        db2_status = classify_db2_status(has_sql)
 
         cics_status = "CICS_NOT_VERIFIED"
         if has_cics:
@@ -5457,9 +5022,10 @@ class Pipeline:
             return "UNVERIFIED"
 
         # Check for unsupported diagnostics
+        # Run-scoped evidence only. The historical repository-global
+        # <repo>/target/generated location is intentionally NOT consulted:
+        # a stale file from an unrelated run must never gate this run.
         diag_path = os.path.join(self.out, "generated", "native_translation_diagnostics.json")
-        if not os.path.exists(diag_path):
-            diag_path = os.path.join(os.path.dirname(self.out), "target", "generated", "native_translation_diagnostics.json")
         if os.path.exists(diag_path):
             try:
                 with open(diag_path, "r", encoding="utf-8") as fh:

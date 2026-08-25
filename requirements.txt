@@ -1,5 +1,12 @@
-# Python Standard Library only (Python 3.8+)
-# No external third-party python packages required on host.
+# Production runtime: Python Standard Library only (Python 3.10+).
+# No external third-party Python packages are required to RUN the platform.
 #
-# Docker is required on the host to execute the cobj (COBOL 4J) compiler container.
-# Maven (mvn) is optional on the host, used only for local compilation checks.
+# External tools:
+#   Docker  - required on the host to execute the cobj (COBOL 4J) container
+#             and the GnuCOBOL baseline container.
+#   Maven   - optional on the host for enterprise compile checks; offline
+#             after seeding via docker/maven-seed-pom.xml and
+#             docker/maven-proleap-seed-pom.xml.
+#   JDK 17+ - required to compile/execute generated Java outside containers.
+#
+# TEST-ONLY dependencies live in requirements-dev.txt (requests, playwright).

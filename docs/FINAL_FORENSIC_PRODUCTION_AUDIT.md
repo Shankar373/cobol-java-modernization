@@ -1,11 +1,14 @@
 # FINAL FORENSIC PRODUCTION AUDIT
 
-**Repository:** https://github.com/Shankar373/cobol-java-modernization  
-**Audit Date:** 2026-08-25  
-**Auditor:** AI Agent (forensic mode)  
-**Scope:** Complete Maven dependency verification, ProLeap/ANTLR/Jackson isolation, offline capability, CI reproducibility
-
----
+> **UPDATE 2026-08-25 (post AGENTS-compliance fix phase):** the numbers and
+> claims below were captured mid-phase. The authoritative final state is
+> documented in docs/AGENTS_COMPLIANCE_AUDIT.md: **466 passed / 0 failed /
+> 0 skipped** (full clean run, 18m38s), fixture-specific preprocessing removed
+> from the generic path, native artifacts run-scoped with concurrency
+> regression tests, deterministic Maven seeding with per-artifact
+> verification, and offline mvn -o resolution proven for both seed POMs.
+> Sections below are retained for audit history; where they conflict with
+> this update (e.g. the earlier 455+ test counts), the newer document wins.
 
 ## EXECUTIVE SUMMARY
 

@@ -63,7 +63,7 @@ def test_pic_formatting_e2e():
         p = NativePipeline(repo_dir, temp_out)
         verdict = p.run()
         
-        obs_file = os.path.join("target", "generated", "native_execution_observation.json")
+        obs_file = os.path.join(temp_out, "generated", "native_execution_observation.json")
         if os.path.exists(obs_file):
             with open(obs_file, "r") as fh:
                 obs = json.load(fh)

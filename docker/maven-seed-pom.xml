@@ -14,6 +14,11 @@
   <version>1.0.0</version>
   <packaging>pom</packaging>
 
+  <properties>
+    <!-- Pinned so resolution is deterministic regardless of the Maven used. -->
+    <maven-dependency-plugin.version>3.6.1</maven-dependency-plugin.version>
+  </properties>
+
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
@@ -47,6 +52,12 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <!-- Pinned explicitly: AGENTS.md §10 requires deterministic resolution. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>${maven-dependency-plugin.version}</version>
       </plugin>
     </plugins>
   </build>

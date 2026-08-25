@@ -10,7 +10,7 @@ from modernize.parser import CobolParser
 from modernize.native_generator import NativeProgramGenerator
 from tests.test_phase8_file_semantics import run_cobol_code
 
-def test_pipeline_performance_metrics():
+def test_pipeline_performance_metrics(tmp_path):
     # Load INVMGR code
     cob_path = os.path.join("tests", "repos", "INVMGR", "src", "INVMGR.cob")
     assert os.path.exists(cob_path), f"INVMGR source not found at {cob_path}"
@@ -53,11 +53,10 @@ def test_pipeline_performance_metrics():
     assert ret == 0, f"Execution failed: {stderr}"
     assert "QTY" in stdout and "0050" in stdout
 
-    # Write performance results
-    results_dir = os.path.join("audit", "phase8")
-    os.makedirs(results_dir, exist_ok=True)
-    results_path = os.path.join(results_dir, "performance_results.json")
-    
+    # Write performance results to the run-scoped temp directory.
+    # AGENTS.md §13: test artifacts must never dirty tracked repository files
+    # (this previously overwrote audit/phase8/performance_results.json).
+    results_path = tmp_path / "performance_results.json"
     with open(results_path, "w", encoding="utf-8") as fh:
         json.dump(metrics, fh, indent=2)
 

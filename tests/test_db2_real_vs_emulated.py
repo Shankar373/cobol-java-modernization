@@ -30,24 +30,39 @@ def test_db2_dialect_warnings():
     assert "WITH UR" in warnings[0].message
     assert "FOR UPDATE" in warnings[1].message
 
-def test_db2_real_vs_emulated_status():
-    # If DB2 target credentials/host are not configured in environment,
-    # REAL_DB2_EXECUTION status must resolve to NOT_VERIFIED.
-    db2_host = os.environ.get("DB2_HOST")
-    db2_user = os.environ.get("DB2_USER")
-    
-    h2_status = "H2_VERIFIED"
-    
-    if not db2_host or not db2_user:
-        real_db2_status = "REAL_DB2_NOT_VERIFIED"
-        real_db2_execution = "NOT_VERIFIED"
-    else:
-        real_db2_status = "REAL_DB2_VERIFIED"
-        real_db2_execution = "VERIFIED"
-        
-    assert h2_status == "H2_VERIFIED"
-    assert real_db2_status in ("REAL_DB2_VERIFIED", "REAL_DB2_NOT_VERIFIED")
-    assert real_db2_execution in ("VERIFIED", "NOT_VERIFIED")
-    
-    print(f"H2 Emulation Status: {h2_status}")
-    print(f"Real DB2 Execution Status: {real_db2_execution}")
+def test_db2_real_vs_emulated_status(monkeypatch):
+    """Exercise the REAL classification logic (cobol_migrate.classify_db2_status).
+
+    REGRESSION: this test previously computed local strings and asserted them
+    against their own assignment sets — a tautology that exercised no
+    production code. Each branch below pins an exact expected state.
+    """
+    import cobol_migrate as cm
+
+    # No embedded SQL in the repository -> nothing to verify.
+    assert cm.classify_db2_status(has_sql=False) == "NOT_VERIFIED"
+
+    # SQL present, no DB2_URL configured: must NOT claim any real-DB2 state.
+    monkeypatch.delenv("DB2_URL", raising=False)
+    assert cm.classify_db2_status(has_sql=True) == "REAL_DB2_NOT_CONFIGURED"
+
+    # Malformed URL must be rejected explicitly.
+    monkeypatch.setenv("DB2_URL", "some-garbage-not-a-jdbc-url")
+    assert cm.classify_db2_status(has_sql=True) == "REAL_DB2_INVALID_URL"
+
+    # Reachable port: reachability is explicitly NOT verification.
+    # Bind a real listener so this branch is deterministic offline.
+    import socket
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    try:
+        monkeypatch.setenv("DB2_URL", f"jdbc:db2://127.0.0.1:{port}")
+        assert cm.classify_db2_status(has_sql=True) == "REAL_DB2_NOT_VERIFIED_REACHABLE"
+    finally:
+        srv.close()
+
+    # Unreachable endpoint (closed port on loopback): honest failure state.
+    monkeypatch.setenv("DB2_URL", "jdbc:db2://127.0.0.1:1")
+    assert cm.classify_db2_status(has_sql=True) == "REAL_DB2_UNREACHABLE"

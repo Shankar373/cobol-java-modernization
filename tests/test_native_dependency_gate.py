@@ -16,16 +16,11 @@ def test_dependency_gate_clean(tmpdir):
     with open(os.path.join(p.src_dir, "CleanClass.java"), "w") as fh:
         fh.write("package com.systema.modernized.native_gen;\npublic class CleanClass {}")
         
-    import modernize.native_pipeline
-    original_root = modernize.native_pipeline.ROOT
     try:
-        modernize.native_pipeline.ROOT = out_dir
-        os.makedirs(os.path.join(out_dir, "target", "generated"), exist_ok=True)
-        
         passed = p.stage_dependency_gate()
         assert passed is True
         
-        audit_file = os.path.join(out_dir, "target", "generated", "native_java_dependency_audit.json")
+        audit_file = os.path.join(out_dir, "generated", "native_java_dependency_audit.json")
         assert os.path.exists(audit_file)
         with open(audit_file, "r") as fh:
             audit = json.load(fh)
@@ -33,7 +28,7 @@ def test_dependency_gate_clean(tmpdir):
             assert audit["native_java"] is True
             assert len(audit["forbidden_dependencies"]) == 0
     finally:
-        modernize.native_pipeline.ROOT = original_root
+        pass
 
 def test_dependency_gate_forbidden(tmpdir):
     out_dir = str(tmpdir.mkdir("out"))
@@ -44,16 +39,11 @@ def test_dependency_gate_forbidden(tmpdir):
     with open(os.path.join(p.src_dir, "DirtyClass.java"), "w") as fh:
         fh.write("import jp.osscons.CobolField;\npublic class DirtyClass {}")
         
-    import modernize.native_pipeline
-    original_root = modernize.native_pipeline.ROOT
     try:
-        modernize.native_pipeline.ROOT = out_dir
-        os.makedirs(os.path.join(out_dir, "target", "generated"), exist_ok=True)
-        
         passed = p.stage_dependency_gate()
         assert passed is False
         
-        audit_file = os.path.join(out_dir, "target", "generated", "native_java_dependency_audit.json")
+        audit_file = os.path.join(out_dir, "generated", "native_java_dependency_audit.json")
         assert os.path.exists(audit_file)
         with open(audit_file, "r") as fh:
             audit = json.load(fh)
@@ -62,4 +52,4 @@ def test_dependency_gate_forbidden(tmpdir):
             assert len(audit["forbidden_dependencies"]) > 0
             assert "DirtyClass.java: matches term 'jp.osscons'" in audit["forbidden_dependencies"][0]
     finally:
-        modernize.native_pipeline.ROOT = original_root
+        pass

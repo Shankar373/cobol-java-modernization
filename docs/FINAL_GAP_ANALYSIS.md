@@ -158,3 +158,9 @@ Security: C-4, C-5, H-6, H-7, H-8, M-9..M-11, M-16..M-18 + regression tests.
 Generalization: move fixture-specific logic out of generic paths (M-12/M-13), evidence-driven acceptance report.
 Tests: fix logical_audit_test self-containment; consolidate conftest helpers; declare test deps.
 Cleanup: remove committed binaries/stale artifacts, fix .dockerignore packaging.
+
+---
+
+## CLOSURE UPDATE 2026-08-25
+
+P0/P1/P2 findings in this document were executed to completion. Final verified state: **466 passed / 0 failed / 0 skipped** (clean-tree full run), fixture preprocessing removed from production, native artifacts run-scoped with concurrency regression tests, deterministic Maven seeding with per-artifact checks, offline seed-POM resolution proven. Authoritative post-fix audit: docs/AGENTS_COMPLIANCE_AUDIT.md. Status: PRODUCTION CANDIDATE.

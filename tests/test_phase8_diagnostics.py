@@ -84,10 +84,8 @@ def test_diagnostics_json_structure():
         src = pipe.stage_select_slice()
         if src:
             pipe.stage_generate(src)
-        diag_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'target', 'generated', 'native_translation_diagnostics.json'
-        )
+        # Run-scoped artifact: lives inside this pipeline's out directory.
+        diag_path = pipe._artifact_file('native_translation_diagnostics.json')
         assert os.path.exists(diag_path), 'native_translation_diagnostics.json was not written'
         with open(diag_path, encoding='utf-8') as fh:
             data = json.load(fh)

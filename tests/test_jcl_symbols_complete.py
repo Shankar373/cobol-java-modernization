@@ -82,7 +82,7 @@ def test_jcl_symbols_e2e():
         
         # Verify success
         if verdict != "NATIVE_JAVA_VERIFIED":
-            obs_path = os.path.join(temp_out, "native", "target", "generated", "native_execution_observation.json")
+            obs_path = os.path.join(temp_out, "generated", "native_execution_observation.json")
             if os.path.exists(obs_path):
                 with open(obs_path, "r") as fh:
                     print("=== NATIVE RUN OBSERVATION ===")

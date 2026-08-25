@@ -40,3 +40,6 @@ ui-server.err.log
 target_*/
 scratch/
 generated/
+
+# Preprocessed shadow tree — regenerated deterministically by preprocess_cobol_for_cobj()
+legacy/_preprocessed/

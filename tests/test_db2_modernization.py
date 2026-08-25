@@ -110,7 +110,7 @@ def run_db2_pipeline_e2e(repo_name, expected_stdout):
         assert verdict == "NATIVE_JAVA_VERIFIED", f"Pipeline failed. Check temp out: {temp_out}"
         
         # Double check that the execution observation exists and was captured
-        obs_file = os.path.join("target", "generated", "native_execution_observation.json")
+        obs_file = os.path.join(temp_out, "generated", "native_execution_observation.json")
         assert os.path.exists(obs_file)
         with open(obs_file, "r", encoding="utf-8") as fh:
             obs = json.load(fh)

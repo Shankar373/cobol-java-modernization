@@ -40,8 +40,12 @@ class TestParagraphSlicer(unittest.TestCase):
         # Mount output_dir to /target, run cobc syntactical compile check
         from cobol_migrate import docker_available
         if not docker_available():
-            print("  [SKIP] Docker not available, skipping container compilation checks")
-            return
+            # AGENTS.md §9/§16: an unavailable environment is a SKIP, never a
+            # silent PASS. pytest honors unittest self.skipTest as a skip.
+            self.skipTest(
+                "ENVIRONMENT_BLOCKED: Docker unavailable - GnuCOBOL syntax "
+                "check and COBOL4J transpile check cannot run"
+            )
             
         cobj_img = "hurriedreformist/gnucobol:3.1-builder"
         
