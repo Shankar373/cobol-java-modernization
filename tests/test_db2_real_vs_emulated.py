@@ -32,12 +32,7 @@ def test_db2_dialect_warnings():
 
 
 def test_db2_real_vs_emulated_status(monkeypatch):
-    """Exercise the REAL classification logic (cobol_migrate.classify_db2_status).
-
-    REGRESSION: this test previously computed local strings and asserted them
-    against their own assignment sets — a tautology that exercised no
-    production code. Each branch below pins an exact expected state.
-    """
+    """Exercise the REAL classification logic (cobol_migrate.classify_db2_status)."""
     import cobol_migrate as cm
 
     # No embedded SQL in the repository -> nothing to verify.
@@ -47,39 +42,40 @@ def test_db2_real_vs_emulated_status(monkeypatch):
     monkeypatch.delenv("DB2_URL", raising=False)
     assert cm.classify_db2_status(has_sql=True) == "REAL_DB2_NOT_CONFIGURED"
 
-    # With REAL_DB2_MODE=1 and no DB2_URL: H2 emulation is the best we can do.
+    # With REAL_DB2_MODE=1 and missing DB2_URL/USERNAME/PASSWORD: ENVIRONMENT_BLOCKED
     monkeypatch.setenv("REAL_DB2_MODE", "1")
-    assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "H2_VERIFIED"
+    monkeypatch.delenv("DB2_URL", raising=False)
+    monkeypatch.delenv("DB2_USERNAME", raising=False)
+    monkeypatch.delenv("DB2_PASSWORD", raising=False)
+    assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "ENVIRONMENT_BLOCKED"
 
-    # Malformed URL must be rejected explicitly, even with REAL_DB2_MODE.
+    # Missing username or password
+    monkeypatch.setenv("DB2_URL", "jdbc:db2://127.0.0.1:50000/SAMPLE")
+    assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "ENVIRONMENT_BLOCKED"
+    
+    monkeypatch.setenv("DB2_USERNAME", "db2user")
+    monkeypatch.setenv("DB2_PASSWORD", "secret")
+
+    # Malformed URL must be rejected explicitly as INVALID_CONFIGURATION under REAL_DB2_MODE
     monkeypatch.setenv("DB2_URL", "some-garbage-not-a-jdbc-url")
-    assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "UNSUPPORTED"
+    assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "INVALID_CONFIGURATION"
 
-    # Reachable port: reachability is explicitly NOT verification.
-    # Bind a real listener so this branch is deterministic offline.
+    # Reachable port: REAL_DB2_NOT_VERIFIED
     import socket
     srv = socket.socket()
     srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
+    srv.listen(5)
     port = srv.getsockname()[1]
     try:
         monkeypatch.setenv("DB2_URL", f"jdbc:db2://127.0.0.1:{port}")
         # Without REAL_DB2_MODE: reachability only
         assert cm.classify_db2_status(has_sql=True) == "REAL_DB2_NOT_VERIFIED_REACHABLE"
-        # With REAL_DB2_MODE: PARTIAL (reachable but not verified)
-        assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "PARTIAL"
+        # With REAL_DB2_MODE: REAL_DB2_NOT_VERIFIED (reachable but not verified yet)
+        assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "REAL_DB2_NOT_VERIFIED"
     finally:
         srv.close()
 
-    # Unreachable endpoint (closed port on loopback): honest failure state.
+    # Unreachable endpoint: REAL_DB2_UNREACHABLE (without mode) and ENVIRONMENT_BLOCKED (with mode)
     monkeypatch.setenv("DB2_URL", "jdbc:db2://127.0.0.1:1")
     assert cm.classify_db2_status(has_sql=True) == "REAL_DB2_UNREACHABLE"
-
-    # With REAL_DB2_MODE and unreachable: REAL_DB2_NOT_VERIFIED
-    # (the function returns this when TCP connect fails even with the mode set)
-    # Note: the current implementation with real_db2_mode=True + unreachable
-    # returns REAL_DB2_NOT_VERIFIED because the socket timeout/error path
-    # is hit before the mode-specific logic can differ.
-    # We'll just verify the no-mode version stays UNA reachable.
-    # (If we want the mode to change the return we would need to adjust
-    # the function logic — here we verify the baseline behavior.)
+    assert cm.classify_db2_status(has_sql=True, real_db2_mode=True) == "ENVIRONMENT_BLOCKED"

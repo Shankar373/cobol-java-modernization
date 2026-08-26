@@ -437,7 +437,16 @@ class NativePipeline:
 
         deps = ""
         if has_sql:
-            deps = """
+            db2_dep = ""
+            if os.environ.get("REAL_DB2_MODE") == "1":
+                db2_dep = """
+        <dependency>
+            <groupId>com.ibm.db2</groupId>
+            <artifactId>jcc</artifactId>
+            <version>11.5.8.0</version>
+        </dependency>"""
+            
+            deps = f"""
     <dependencies>
         <dependency>
             <groupId>org.springframework</groupId>
@@ -453,7 +462,7 @@ class NativePipeline:
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <version>2.2.224</version>
-        </dependency>
+        </dependency>{db2_dep}
     </dependencies>
 """
 
@@ -568,6 +577,14 @@ public class JclExecutionContext {
         ref_helper_src = open(os.path.join(os.path.dirname(__file__), "java_helpers", "CobolRef.java"), "r", encoding="utf-8").read()
         with open(os.path.join(helper_dir, "CobolRef.java"), "w", encoding="utf-8") as fh:
             fh.write(ref_helper_src)
+
+        # Db2Verify helper for REAL_DB2 validation
+        db2_verify_path = os.path.join(os.path.dirname(__file__), "java_helpers", "Db2Verify.java")
+        if os.path.exists(db2_verify_path):
+            db2_verify_src = open(db2_verify_path, "r", encoding="utf-8").read()
+            with open(os.path.join(helper_dir, "Db2Verify.java"), "w", encoding="utf-8") as fh:
+                fh.write(db2_verify_src)
+
 
         # Copy JCL utility emulators to self.src_dir (native_gen package)
         for util in ["Iebgener.java", "Idcams.java", "Sort.java"]:
@@ -862,7 +879,11 @@ public class CicsTransactionContext {
         # Run mvn clean compile
         try:
             mvn_exe = "mvn.cmd" if sys.platform == "win32" else "mvn"
-            res = subprocess.run([mvn_exe, "-o", "clean", "compile"], cwd=self.generated_dir, capture_output=True, text=True, timeout=180)
+            mvn_args = [mvn_exe]
+            if os.environ.get("REAL_DB2_MODE") != "1":
+                mvn_args.append("-o")
+            mvn_args += ["clean", "compile"]
+            res = subprocess.run(mvn_args, cwd=self.generated_dir, capture_output=True, text=True, timeout=180)
         except subprocess.TimeoutExpired:
             self.log("Maven compilation timed out after 180 seconds.")
             return False
@@ -904,9 +925,11 @@ public class CicsTransactionContext {
         cp_file = os.path.join(self.generated_dir, "cp.txt")
         try:
             mvn_exe = "mvn.cmd" if sys.platform == "win32" else "mvn"
-            subprocess.run([
-                mvn_exe, "-o", "dependency:build-classpath", "-Dmdep.outputFile=cp.txt"
-            ], cwd=self.generated_dir, capture_output=True, text=True)
+            mvn_args = [mvn_exe]
+            if os.environ.get("REAL_DB2_MODE") != "1":
+                mvn_args.append("-o")
+            mvn_args += ["dependency:build-classpath", "-Dmdep.outputFile=cp.txt"]
+            subprocess.run(mvn_args, cwd=self.generated_dir, capture_output=True, text=True)
             if os.path.exists(cp_file):
                 with open(cp_file, "r", encoding="utf-8") as fh:
                     cp_deps = fh.read().strip()

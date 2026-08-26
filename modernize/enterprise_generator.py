@@ -296,14 +296,34 @@ class EnterpriseApplicationGenerator:
         lines = []
         lines.append("spring.application.name=modernized")
         
-        # Always configure datasource so that Spring Boot/Batch/JPA has a valid database definition
-        lines.append("spring.datasource.url=${DB2_URL:jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}")
-        lines.append("spring.datasource.driverClassName=${DB2_DRIVER:org.h2.Driver}")
-        lines.append("spring.datasource.username=${DB2_USERNAME:sa}")
-        lines.append("spring.datasource.password=${DB2_PASSWORD:}")
+        # Check REAL_DB2_MODE at code generation time to set appropriate defaults, while allowing environment override
+        db_url_default = "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+        db_driver_default = "org.h2.Driver"
+        db_user_default = "sa"
+        db_pass_default = ""
+        jpa_platform_default = "org.hibernate.dialect.H2Dialect"
         
+        if os.environ.get("REAL_DB2_MODE") == "1":
+            db_url_default = os.environ.get("DB2_URL") or "jdbc:db2://localhost:50000/SAMPLE"
+            db_driver_default = "com.ibm.db2.jcc.DB2Driver"
+            db_user_default = os.environ.get("DB2_USERNAME") or "db2user"
+            db_pass_default = os.environ.get("DB2_PASSWORD") or ""
+            jpa_platform_default = "org.hibernate.dialect.DB2Dialect"
+
+        lines.append(f"spring.datasource.url=${{DB2_URL:{db_url_default}}}")
+        lines.append(f"spring.datasource.driverClassName=${{DB2_DRIVER:{db_driver_default}}}")
+        lines.append(f"spring.datasource.username=${{DB2_USERNAME:{db_user_default}}}")
+        lines.append(f"spring.datasource.password=${{DB2_PASSWORD:{db_pass_default}}}")
+        
+        # Handle schema mapping in application.properties if configured
+        db_schema = os.environ.get("DB2_SCHEMA")
+        if db_schema:
+            lines.append(f"spring.datasource.hikari.schema={db_schema}")
+            if is_jpa:
+                lines.append(f"spring.jpa.properties.hibernate.default_schema={db_schema}")
+
         if is_jpa:
-            lines.append("spring.jpa.database-platform=${DB2_DIALECT:org.hibernate.dialect.H2Dialect}")
+            lines.append(f"spring.jpa.database-platform=${{DB2_DIALECT:{jpa_platform_default}}}")
             lines.append("spring.hibernate.ddl-auto=update")
             
         if self._check_batch_evidence():
