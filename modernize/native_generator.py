@@ -330,7 +330,8 @@ class NativeExpressionTranslator:
             return "[" + key + "]"
         masked = re.sub(r'\[([^\[\]]*)\]', _mask, expr_str)
         
-        tokens = re.split(r'(\s+[\+\-\*\/]\s+|\(|\))', masked)
+        _bare_op = r'(?<![a-zA-Z0-9_])[\+\-\*\/]'
+        tokens = re.split(rf'(\s+[\+\-\*\/]\s+|\s+[\+\-\*\/]|[\+\-\*\/]\s+|\(|\)|{_bare_op})', masked)
         
         translated_tokens = []
         for t in tokens:
@@ -339,7 +340,7 @@ class NativeExpressionTranslator:
                 continue
             if t_strip in ("+", "-", "*", "/", "(", ")"):
                 translated_tokens.append(t_strip)
-            elif re.match(r'^\d+(\.\d+)?$', t_strip):
+            elif re.match(r'^-?\d*\.?\d+$', t_strip):
                 translated_tokens.append(f"new BigDecimal(\"{t_strip}\")")
             else:
                 # Restore any masked bracket contents for the raw token output
@@ -415,6 +416,13 @@ class NativeExpressionTranslator:
                 expr = parse_expr()
                 consume()
                 return expr
+            if t == "-":
+                consume()
+                operand = parse_factor()
+                return f"({operand}).negate()"
+            if t == "+":
+                consume()
+                return parse_factor()
             return consume()
 
         def parse_term() -> str:
@@ -425,7 +433,7 @@ class NativeExpressionTranslator:
                 if op == "*":
                     left = f"{left}.multiply({right})"
                 else:
-                    left = f"{left}.divide({right}, 2, RoundingMode.DOWN)"
+                    left = f"{left}.divide({right}, 10, RoundingMode.DOWN)"
             return left
 
         def parse_expr() -> str:
@@ -636,34 +644,57 @@ class NativeStatementTranslator:
     def wrap_math_with_size_error(self, tgt, val_expr, props, tgt_type, val_is_bigdecimal=True):
         on_size_nodes = props.get("on_size_error_nodes", [])
         not_size_nodes = props.get("not_on_size_error_nodes", [])
-        
-        if not on_size_nodes and not not_size_nodes:
-            if tgt_type == "Integer":
-                final_expr = f"({val_expr}).intValue()" if val_is_bigdecimal else val_expr
-            elif tgt_type == "Long":
-                final_expr = f"({val_expr}).longValue()" if val_is_bigdecimal else val_expr
-            else:
-                final_expr = val_expr
-            return self.generate_assignment(tgt, final_expr)
-            
+
         tgt_base = re.split(r'\(', tgt)[0].strip()
         tgt_pic = self.current_generator.var_pics.get(tgt_base.upper(), "") if self.current_generator else ""
         if tgt_pic:
             _, digits, scale, signed = NativeTypeMapper.parse_pic(tgt_pic)
+            trunc_prefix = "com.systema.modernized.CobolFormatHelper.truncateToPic("
+            trunc_suffix = f", {digits}, {scale}, {'true' if signed else 'false'})"
         else:
+            # No PICTURE info: keep legacy full-precision behavior.
             digits, scale, signed = 18, 0, True
-            
-        temp_eval = val_expr if val_is_bigdecimal else f"BigDecimal.valueOf({val_expr})"
-        
+            trunc_prefix, trunc_suffix = "", ""
+
+        def _trunc(expr):
+            if trunc_prefix:
+                return f"{trunc_prefix}{expr}{trunc_suffix}"
+            return expr
+
+        # Build the storage-truncated value expression (COBOL PICTURE semantics).
+        if tgt_type == "Integer":
+            if val_is_bigdecimal:
+                bd_expr = val_expr
+            else:
+                bd_expr = f"BigDecimal.valueOf((long)({val_expr}))"
+            stored_expr = _trunc(bd_expr) + ".intValue()"
+        elif tgt_type == "Long":
+            if val_is_bigdecimal:
+                bd_expr = val_expr
+            else:
+                bd_expr = f"BigDecimal.valueOf((long)({val_expr}))"
+            stored_expr = _trunc(bd_expr) + ".longValue()"
+        else:
+            stored_expr = _trunc(val_expr)
+
+        if not on_size_nodes and not not_size_nodes:
+            return self.generate_assignment(tgt, stored_expr)
+
+        temp_eval = val_expr if val_is_bigdecimal else f"BigDecimal.valueOf((long)({val_expr}))"
+
         on_size_code = "\n            ".join(self.translate_statement(n) for n in on_size_nodes if self.translate_statement(n))
         not_size_code = "\n            ".join(self.translate_statement(n) for n in not_size_nodes if self.translate_statement(n))
-        
-        assignment = self.generate_assignment(tgt, "val_temp")
+
+        # COBOL: the receiver is updated with the PICTURE-truncated result only
+        # when no SIZE ERROR occurs; the size check itself uses the full value.
         if tgt_type == "Integer":
-            assignment = self.generate_assignment(tgt, "val_temp.intValue()")
+            assign_rhs = "val_stored.intValue()"
         elif tgt_type == "Long":
-            assignment = self.generate_assignment(tgt, "val_temp.longValue()")
-            
+            assign_rhs = "val_stored.longValue()"
+        else:
+            assign_rhs = "val_stored"
+        assignment = self.generate_assignment(tgt, assign_rhs)
+
         lines = [
             "{",
             "    try {",
@@ -671,6 +702,7 @@ class NativeStatementTranslator:
             f"        if (checkSizeError(val_temp, {digits}, {scale}, {'true' if signed else 'false'})) {{",
             f"            {on_size_code}",
             "        } else {",
+            f"            BigDecimal val_stored = {_trunc('val_temp')};",
             f"            {assignment}",
             f"            {not_size_code}",
             "        }",
@@ -722,7 +754,18 @@ class NativeStatementTranslator:
                 elif src_upper in ("HIGH-VALUE", "HIGH-VALUES"):
                     java_src = '"\\uFFFF"'
                 elif src.startswith("'") or src.startswith('"'):
-                    java_src = src
+                    java_str = '"' + src[1:-1] + '"'
+                    if tgt_type in ("Integer", "Long", "int", "long"):
+                        parse_method = "parseLongSafe" if tgt_type in ("Long", "long") else "parseIntSafe"
+                        java_src = f"com.systema.modernized.CobolFormatHelper.{parse_method}({java_str})"
+                    elif tgt_type == "BigDecimal":
+                        java_src = (
+                            f"({java_str} == null || {java_str}.trim().isEmpty()) ? BigDecimal.ZERO : "
+                            f"({java_str}.trim().contains(\".\")) ? new BigDecimal({java_str}.trim()) : "
+                            f"new BigDecimal({java_str}.trim())"
+                        )
+                    else:
+                        java_src = java_str
                 elif re.match(r'^\d+(\.\d+)?$', src):
                     if tgt_type == "BigDecimal":
                         java_src = f"new BigDecimal(\"{src}\")"
@@ -754,8 +797,8 @@ class NativeStatementTranslator:
                         else:
                             java_src = f"({java_src} == null || {java_src}.trim().isEmpty()) ? BigDecimal.ZERO : new BigDecimal({java_src}.trim())"
                     elif tgt_type in ("Integer", "Long", "int", "long") and src_type == "String":
-                        parse_method = "Long.parseLong" if tgt_type in ("Long", "long") else "Integer.parseInt"
-                        java_src = f"({java_src} == null || {java_src}.trim().isEmpty()) ? 0 : {parse_method}({java_src}.trim())"
+                        parse_method = "parseLongSafe" if tgt_type in ("Long", "long") else "parseIntSafe"
+                        java_src = f"com.systema.modernized.CobolFormatHelper.{parse_method}({java_src})"
                     elif tgt_type == "String" and src_type != "String":
                         tgt_base = re.split(r'\(', tgt)[0].strip().upper()
                         tgt_pic = self.current_generator.var_pics.get(tgt_base, "") if self.current_generator else ""
@@ -819,7 +862,7 @@ class NativeStatementTranslator:
                     elif stype == "MULTIPLY":
                         val_expr = f"{java_val}.multiply({java_op2})" if tgt_type == "BigDecimal" else f"{java_val} * {java_op2}"
                     else:
-                        val_expr = f"{java_val}.divide({java_op2}, 2, RoundingMode.DOWN)" if tgt_type == "BigDecimal" else f"{java_val} / {java_op2}"
+                        val_expr = f"{java_val}.divide({java_op2}, 10, RoundingMode.DOWN)" if tgt_type == "BigDecimal" else f"{java_val} / {java_op2}"
                 else:
                     if stype == "ADD":
                         val_expr = f"{java_tgt_read}.add({java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} + {java_val}"
@@ -828,7 +871,7 @@ class NativeStatementTranslator:
                     elif stype == "MULTIPLY":
                         val_expr = f"{java_tgt_read}.multiply({java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} * {java_val}"
                     else:
-                        val_expr = f"{java_tgt_read}.divide({java_val}, 2, RoundingMode.DOWN)" if tgt_type == "BigDecimal" else f"{java_tgt_read} / {java_val}"
+                        val_expr = f"{java_tgt_read}.divide({java_val}, 10, RoundingMode.DOWN)" if tgt_type == "BigDecimal" else f"{java_tgt_read} / {java_val}"
 
                 stmts.append(self.wrap_math_with_size_error(cur_tgt, val_expr, props, tgt_type, val_is_bigdecimal=(tgt_type == "BigDecimal")))
 
@@ -1649,7 +1692,8 @@ class NativeStatementTranslator:
             not_on_overflow = props.get("not_on_overflow_nodes", [])
             
             if source.startswith("'") or source.startswith('"'):
-                src_expr = f"\"{source[1:-1].replace('\"', '\\\"')}\""
+                escaped_source = source[1:-1].replace('"', '\\"')
+                src_expr = f"\"{escaped_source}\""
             elif source in self.var_types:
                 j_src = to_java_var(source)
                 src_expr = f"get_{j_src}()" if source in self.redefines_layout else j_src

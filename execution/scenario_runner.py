@@ -213,10 +213,31 @@ def shell_safe(token: str, what: str = "value") -> str:
 
 
 def _docker_cmd(image: str, mounts: list, workdir: str, inner_cmd: str) -> list:
-    """Build a docker run command list."""
-    full = ["docker", "run", "--rm"]
-    for host, guest in mounts:
-        full += ["-v", f"{host}:{guest}"]
+    """Build a docker run command list with Docker-out-of-Docker translation."""
+    full = ["docker", "run", "--rm",
+            "--memory=2g", "--cpus=2", "--pids-limit=512",
+            "--network", "none",
+            "--cap-drop=ALL", "--security-opt=no-new-privileges"]
+    
+    in_docker = os.path.exists("/.dockerenv")
+    
+    if in_docker:
+        full += ["-v", "cobol-to-java-test_workspace:/app/workspace"]
+        
+        symlink_cmds = ["cd /"]
+        for host, guest in mounts:
+            host_posix = host.replace("\\", "/")
+            symlink_cmds.append(f"rm -rf {guest}")
+            symlink_cmds.append(f"mkdir -p $(dirname {guest})")
+            symlink_cmds.append(f"ln -sf {host_posix} {guest}")
+            
+        if symlink_cmds:
+            cd_back = f"cd {workdir}" if workdir else ""
+            inner_cmd = " && ".join(symlink_cmds) + (f" && {cd_back}" if cd_back else "") + " && " + inner_cmd
+    else:
+        for host, guest in mounts:
+            full += ["-v", f"{host}:{guest}"]
+            
     if workdir:
         full += ["-w", workdir]
     full += [image, "sh", "-c", inner_cmd]

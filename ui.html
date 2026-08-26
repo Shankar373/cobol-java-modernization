@@ -1316,7 +1316,7 @@ function renderActiveWorkspace(r) {
     bannerCls = 'chip-error';
     verdictStyle = 'border-color: var(--err); background: var(--err-bg);';
     verdictDesc = '❌ FAILED: Modernization checks or compiler compilation tests failed, or functional equivalence matches showed difference.';
-  } else if (verd === 'BLOCKED') {
+  } else if (verd === 'BLOCKED' || verd === 'ENVIRONMENT_BLOCKED') {
     bannerCls = 'chip-error';
     verdictStyle = 'border-color: var(--err); background: var(--err-bg);';
     verdictDesc = '🚫 BLOCKED: Pipeline execution cannot continue. A critical tool or environment dependency is missing or failed.';

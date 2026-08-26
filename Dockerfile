@@ -1,14 +1,19 @@
 # ── Stage 1: Python + JDK 17 + Maven 3.9 ─────────────────────────────────────
 # Uses eclipse-temurin JDK 17 (LTS) as base — includes javac + java.
+# Base image upgraded to 'noble' (Ubuntu 24.04) to provide Python 3.12 (PEP 701 support).
 # Maven is installed on top. Python is installed via apt.
 # No local JDK, Maven, or Python versions needed on the host.
-FROM eclipse-temurin:17-jdk-jammy AS runtime
+FROM eclipse-temurin:17-jdk-noble AS runtime
 
 # Install Python 3 + pip + curl (for health checks) with minimal layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip curl \
         maven \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install static Docker CLI binary to allow containerized docker executions
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-26.1.4.tgz | tar -xz -C /tmp \
+ && mv /tmp/docker/docker /usr/local/bin/ \
+ && rm -rf /tmp/docker
 
 # Make 'python' resolve to python3
 RUN ln -sf /usr/bin/python3 /usr/bin/python
@@ -18,11 +23,13 @@ WORKDIR /app
 
 # Copy only source — generated dirs (target/, workspace/, scratch/) stay out via .dockerignore
 COPY modernize/        ./modernize/
+COPY execution/        ./execution/
 COPY third_party/      ./third_party/
 COPY tests/            ./tests/
 COPY docs/             ./docs/
 COPY legacy/           ./legacy/
 COPY *.py              ./
+COPY ui.html           ./
 COPY requirements.txt  ./
 
 # Pre-warm the Maven local repo with common dependencies so first pipeline run

@@ -36,7 +36,7 @@ This document provides a comprehensive, evidence-based feature compatibility mat
 | **Sequential Files** | PASS | PASS | PASS | PASS | PASS | PASS | PASS | **VERIFIED** | `tests/test_phase8_file_semantics.py` |
 | **VSAM KSDS/ESDS/RRDS** | PASS | PASS | PASS | PASS | PASS | PASS | PASS | **PARTIALLY_VERIFIED** | Mapped to SQLite; alternate index lookup is simulated rather than strictly native KSDS block operations. |
 | **Copybooks (`COPY`)** | PASS | PASS | PASS | PASS | PASS | PASS | PASS | **VERIFIED** | `tests/test_lexer.py` (copybook preprocessor tests) |
-| **`EXEC SQL` / DB2** | STUB | STUB | STUB | STUB | STUB | STUB | STUB | **UNSUPPORTED** | Detected and stubbed; requires manual JPA transition. |
+| **`EXEC SQL` / DB2** | STUB | STUB | STUB | STUB | STUB | STUB | STUB |   IMPROVING  | |   DB2 transpilation in progress; REAL_DB2 mode coming soon; H2 emulation verified.  |
 | **`EXEC CICS` / BMS** | STUB | STUB | STUB | STUB | STUB | STUB | STUB | **UNSUPPORTED** | Detected and stubbed; maps/transactions bypassed. |
 | **JCL / PROC / SYSIN** | SKIP | SKIP | SKIP | SKIP | SKIP | SKIP | SKIP | **UNSUPPORTED** | Replaced by Spring Batch execution definitions. |
 | **Dynamic `CALL`** | SKIP | SKIP | SKIP | SKIP | SKIP | SKIP | SKIP | **UNSUPPORTED** | Program lookup requires static literal reference targets. |

@@ -176,3 +176,28 @@ def test_compute_verdict_gate2_failed(blank_pipeline):
 def test_compute_verdict_skipped_stages(blank_pipeline):
     p = blank_pipeline
     assert p._compute_verdict() == "UNVERIFIED"
+
+
+def test_compute_verdict_environment_blocked(blank_pipeline):
+    """A stage explicitly marked 'blocked' (missing host tool: Maven/Java/Docker)
+    must fail CLOSED with ENVIRONMENT_BLOCKED, never a misleading pass-tier
+    verdict. This is the fix for the AGENTS.md gap (ENVIRONMENT_BLOCKED was
+    never produced by _compute_verdict)."""
+    p = blank_pipeline
+    p.state["stages"] = {
+        "ingest": {"status": "done"},
+        "transpile": {"status": "done"},
+        "validate": {"status": "blocked"},
+    }
+    p.set_data("transpile", {"n_ok": 1, "n_total": 1})
+    p.set_data("baseline_files", ["output.dat"])
+    p.set_data("compare", {
+        "checks": [{"name": "file_contents", "ok": True, "kind": "file"}],
+        "rows": [{"file": "output.dat", "verdict": "match"}],
+    })
+    assert p._compute_verdict() == "ENVIRONMENT_BLOCKED"
+    # And UI maps it to the BLOCKED presentation (line in ui.html).
+    ui_html = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "ui.html"), encoding="utf-8").read()
+    assert "verd === 'ENVIRONMENT_BLOCKED'" in ui_html, \
+        "UI must represent ENVIRONMENT_BLOCKED distinctly"

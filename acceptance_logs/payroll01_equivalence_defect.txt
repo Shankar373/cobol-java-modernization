@@ -1,0 +1,17 @@
+BASELINE (GnuCOBOL):
+E001E00129324002586400103460
+E002E00138648002772900110919
+E003E00147972002959400118378
+
+NATIVE (Spring/native_gen):
+E001E00129324002586400103459
+E002E00138648002772900110918
+E003E00147972002959400118377
+
+
+DEFECT: PY-NET off-by-one per row (00103460 -> 00103459).
+Root cause hypothesis: COMPUTE PY-NET = PY-GROSS - PY-TAX consumes the
+full-precision intermediate TAX (25864.80) instead of the truncated
+stored PIC 9(5)V99 value (25864), violating COBOL storage-truncation
+semantics for chained arithmetic.
+Caught by: Gate 2 content mismatch -> verdict FAILED (no false pass).

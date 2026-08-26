@@ -1,0 +1,61 @@
+[PASS] server starts on 127.0.0.1:8787
+[PASS] frontend HTML loads with dashboard markers :: 200, 76270 bytes
+[PASS] /api/state responds with runs array
+
+=== RUN claimscore-fixtures ===
+[PASS] claimscore-fixtures: ingest :: claimscore-fixtures-7
+[PASS] claimscore-fixtures: run accepted
+    06:47:16     running | stages  0/13 | verdict=UNVERIFIED
+    06:47:19     running | stages  3/13 | verdict=UNVERIFIED
+    06:47:35     running | stages  4/13 | verdict=UNVERIFIED
+    06:48:06     running | stages  5/13 | verdict=FAILED
+    06:48:21     running | stages  6/13 | verdict=FAILED
+    06:48:24     running | stages  7/13 | verdict=FAILED
+    06:48:52     running | stages  8/13 | verdict=FAILED
+    06:49:04     running | stages  9/13 | verdict=VERIFIED_WITH_LIMITATIONS
+    06:49:23     running | stages 10/13 | verdict=VERIFIED_WITH_LIMITATIONS
+    06:50:03     running | stages 13/13 | verdict=VERIFIED_WITH_LIMITATIONS
+    06:50:07        done | stages 13/13 | verdict=VERIFIED_WITH_LIMITATIONS
+[PASS] claimscore-fixtures: backend status done :: done
+[PASS] claimscore-fixtures: verdict is pass-tier (VERIFIED_WITH_LIMITATIONS)
+[PASS] claimscore-fixtures: compare stage done :: done
+[PASS] claimscore-fixtures: state stable on re-poll
+[PASS] claimscore-fixtures: package downloadable :: 163237 bytes, 111 entries
+[PASS] claimscore-fixtures: report downloadable :: 200, 7517 chars
+[PASS] claimscore-fixtures: SSE log stream delivered events :: 3 events
+[PASS] claimscore-fixtures: native Java compiles standalone (javac, zero deps)
+[PASS] claimscore-fixtures: native Java runs (java rc=0) :: rc=0 tail=['CLAIMSCORE ENTERPRISE NIGHTLY BATCH', 'CLAIMS PROCESSED:  0000007', 'CLAIMSCORE NIGHTLY BATCH COMPLETED']
+[PASS] claimscore-fixtures: zero forbidden runtime deps in native_gen :: []
+
+=== RUN payroll01-unseen ===
+[PASS] payroll01-unseen: ingest :: payroll01-unseen-7
+[PASS] payroll01-unseen: run accepted
+    06:50:12     running | stages  3/13 | verdict=UNVERIFIED
+    06:50:21     running | stages  4/13 | verdict=UNVERIFIED
+    06:50:30     running | stages  5/13 | verdict=FAILED
+    06:50:36     running | stages  6/13 | verdict=FAILED
+    06:50:46     running | stages  7/13 | verdict=FAILED
+    06:50:52     running | stages  9/13 | verdict=VERIFIED
+    06:51:07     running | stages 10/13 | verdict=NATIVE_SPRING_UNIFIED
+    06:51:48        done | stages 13/13 | verdict=PRODUCTION_READY
+[PASS] payroll01-unseen: backend status done :: done
+[PASS] payroll01-unseen: verdict is pass-tier (PRODUCTION_READY)
+[PASS] payroll01-unseen: compare stage done :: done
+[PASS] payroll01-unseen: state stable on re-poll
+[PASS] payroll01-unseen: package downloadable :: 44021 bytes, 37 entries
+[PASS] payroll01-unseen: report downloadable :: 200, 4188 chars
+[PASS] payroll01-unseen: SSE log stream delivered events :: 3 events
+
+=== RUN broken01-negative ===
+[PASS] broken01-negative: ingest :: broken01-negative-7
+[PASS] broken01-negative: run accepted
+    06:51:48     running | stages  3/13 | verdict=UNVERIFIED
+    06:51:51     running | stages  4/13 | verdict=BASELINE_UNPRODUCIBLE
+    06:51:54       error | stages  4/13 | verdict=BASELINE_UNPRODUCIBLE
+[PASS] broken01-negative: failure surfaced honestly (status=error, verdict=BASELINE_UNPRODUCIBLE)
+[PASS] broken01-negative: state stable on re-poll
+[PASS] broken01-negative: SSE log stream delivered events :: 3 events
+[PASS] server logs free of UNEXPECTED exceptions (0 SSE-probe resets classified as expected noise) :: []
+[PASS] server stopped cleanly, port released :: terminated
+
+==== ACCEPTANCE SUMMARY: 31/31 checks passed ====

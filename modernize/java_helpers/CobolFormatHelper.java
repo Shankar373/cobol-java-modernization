@@ -1,6 +1,7 @@
 package com.systema.modernized;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.math.RoundingMode;
 
 public class CobolFormatHelper {
@@ -236,10 +237,69 @@ public class CobolFormatHelper {
         return a % b;
     }
 
+    /**
+     * Apply COBOL PICTURE storage/truncation semantics to an arithmetic result.
+     *
+     * COBOL (without ROUNDED) truncates the value to the receiver field's PICTURE
+     * before storing it: extra decimal places are dropped (truncation toward
+     * zero) and, when the integer magnitude exceeds the available integer digits,
+     * the most-significant integer digits are truncated. The stored (truncated)
+     * value is what any subsequent arithmetic reads, which is the root of correct
+     * chained-COMPUTE semantics (e.g. PY-TAX = PY-GROSS * RATE must be stored
+     * truncated so that PY-NET = PY-GROSS - PY-TAX reads the truncated amount).
+     */
+    public static BigDecimal truncateToPic(BigDecimal v, int digits, int scale, boolean signed) {
+        if (v == null) return BigDecimal.ZERO;
+        BigDecimal t = v;
+        // Truncate fractional part beyond the PICTURE scale (COBOL non-ROUNDED).
+        if (t.scale() > scale) {
+            t = t.setScale(scale, RoundingMode.DOWN);
+        }
+        // Truncate excess most-significant integer digits (COBOL cuts them).
+        int intDigits = digits - scale;
+        if (intDigits < 0) intDigits = 0;
+        if (intDigits > 0) {
+            BigInteger intPart = t.unscaledValue().divide(BigInteger.TEN.pow(t.scale()));
+            BigInteger maxInt = BigInteger.TEN.pow(intDigits);
+            if (intPart.abs().compareTo(maxInt) >= 0) {
+                BigInteger trunc = intPart.abs().remainder(maxInt);
+                intPart = intPart.signum() < 0 ? trunc.negate() : trunc;
+                t = new BigDecimal(intPart).setScale(scale, RoundingMode.DOWN);
+            }
+        }
+        // Guarantee exact scale even for zero / integer results.
+        if (t.scale() != scale) {
+            t = t.setScale(scale, RoundingMode.DOWN);
+        }
+        return t;
+    }
+
     private static String padString(String val, int length) {
         if (val == null) val = "";
         String padded = String.format("%-" + length + "s", val);
         if (padded.length() > length) return padded.substring(0, length);
         return padded;
+    }
+
+    public static int parseIntSafe(Object src) {
+        if (src == null) return 0;
+        String s = src.toString().trim();
+        if (s.isEmpty()) return 0;
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    public static long parseLongSafe(Object src) {
+        if (src == null) return 0L;
+        String s = src.toString().trim();
+        if (s.isEmpty()) return 0L;
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
     }
 }

@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-08-26T01:20:03+00:00",
+  "mappings": [
+    {
+      "source_coordinate": "CCMAIN01.cob:1",
+      "lexer_token": "PROGRAM-ID",
+      "semantic_ir_node": "Entrypoint: CCMAIN01",
+      "application_semantic_model": "Spring Batch Job Launcher",
+      "java_class": "com.systema.modernized.ModernizedApplication",
+      "java_method": "main",
+      "validation_evidence": "Spring Boot compile status: Generated and compiled successfully"
+    },
+    {
+      "source_coordinate": "Claim.cpy:1",
+      "lexer_token": "01 RECORD",
+      "semantic_ir_node": "RecordModel: Claim",
+      "application_semantic_model": "Domain Model",
+      "java_class": "com.systema.modernized.domain.Claim",
+      "java_method": "constructor",
+      "validation_evidence": "Model parsed (7 total); spring_compile_ok=True"
+    },
+    {
+      "source_coordinate": "Customer.cpy:1",
+      "lexer_token": "01 RECORD",
+      "semantic_ir_node": "RecordModel: Customer",
+      "application_semantic_model": "Domain Model",
+      "java_class": "com.systema.modernized.domain.Customer",
+      "java_method": "constructor",
+      "validation_evidence": "Model parsed (7 total); spring_compile_ok=True"
+    },
+    {
+      "source_coordinate": "Policy.cpy:1",
+      "lexer_token": "01 RECORD",
+      "semantic_ir_node": "RecordModel: Policy",
+      "application_semantic_model": "Domain Model",
+      "java_class": "com.systema.modernized.domain.Policy",
+      "java_method": "constructor",
+      "validation_evidence": "Model parsed (7 total); spring_compile_ok=True"
+    },
+    {
+      "source_coordinate": "ClaimLine.cpy:1",
+      "lexer_token": "01 RECORD",
+      "semantic_ir_node": "RecordModel: ClaimLine",
+      "application_semantic_model": "Domain Model",
+      "java_class": "com.systema.modernized.domain.ClaimLine",
+      "java_method": "constructor",
+      "validation_evidence": "Model parsed (7 total); spring_compile_ok=True"
+    },
+    {
+      "source_coordinate": "AuditLine.cpy:1",
+      "lexer_token": "01 RECORD",
+      "semantic_ir_node": "RecordModel: AuditLine",
+      "application_semantic_model": "Domain Model",
+      "java_class": "com.systema.modernized.domain.AuditLine",
+      "java_method": "constructor",
+      "validation_evidence": "Model parsed (7 total); spring_compile_ok=True"
+    },
+    {
+      "source_coordinate": "ExceptionLine.cpy:1",
+      "lexer_token": "01 RECORD",
+      "semantic_ir_node": "RecordModel: ExceptionLine",
+      "application_semantic_model": "Domain Model",
+      "java_class": "com.systema.modernized.domain.ExceptionLine",
+      "java_method": "constructor",
+      "validation_evidence": "Model parsed (7 total); spring_compile_ok=True"
+    },
+    {
+      "source_coordinate": "ReportLine.cpy:1",
+      "lexer_token": "01 RECORD",
+      "semantic_ir_node": "RecordModel: ReportLine",
+      "application_semantic_model": "Domain Model",
+      "java_class": "com.systema.modernized.domain.ReportLine",
+      "java_method": "constructor",
+      "validation_evidence": "Model parsed (7 total); spring_compile_ok=True"
+    }
+  ],
+  "audit": {
+    "orphan_ir_nodes": [],
+    "unmapped_cobol_statements": [],
+    "unmapped_generated_java": [],
+    "missing_coordinates": []
+  }
+}

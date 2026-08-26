@@ -224,9 +224,35 @@ def start_run(run_id, restart_from):
             p = engine.Pipeline(run["repo"], run["out"], cfg=run_cfg, pull=True)
             p.run_id = run_id
             run["pipeline"] = p
-            
-            p.run(restart_from=restart_from)
-            
+
+            # Live progress monitor: keep last_stage (and the Continue-button
+            # index) in step with the highest completed stage while the
+            # pipeline runs, instead of only at the very end.
+            _stop = {"v": False}
+
+            def _monitor():
+                while not _stop["v"]:
+                    try:
+                        st = engine.load_json(
+                            os.path.join(run["out"], "state.json"), {}).get("stages", {})
+                        done_idx = max(
+                            [idx for idx, (lab, _) in enumerate(STEP_LABELS)
+                             if st.get(engine.STAGES[idx], {}).get("status") == "done"],
+                            default=-1)
+                        with LOCK:
+                            run["last_stage"] = done_idx
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
+
+            mon = threading.Thread(target=_monitor, daemon=True)
+            mon.start()
+            try:
+                p.run(restart_from=restart_from)
+            finally:
+                _stop["v"] = True
+                mon.join(timeout=2)
+
             state = engine.load_json(os.path.join(run["out"], "state.json"), {})
             run["last_stage"] = 12 if state.get("stages", {}).get("package", {}).get("status") == "done" else 11
             run["verdict"] = state.get("stages", {}).get("report", {}).get("detail", "done")
@@ -836,7 +862,19 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    # Expected client-side disconnects (SSE probe aborts, browser navigation,
+    # keep-alive teardown) surface as socket resets on the server's error path.
+    # They are normal and must not pollute the server error log, so suppress
+    # only those, while still surfacing genuine server errors.
+    class SilentClientResetServer(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            exc = sys.exc_info()[1]
+            if isinstance(exc, (ConnectionAbortedError, ConnectionResetError,
+                                 BrokenPipeError, OSError)):
+                return
+            super().handle_error(request, client_address)
+
+    server = SilentClientResetServer((args.host, args.port), Handler)
     print("  (ctrl-c to stop)")
     try:
         server.serve_forever()

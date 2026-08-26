@@ -7,11 +7,15 @@ services:
     container_name: cobol-modernizer
     ports:
       - "8787:8787"
+    security_opt:
+      - no-new-privileges:true
     volumes:
       # Pipeline output — generated Java, compiled classes, migration reports
       - workspace:/app/workspace
       # Maven local repo cache — persists between restarts so deps aren't re-downloaded
       - maven-cache:/root/.m2
+      # Mount Docker socket to allow pipeline to run sub-containers (DooD)
+      - /var/run/docker.sock:/var/run/docker.sock
       # Mount source repos you want to modernize from host into container
       # Uncomment and point to your COBOL repo:
       # - C:/path/to/your/cobol-repo:/input:ro
@@ -24,9 +28,10 @@ services:
       # CICS_HOST: your-cics-host
       # CICS_PORT: 2006
       PYTHONUNBUFFERED: "1"
+      UI_AUTH_CREDENTIALS: "admin:admin"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8787/"]
+      test: ["CMD", "curl", "-sf", "-u", "admin:admin", "http://localhost:8787/"]
       interval: 30s
       timeout: 5s
       retries: 3

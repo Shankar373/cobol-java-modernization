@@ -1,0 +1,231 @@
+{
+  "schema_version": "1.0",
+  "execution_id": "7fe34ba9-f61c-49d8-afa5-39b601e7167f",
+  "repository": "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/repo",
+  "started_at": "2026-08-26T01:17:16+00:00",
+  "completed_at": "2026-08-26T01:20:03+00:00",
+  "duration_seconds": 167.0,
+  "stages": {
+    "ingest": {
+      "status": "done",
+      "started_at": "2026-08-26T01:17:16+00:00",
+      "completed_at": "2026-08-26T01:17:16+00:00",
+      "duration_seconds": 0.0,
+      "detail": "repo ok: 5 COBOL programs, 4 copybooks fingerprinted",
+      "warnings": [],
+      "errors": []
+    },
+    "discover": {
+      "status": "done",
+      "started_at": "2026-08-26T01:17:16+00:00",
+      "completed_at": "2026-08-26T01:17:16+00:00",
+      "duration_seconds": 0.0,
+      "detail": "5 programs discovered",
+      "warnings": [],
+      "errors": []
+    },
+    "analyze": {
+      "status": "done",
+      "started_at": "2026-08-26T01:17:16+00:00",
+      "completed_at": "2026-08-26T01:17:16+00:00",
+      "duration_seconds": 0.0,
+      "detail": "call graph and 5 programs analyzed successfully",
+      "warnings": [],
+      "errors": []
+    },
+    "baseline": {
+      "status": "done",
+      "started_at": "2026-08-26T01:17:16+00:00",
+      "completed_at": "2026-08-26T01:17:32+00:00",
+      "duration_seconds": 16.0,
+      "detail": "baseline produced 5 output files",
+      "warnings": [],
+      "errors": []
+    },
+    "transpile": {
+      "status": "done",
+      "started_at": "2026-08-26T01:17:32+00:00",
+      "completed_at": "2026-08-26T01:18:05+00:00",
+      "duration_seconds": 33.0,
+      "detail": "5 programs transpiled",
+      "warnings": [],
+      "errors": []
+    },
+    "collect": {
+      "status": "done",
+      "started_at": "2026-08-26T01:18:05+00:00",
+      "completed_at": "2026-08-26T01:18:19+00:00",
+      "duration_seconds": 14.0,
+      "detail": "5 java sources, 3234 LOC",
+      "warnings": [],
+      "errors": []
+    },
+    "generate": {
+      "status": "done",
+      "started_at": "2026-08-26T01:18:19+00:00",
+      "completed_at": "2026-08-26T01:18:24+00:00",
+      "duration_seconds": 5.0,
+      "detail": "target project assembled",
+      "warnings": [],
+      "errors": []
+    },
+    "execute": {
+      "status": "done",
+      "started_at": "2026-08-26T01:18:24+00:00",
+      "completed_at": "2026-08-26T01:18:52+00:00",
+      "duration_seconds": 28.0,
+      "detail": "java run produced 5 output files",
+      "warnings": [],
+      "errors": []
+    },
+    "compare": {
+      "status": "done",
+      "started_at": "2026-08-26T01:18:52+00:00",
+      "completed_at": "2026-08-26T01:19:03+00:00",
+      "duration_seconds": 11.0,
+      "detail": "ComparisonResult status: PASS",
+      "warnings": [],
+      "errors": []
+    },
+    "refactor": {
+      "status": "done",
+      "started_at": "2026-08-26T01:19:03+00:00",
+      "completed_at": "2026-08-26T01:19:21+00:00",
+      "duration_seconds": 18.0,
+      "detail": "Generated and compiled successfully",
+      "warnings": [],
+      "errors": []
+    },
+    "validate": {
+      "status": "done",
+      "started_at": "2026-08-26T01:19:21+00:00",
+      "completed_at": "2026-08-26T01:20:03+00:00",
+      "duration_seconds": 42.0,
+      "detail": "Gate 2 PASS \u2014 output matched baseline",
+      "warnings": [],
+      "errors": []
+    },
+    "report": {
+      "status": "running",
+      "started_at": "2026-08-26T01:20:03+00:00",
+      "completed_at": null,
+      "duration_seconds": null,
+      "detail": "in progress",
+      "warnings": [],
+      "errors": []
+    }
+  },
+  "diagnostics": {
+    "blocking_constructs": [],
+    "unsupported_count": 0
+  },
+  "dependency_audit": {
+    "executed": true,
+    "status": "PASS",
+    "forbidden_found": [],
+    "scanned_files_count": 21
+  },
+  "build": {
+    "enterprise_project_generated": true,
+    "status": "done"
+  },
+  "execution": {
+    "status": null,
+    "scenario_type": null
+  },
+  "equivalence": {
+    "topology": "MULTI_FILE_OUTPUT",
+    "mode": "MULTI_FILE_OUTPUT",
+    "executed": true,
+    "status": "PASS",
+    "rows": 5,
+    "checks": [
+      {
+        "name": "data/out/claim-audit.dat",
+        "kind": "comp3",
+        "ok": true,
+        "actual": [
+          "95000.00",
+          "35000.00",
+          "295000.00",
+          "300000.00"
+        ],
+        "expected": [
+          "95000.00",
+          "35000.00",
+          "295000.00",
+          "300000.00"
+        ],
+        "note": "decoded packed-decimal column"
+      },
+      {
+        "name": "data/out/eod-claims-report.txt",
+        "kind": "regex",
+        "ok": true,
+        "actual": "0000004",
+        "expected": "4",
+        "note": "regex group match"
+      },
+      {
+        "name": "data/out/eod-claims-report.txt",
+        "kind": "regex",
+        "ok": true,
+        "actual": "0000003",
+        "expected": "3",
+        "note": "regex group match"
+      },
+      {
+        "name": "data/out/eod-claims-report.txt",
+        "kind": "regex",
+        "ok": true,
+        "actual": "0000002",
+        "expected": "2",
+        "note": "regex group match"
+      }
+    ],
+    "baseline_observable": {
+      "type": "files",
+      "count": 5,
+      "total_bytes": 18275
+    },
+    "native_observable": {
+      "type": "files",
+      "count": 5,
+      "total_bytes": 75619
+    },
+    "normalization": "full",
+    "stdout_truncated": false,
+    "stdout_compare_limit": 1500
+  },
+  "negative_equivalence": {
+    "executed": true,
+    "status": "PASS",
+    "mode": "MULTI_FILE_OUTPUT",
+    "verdict": "PASS",
+    "mutations_tested": 6,
+    "mutations_caught": 6,
+    "mutations_detected": [
+      "input_record_modification",
+      "business_value_modification",
+      "output_record_modification",
+      "missing_output",
+      "altered_output_content",
+      "altered_execution_result"
+    ],
+    "reason": null
+  },
+  "traceability": {
+    "status": "done",
+    "gate": "Gate 2"
+  },
+  "artifacts": [
+    "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/target/migration-report.json",
+    "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/target/migration-report.md",
+    "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/target/transpilation-provenance.json",
+    "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/target/business-rule-traceability.json",
+    "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/target/business-rule-traceability.md",
+    "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/target/hardcoded-value-scan.json",
+    "C:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/workspace/claimscore-fixtures-7/target/state.json"
+  ],
+  "final_verdict": "VERIFIED_WITH_LIMITATIONS"
+}

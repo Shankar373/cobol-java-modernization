@@ -1,0 +1,5 @@
+CLAIMSCORE - END OF DAY CLAIMS REPORT                                                                                                                           
+AUDIT RECORDS         : 4                                                                                                                                       
+EXCEPTIONS            : 3                                                                                                                                       
+MANUAL REVIEWS        : 2                                                                                                                                       
+STATUS: CLAIMS BATCH COMPLETED                                                                                                                                  
