@@ -434,6 +434,8 @@ class Handler(BaseHTTPRequestHandler):
     timeout = 300
 
     def check_auth(self):
+        if getattr(self.server, "no_auth", False):
+            return True
         auth_env = os.environ.get("UI_AUTH_CREDENTIALS")
         if not auth_env:
             # Fail-closed for non-loopback bindings: a network-exposed instance
@@ -852,6 +854,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--no-auth", action="store_true", help="Disable HTTP Basic Authentication")
     args = ap.parse_args()
     print("COBOL -> Java migration UI")
     print("  UI        : http://%s:%d" % (args.host, args.port))
@@ -875,6 +878,7 @@ def main():
             super().handle_error(request, client_address)
 
     server = SilentClientResetServer((args.host, args.port), Handler)
+    server.no_auth = args.no_auth
     print("  (ctrl-c to stop)")
     try:
         server.serve_forever()

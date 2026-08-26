@@ -28,10 +28,10 @@ services:
       # CICS_HOST: your-cics-host
       # CICS_PORT: 2006
       PYTHONUNBUFFERED: "1"
-      UI_AUTH_CREDENTIALS: "admin:admin"
+    command: ["python", "ui.py", "--host", "0.0.0.0", "--port", "8787", "--no-auth"]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "-u", "admin:admin", "http://localhost:8787/"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8787/"]
       interval: 30s
       timeout: 5s
       retries: 3
