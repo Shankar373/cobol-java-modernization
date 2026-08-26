@@ -1,6 +1,0 @@
-================================================================================================================================================================
-CLAIMSCORE - END OF DAY CLAIMS REPORT
-AUDIT RECORDS         : 0000004REPORT
-EXCEPTIONS            : 0000003REPORT
-MANUAL REVIEWS        : 0000002REPORT
-STATUS: CLAIMS BATCH COMPLETED
