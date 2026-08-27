@@ -259,11 +259,37 @@ class NativePipeline:
                         candidates.append(os.path.join(repo_path, subdir, cp_path + ext))
                 
                 cp_file = None
+                # 1. Exact match pass
                 for candidate in candidates:
                     norm_candidate = os.path.normpath(candidate)
                     if os.path.exists(norm_candidate) and os.path.isfile(norm_candidate):
                         cp_file = norm_candidate
                         break
+
+                # 2. Case-insensitive lookup pass (if no exact match)
+                if not cp_file:
+                    case_matches = []
+                    for candidate in candidates:
+                        norm_candidate = os.path.normpath(candidate)
+                        parent = os.path.dirname(norm_candidate)
+                        base = os.path.basename(norm_candidate).lower()
+                        if not os.path.exists(parent) or not os.path.isdir(parent):
+                            continue
+                        try:
+                            files_in_dir = os.listdir(parent)
+                        except OSError:
+                            continue
+                        for filename in files_in_dir:
+                            if filename.lower() == base:
+                                full_p = os.path.join(parent, filename)
+                                if os.path.isfile(full_p):
+                                    if full_p not in case_matches:
+                                        case_matches.append(full_p)
+                    if len(case_matches) == 1:
+                        cp_file = case_matches[0]
+                    elif len(case_matches) > 1:
+                        import sys
+                        sys.stderr.write(f"[WARN] Ambiguous case-insensitive match for copybook {cp_path}: {case_matches}\n")
                 
                 if cp_file:
                     try:
@@ -694,6 +720,9 @@ public class CicsTransactionContext {
     public static Object getReceiveOption(String map, String mapset, String optionName) {
         Map<String, Object> opts = lastReceiveOptions.get(mapset.toUpperCase() + "_" + map.toUpperCase());
         return opts != null ? opts.get(optionName.toLowerCase()) : null;
+    }
+    public static void cicsReturn() {
+        System.out.println("CICS RETURN");
     }
     public static void clear() {
         session.clear();

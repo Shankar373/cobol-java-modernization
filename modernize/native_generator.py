@@ -333,6 +333,15 @@ class NativeExpressionTranslator:
         _bare_op = r'(?<![a-zA-Z0-9_])[\+\-\*\/]'
         tokens = re.split(rf'(\s+[\+\-\*\/]\s+|\s+[\+\-\*\/]|[\+\-\*\/]\s+|\(|\)|{_bare_op})', masked)
         
+        def to_java_string_literal(cobol_lit: str) -> str:
+            inner = cobol_lit[1:-1]
+            escaped = inner.replace('\\', '\\\\')
+            escaped = (escaped.replace('"', '\\"')
+                              .replace('\n', '\\n')
+                              .replace('\r', '\\r')
+                              .replace('\t', '\\t'))
+            return f'"{escaped}"'
+
         translated_tokens = []
         for t in tokens:
             t_strip = t.strip()
@@ -340,6 +349,8 @@ class NativeExpressionTranslator:
                 continue
             if t_strip in ("+", "-", "*", "/", "(", ")"):
                 translated_tokens.append(t_strip)
+            elif (t_strip.startswith("'") and t_strip.endswith("'")) or (t_strip.startswith('"') and t_strip.endswith('"')):
+                translated_tokens.append(to_java_string_literal(t_strip))
             elif re.match(r'^-?\d*\.?\d+$', t_strip):
                 translated_tokens.append(f"new BigDecimal(\"{t_strip}\")")
             else:

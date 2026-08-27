@@ -63,6 +63,8 @@ class CobolLexer:
                 free_signals += 1
             elif len(line) > 72:
                 free_signals += 1
+        if fixed_signals > 2:
+            return "fixed"
         return "fixed" if fixed_signals > free_signals else "free"
 
     def preprocess_copybooks(self, text: str) -> str:

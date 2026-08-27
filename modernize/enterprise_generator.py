@@ -66,6 +66,10 @@ class EnterpriseApplicationGenerator:
         self._write_spring_context_helper(java_base)
         self._write_jcl_execution_context(java_base)
         self._write_cobol_format_helper(java_base)
+        self._write_cobol_ref(java_base)
+        self._write_db2_verify(java_base)
+        self._write_cics_program_registry(java_base)
+        self._write_cics_transaction_context(java_base)
         self._write_dockerfile(dest_dir)
 
     def _check_batch_evidence(self) -> bool:
@@ -440,6 +444,129 @@ public class JclExecutionContext {
         path = os.path.join(java_base, "CobolFormatHelper.java")
         with open(path, "w", encoding="utf-8") as f:
             f.write(src)
+
+    def _write_cics_program_registry(self, java_base: str):
+        registry_src = """package com.systema.modernized;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+public class CicsProgramRegistry {
+    private static final Map<String, Supplier<Object>> registry = new HashMap<>();
+    public static void register(String name, Supplier<Object> supplier) {
+        registry.put(name.toUpperCase(), supplier);
+    }
+    public static Object invoke(String name, String commarea) throws Exception {
+        Supplier<Object> supplier = registry.get(name.toUpperCase());
+        if (supplier == null) {
+            try {
+                String cleaned = name.replace("-", " ").replace("_", " ");
+                String[] parts = cleaned.split("\\\\s+");
+                StringBuilder sb = new StringBuilder();
+                for (String p : parts) {
+                    if (!p.isEmpty()) {
+                        sb.append(p.substring(0, 1).toUpperCase());
+                        sb.append(p.substring(1).toLowerCase());
+                    }
+                }
+                String className = sb.toString();
+                Class.forName("com.systema.modernized.native_gen." + className);
+                supplier = registry.get(name.toUpperCase());
+            } catch (Exception e) {}
+        }
+        if (supplier == null) {
+            throw new IllegalArgumentException("CICS_INVALID_PROGRAM: Program " + name + " not registered in CICS registry");
+        }
+        Object program = supplier.get();
+        try {
+            java.lang.reflect.Field field = program.getClass().getField("commarea");
+            field.set(program, commarea);
+        } catch (NoSuchFieldException e) {}
+        program.getClass().getMethod("execute").invoke(program);
+        try {
+            java.lang.reflect.Field field = program.getClass().getField("commarea");
+            return field.get(program);
+        } catch (NoSuchFieldException e) {
+            return commarea;
+        }
+    }
+}
+"""
+        path = os.path.join(java_base, "CicsProgramRegistry.java")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(registry_src)
+
+    def _write_cics_transaction_context(self, java_base: str):
+        context_src = """package com.systema.modernized;
+import java.util.HashMap;
+import java.util.Map;
+public class CicsTransactionContext {
+    private static final Map<String, Object> session = new HashMap<>();
+    private static final Map<String, Map<String, Object>> lastSendOptions = new HashMap<>();
+    private static final Map<String, Map<String, Object>> lastReceiveOptions = new HashMap<>();
+    
+    public static void send(String map, String mapset, Object data) {
+        send(map, mapset, data, new HashMap<>());
+    }
+    public static void send(String map, String mapset, Object data, Map<String, Object> options) {
+        System.out.println("CICS SEND MAP: " + map + " MAPSET: " + mapset + " DATA: " + data + " OPTIONS: " + options);
+        String key = mapset.toUpperCase() + "_" + map.toUpperCase();
+        session.put(key + "_sent", data);
+        lastSendOptions.put(key, options);
+    }
+    public static Object receive(String map, String mapset) {
+        return receive(map, mapset, new HashMap<>());
+    }
+    public static Object receive(String map, String mapset, Map<String, Object> options) {
+        System.out.println("CICS RECEIVE MAP: " + map + " MAPSET: " + mapset + " OPTIONS: " + options);
+        String key = mapset.toUpperCase() + "_" + map.toUpperCase();
+        lastReceiveOptions.put(key, options);
+        return session.get(key + "_input");
+    }
+    public static void setSessionInput(String map, String mapset, Object data) {
+        session.put(mapset.toUpperCase() + "_" + map.toUpperCase() + "_input", data);
+    }
+    public static Object getSessionSent(String map, String mapset) {
+        return session.get(mapset.toUpperCase() + "_" + map.toUpperCase() + "_sent");
+    }
+    public static Object getSendOption(String map, String mapset, String optionName) {
+        Map<String, Object> opts = lastSendOptions.get(mapset.toUpperCase() + "_" + map.toUpperCase());
+        return opts != null ? opts.get(optionName.toLowerCase()) : null;
+    }
+    public static Object getReceiveOption(String map, String mapset, String optionName) {
+        Map<String, Object> opts = lastReceiveOptions.get(mapset.toUpperCase() + "_" + map.toUpperCase());
+        return opts != null ? opts.get(optionName.toLowerCase()) : null;
+    }
+    public static void cicsReturn() {
+        System.out.println("CICS RETURN");
+    }
+    public static void clear() {
+        session.clear();
+        lastSendOptions.clear();
+        lastReceiveOptions.clear();
+    }
+}
+"""
+        path = os.path.join(java_base, "CicsTransactionContext.java")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(context_src)
+
+    def _write_cobol_ref(self, java_base: str):
+        helper_path = os.path.join(os.path.dirname(__file__), "java_helpers", "CobolRef.java")
+        if os.path.exists(helper_path):
+            with open(helper_path, "r", encoding="utf-8") as fh:
+                src = fh.read()
+            path = os.path.join(java_base, "CobolRef.java")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(src)
+
+    def _write_db2_verify(self, java_base: str):
+        helper_path = os.path.join(os.path.dirname(__file__), "java_helpers", "Db2Verify.java")
+        if os.path.exists(helper_path):
+            with open(helper_path, "r", encoding="utf-8") as fh:
+                src = fh.read()
+            path = os.path.join(java_base, "Db2Verify.java")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(src)
 
     def _write_dockerfile(self, dest_dir: str):
         lines = []
