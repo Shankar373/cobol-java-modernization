@@ -23,3 +23,7 @@ This document lists the architectural constraints and emulation limits of the cu
     *   Complex control break headers and detail loops in `REPORT SECTION` are only partially parsed and require manual Spring Batch report generator stubs.
 3.  **Dynamic CALL Resolution**:
     *   Program calls resolved at runtime (`CALL ws-program-name`) produce warnings and require explicit mapping dictionaries inside `migration_config.json`.
+4.  **Integer/Long Fast-Path Limitations**:
+    *   Variables without implied decimal points (`V`) or `COMP-3` usage are mapped to native Java `int` or `long` primitives. Size error checking (`ON SIZE ERROR`) relies on inlined absolute limits rather than precise zoned-decimal overflows. Direct binary serialization of these fields requires temporary conversions to avoid signed overpunch formatting discrepancies.
+5.  **Divide-by-Zero Process Behavior Divergence**:
+    *   Division by zero in GnuCOBOL crashes the program (triggering operating system signals like `SIGFPE` with exit code 136 and outputting platform-dependent crash messages). Modernized Java programs handle division by zero via inline checks or standard arithmetic exceptions, terminating with exit code 1 or logging to stderr, leading to minor process exit-code and stderr formatting divergence.

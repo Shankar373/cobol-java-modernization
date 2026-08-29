@@ -16,7 +16,8 @@ COBOL_KEYWORDS = {
     "UNSTRING", "INSPECT", "TALLYING", "REPLACING", "CONVERTING", "POINTER", "CHARACTERS", "FIRST", "END-UNSTRING",
     "ALL", "LEADING", "WITH", "FOR", "GLOBAL", "PROGRAM", "END-PROGRAM", "SD", "SORT", "MERGE", "RELEASE", "ASCENDING", "DESCENDING", "SET", "ADDRESS", "OF",
     "REPORT", "REPORTS", "INITIATE", "GENERATE", "TERMINATE", "LINE", "COLUMN", "SOURCE", "SUM", "CONTROL", "RD",
-    "DELETE", "START", "END-DELETE", "END-START", "IS"
+    "DELETE", "START", "END-DELETE", "END-START", "IS", "REMAINDER", "ROUNDED",
+    "SIGN", "TRAILING", "SEPARATE", "CHARACTER"
 }
 
 class CobolToken:
@@ -380,7 +381,13 @@ class CobolLexer:
                     continue
 
                 # Other punctuation
-                if char in (",", "(", ")", "+", "-", "=", "*", "/"):
+                is_signed_num = char in ("+", "-") and (pos + 1 < seg_len) and code_segment[pos+1].isdigit()
+                if is_signed_num and self.tokens:
+                    prev_type = self.tokens[-1].type
+                    prev_val = self.tokens[-1].value
+                    if prev_type in ("IDENTIFIER", "LITERAL_NUMBER") or (prev_type == "PUNCTUATION" and prev_val == ")"):
+                        is_signed_num = False
+                if not is_signed_num and char in (",", "(", ")", "+", "-", "=", "*", "/"):
                     tok = CobolToken("PUNCTUATION", char, self.file_path, line_num, tok_col, tok_start_offset, tok_start_offset + 1)
                     self.tokens.append(tok)
                     pos += 1

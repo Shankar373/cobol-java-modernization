@@ -128,6 +128,59 @@ class CobolParser:
                 node.properties["sentence_id"] = self.sentence_id
             if self.current_program and "program" not in node.properties:
                 node.properties["program"] = self.current_program
+            
+            # Capability Matrix feature_id mapping
+            if node.kind == "STATEMENT":
+                stype = node.properties.get("statement_type", "").upper()
+                feature_id = "UNKNOWN"
+                if stype == "MOVE":
+                    feature_id = "MOVE"
+                elif stype == "IF":
+                    feature_id = "COBOL.IF"
+                elif stype == "EVALUATE":
+                    feature_id = "COBOL.EVALUATE"
+                elif stype == "PERFORM":
+                    feature_id = "COBOL.PERFORM"
+                elif stype == "CALL":
+                    is_dyn = node.properties.get("call_type") == "dynamic"
+                    feature_id = "COBOL.CALL_DYNAMIC" if is_dyn else "COBOL.CALL_STATIC"
+                elif stype == "EXEC_SQL":
+                    sql_props = node.properties.get("sql_props", {})
+                    sql_type = sql_props.get("sql_type", "").upper()
+                    if sql_type == "SELECT":
+                        feature_id = "SQL.DB2.SELECT"
+                    elif sql_type == "INSERT":
+                        feature_id = "SQL.DB2.INSERT"
+                    elif sql_type == "UPDATE":
+                        feature_id = "SQL.DB2.UPDATE"
+                    elif sql_type == "DELETE":
+                        feature_id = "SQL.DB2.DELETE"
+                    elif sql_type in ("DECLARE_CURSOR", "OPEN", "CLOSE", "FETCH"):
+                        feature_id = "SQL.DB2.CURSOR"
+                    elif sql_type in ("COMMIT", "ROLLBACK"):
+                        feature_id = "SQL.DB2.TRANSACTION"
+                    else:
+                        feature_id = "SQL.DB2.SELECT"
+                elif stype == "EXEC_CICS":
+                    feature_id = "CICS." + node.properties.get("cics_command", "UNKNOWN").upper()
+                else:
+                    if stype in ("COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"):
+                        feature_id = "COBOL.COMP" if stype == "COMPUTE" else stype
+                    elif stype in ("READ", "WRITE", "REWRITE", "DELETE", "START"):
+                        feature_id = "FILE.SEQUENTIAL"
+                    else:
+                        feature_id = stype
+                node.properties["feature_id"] = feature_id
+            elif node.kind == "VARIABLE":
+                props = node.properties
+                if props.get("redefines"):
+                    node.properties["feature_id"] = "COBOL.REDEFINES"
+                elif props.get("occurs"):
+                    node.properties["feature_id"] = "COBOL.OCCURS"
+                elif "COMP-3" in str(props.get("usage", "")):
+                    node.properties["feature_id"] = "COBOL.COMP_3"
+                elif "COMP" in str(props.get("usage", "")):
+                    node.properties["feature_id"] = "COBOL.COMP"
             original_add_node(node)
         self.ir.add_node = custom_add_node
 
@@ -436,6 +489,8 @@ class CobolParser:
                 self.match_is_keyword()
                 if self.match("KEYWORD", "INDEXED") or self.match("IDENTIFIER", "INDEXED"):
                     org_type = "INDEXED"
+                elif self.match("KEYWORD", "RELATIVE") or self.match("IDENTIFIER", "RELATIVE"):
+                    org_type = "RELATIVE"
                 elif self.match("KEYWORD", "LINE") or self.match("IDENTIFIER", "LINE"):
                     if not self.match("KEYWORD", "SEQUENTIAL") and not self.match("IDENTIFIER", "SEQUENTIAL"):
                         raise ParserDiagnostic("Expected SEQUENTIAL after LINE", self.file_path, self.peek().line, self.peek().column, self.peek().value, "")
@@ -456,6 +511,11 @@ class CobolParser:
                 self.consume("KEYWORD", "KEY")
                 self.match_is_keyword()
                 record_key = self.consume("IDENTIFIER", None, "Expected record key identifier").value
+            elif self.match("KEYWORD", "RELATIVE") or self.match("IDENTIFIER", "RELATIVE"):
+                if self.check("KEYWORD", "KEY") or (self.check("IDENTIFIER") and self.peek().value.upper() == "KEY"):
+                    self.current += 1
+                self.match_is_keyword()
+                record_key = self.consume("IDENTIFIER", None, "Expected relative key identifier").value
             elif self.match("KEYWORD", "FILE"):
                 self.consume("KEYWORD", "STATUS")
                 self.match_is_keyword()
@@ -589,6 +649,12 @@ class CobolParser:
                     else:
                         name = "FILLER"
                 
+                if name.upper() == "FILLER":
+                    if not hasattr(self, "filler_counter"):
+                        self.filler_counter = 0
+                    self.filler_counter += 1
+                    name = f"FILLER_{self.filler_counter}"
+                
                 props = {
                     "name": name,
                     "level": lvl,
@@ -646,6 +712,20 @@ class CobolParser:
                         
                     elif self.match("KEYWORD", "COMP") or self.match("KEYWORD", "COMP-3") or self.match("KEYWORD", "BINARY") or self.match("KEYWORD", "DISPLAY"):
                         props["usage"] = self.peek(-1).value.upper()
+                        
+                    elif self.match("KEYWORD", "SIGN"):
+                        self.match("KEYWORD", "IS")
+                        pos = "TRAILING"
+                        separate = False
+                        if self.match("KEYWORD", "LEADING"):
+                            pos = "LEADING"
+                        elif self.match("KEYWORD", "TRAILING"):
+                            pos = "TRAILING"
+                        if self.match("KEYWORD", "SEPARATE"):
+                            self.match("KEYWORD", "CHARACTER")
+                            separate = True
+                        props["sign_position"] = pos
+                        props["sign_separate"] = separate
                         
                     elif self.match("KEYWORD", "VALUE") or self.match("KEYWORD", "VALUES"):
                         self.match("KEYWORD", "IS")
@@ -889,6 +969,9 @@ class CobolParser:
             
         elif self.match("KEYWORD", "COMPUTE"):
             tgt_val = self.consume_subscripted_identifier("Expected target identifier")
+            rounded = False
+            if self.match("KEYWORD", "ROUNDED"):
+                rounded = True
             self.consume("PUNCTUATION", "=", "Expected '=' in COMPUTE")
             
             expr_parts = []
@@ -931,6 +1014,7 @@ class CobolParser:
                 properties={
                     "statement_type": "COMPUTE",
                     "target": tgt_val,
+                    "rounded": rounded,
                     "expression": " ".join(expr_parts),
                     "on_size_error_nodes": on_size_error_nodes,
                     "not_on_size_error_nodes": not_on_size_error_nodes
@@ -960,15 +1044,48 @@ class CobolParser:
                     mid_kw = "BY"
                 
             self.consume("KEYWORD", mid_kw, f"Expected {mid_kw} keyword")
-            tgt_val = self.consume_subscripted_identifier("Expected target/value identifier")
             
-            giving_tgt = None
+            to_idents = []
+            end_verb = f"END-{op}"
+            
+            while True:
+                if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "GIVING") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended:
+                    break
+                ident_tok = self.consume_val_or_subscript("Expected identifier or literal value")
+                ident = ident_tok.value
+                rounded = False
+                if self.match("KEYWORD", "ROUNDED"):
+                    rounded = True
+                to_idents.append({"name": ident, "rounded": rounded})
+                if not self.check("IDENTIFIER") and not self.check("KEYWORD") and not self.check("NUMBER") and not self.check("LITERAL_NUMBER"):
+                    break
+            
+            if not to_idents:
+                raise self.error(self.peek(), "Expected target/value identifier")
+            
+            giving_targets = []
+            remainder_tgt = None
             if self.match("KEYWORD", "GIVING"):
-                giving_tgt = self.consume_subscripted_identifier("Expected target identifier after GIVING")
+                while True:
+                    if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended:
+                        break
+                    
+                    if self.match("KEYWORD", "REMAINDER"):
+                        remainder_tgt = self.consume_subscripted_identifier("Expected remainder target identifier")
+                        break
+                        
+                    ident = self.consume_subscripted_identifier("Expected target identifier after GIVING")
+                    rounded = False
+                    if self.match("KEYWORD", "ROUNDED"):
+                        rounded = True
+                    giving_targets.append({"name": ident, "rounded": rounded})
+                    if not self.check("IDENTIFIER") and not self.check("KEYWORD", "REMAINDER"):
+                        break
+                if not giving_targets and not remainder_tgt:
+                    raise self.error(self.peek(), "Expected target identifier after GIVING")
                 
             on_size_error_nodes = []
             not_on_size_error_nodes = []
-            end_verb = f"END-{op}"
             
             while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.sentence_ended:
                 if self.match("KEYWORD", "ON") or self.check("KEYWORD", "SIZE"):
@@ -995,12 +1112,19 @@ class CobolParser:
             props = {
                 "statement_type": op,
                 "value": val_tok.value,
-                "target": giving_tgt if giving_tgt else tgt_val,
                 "on_size_error_nodes": on_size_error_nodes,
                 "not_on_size_error_nodes": not_on_size_error_nodes
             }
-            if giving_tgt:
-                props["operand2"] = tgt_val
+            if giving_targets:
+                props["giving"] = True
+                props["operand2"] = to_idents[0]["name"]
+                props["targets"] = giving_targets
+            else:
+                props["giving"] = False
+                props["targets"] = to_idents
+                
+            if remainder_tgt:
+                props["remainder"] = remainder_tgt
                 
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
@@ -1431,10 +1555,33 @@ class CobolParser:
             tgt_tok = self.consume_val("Expected subprogram target name")
             
             args = []
+            args_info = []
             if self.match("KEYWORD", "USING"):
-                while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.check("KEYWORD"):
+                current_mode = "REFERENCE"
+                while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not (self.check("KEYWORD") and self.peek().value.upper() in ("RETURNING", "GIVING")):
+                    if self.match("KEYWORD", "BY"):
+                        next_val = self.peek().value.upper()
+                        if next_val == "REFERENCE":
+                            self.current += 1
+                            current_mode = "REFERENCE"
+                            continue
+                        elif next_val == "CONTENT":
+                            self.current += 1
+                            current_mode = "CONTENT"
+                            continue
+                        elif next_val == "VALUE":
+                            self.current += 1
+                            current_mode = "VALUE"
+                            continue
+                        else:
+                            raise ParserDiagnostic("Expected REFERENCE, CONTENT, or VALUE after BY", self.file_path, self.peek().line, self.peek().column, self.peek().value, "")
+                    
                     tok = self.consume_val("Expected USING argument name")
                     args.append(tok.value)
+                    args_info.append({
+                        "value": tok.value,
+                        "mode": current_mode
+                    })
             
             returning_val = None
             if self.match("KEYWORD", "RETURNING") or self.match("KEYWORD", "GIVING"):
@@ -1450,6 +1597,7 @@ class CobolParser:
                     "statement_type": "CALL",
                     "target": tgt_tok.value,
                     "arguments": args,
+                    "arguments_info": args_info,
                     "returning": returning_val
                 },
                 source_file=self.file_path,
@@ -2763,19 +2911,34 @@ def parse_sql_tokens(tokens):
     elif first == "FETCH":
         cursor_name = tokens[1]
         into_vars = []
+        into_inds = []
         if len(tokens) > 2 and tokens[2].upper() == "INTO":
             i = 3
             while i < len(tokens):
                 t = tokens[i]
-                if t.startswith(":"):
-                    into_vars.append(t[1:])
-                elif t != ",":
-                    into_vars.append(t)
+                if t == ",":
+                    i += 1
+                    continue
+                var_name = t[1:] if t.startswith(":") else t
+                ind_name = None
+                if i + 1 < len(tokens):
+                    next_t = tokens[i+1]
+                    if next_t != "," and (next_t.startswith(":") or next_t.upper().endswith("-IND") or next_t.upper() == "INDICATOR"):
+                        if next_t.upper() == "INDICATOR" and i + 2 < len(tokens):
+                            ind_t = tokens[i+2]
+                            ind_name = ind_t[1:] if ind_t.startswith(":") else ind_t
+                            i += 2
+                        else:
+                            ind_name = next_t[1:] if next_t.startswith(":") else next_t
+                            i += 1
+                into_vars.append(var_name)
+                into_inds.append(ind_name)
                 i += 1
         return {
             "sql_type": "FETCH",
             "cursor_name": cursor_name,
-            "into_variables": into_vars
+            "into_variables": into_vars,
+            "into_indicators": into_inds
         }
         
     elif first == "SELECT":
@@ -2788,14 +2951,28 @@ def parse_sql_tokens(tokens):
             i += 1
             
         into_vars = []
+        into_inds = []
         if i < len(tokens) and tokens[i].upper() == "INTO":
             i += 1
             while i < len(tokens) and tokens[i].upper() != "FROM":
                 t = tokens[i]
-                if t.startswith(":"):
-                    into_vars.append(t[1:])
-                elif t != ",":
-                    into_vars.append(t)
+                if t == ",":
+                    i += 1
+                    continue
+                var_name = t[1:] if t.startswith(":") else t
+                ind_name = None
+                if i + 1 < len(tokens) and tokens[i+1].upper() != "FROM":
+                    next_t = tokens[i+1]
+                    if next_t != "," and (next_t.startswith(":") or next_t.upper().endswith("-IND") or next_t.upper() == "INDICATOR"):
+                        if next_t.upper() == "INDICATOR" and i + 2 < len(tokens) and tokens[i+2].upper() != "FROM":
+                            ind_t = tokens[i+2]
+                            ind_name = ind_t[1:] if ind_t.startswith(":") else ind_t
+                            i += 2
+                        else:
+                            ind_name = next_t[1:] if next_t.startswith(":") else next_t
+                            i += 1
+                into_vars.append(var_name)
+                into_inds.append(ind_name)
                 i += 1
                 
         if i >= len(tokens) or tokens[i].upper() != "FROM":
@@ -2839,6 +3016,7 @@ def parse_sql_tokens(tokens):
             "sql_type": "SELECT",
             "columns": cols,
             "into_variables": into_vars,
+            "into_indicators": into_inds,
             "table": tables[0] if tables else None,
             "tables": tables,
             "alias_map": alias_map,
@@ -2926,6 +3104,9 @@ def extract_host_variables(props):
     vars = []
     for v in props.get("into_variables", []):
         vars.append(v)
+    for v in props.get("into_indicators", []):
+        if v:
+            vars.append(v)
     for p in props.get("predicates", []):
         if "value" in p:
             val = p["value"]
