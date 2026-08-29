@@ -42,7 +42,7 @@
 | SUBTRACT | `DIFFERENTIALLY_VERIFIED` | SUBTRACT CORRESPONDING **unsupported** |
 | MULTIPLY | `DIFFERENTIALLY_VERIFIED` | MULTIPLY CORRESPONDING **unsupported** |
 | DIVIDE / DIVIDE … REMAINDER | `DIFFERENTIALLY_VERIFIED` | Recurring decimal truncated to target PIC scale |
-| COMPUTE (expression) | `DIFFERENTIALLY_VERIFIED` | `**` exponent falls back to `Math.pow()` (double) for fractional exponents — **P0 bug** |
+| COMPUTE (expression) | `DIFFERENTIALLY_VERIFIED` | Fractional exponents are unsupported and fail-fast with a clear diagnostic (no double math) |
 | ROUNDED | `DIFFERENTIALLY_VERIFIED` | Only `NEAREST_AWAY_FROM_ZERO` (HALF_UP) emitted; `ROUNDED MODE IS` clause not supported |
 | ON SIZE ERROR / NOT ON SIZE ERROR | `DIFFERENTIALLY_VERIFIED` | NOT ON SIZE ERROR path has limited test coverage |
 
@@ -174,7 +174,7 @@
 | OCCURS DEPENDING ON (runtime) | `GENERATED_ONLY` | Generated but bounds not verified |
 | SORT with INPUT/OUTPUT PROCEDURE | `UNIT_TESTED` | Partially; complex PROCEDURE not verified |
 | SET ADDRESS OF linkage | `UNSUPPORTED` | |
-| Non-integer COMPUTE ** exponent | `GENERATED_ONLY` | Falls back to `Math.pow()` — **P0 known bug** |
+| Non-integer COMPUTE ** exponent | `GENERATED_ONLY` | Fractional exponents are unsupported and fail-fast with a clear diagnostic (no double math) |
 | COND=ONLY / COND=EVEN (JCL) | `GENERATED_ONLY` | Not verified |
 
 ---

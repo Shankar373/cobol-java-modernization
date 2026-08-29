@@ -233,9 +233,6 @@ public class CobolFormatHelper {
         return a.remainder(b);
     }
 
-    public static double mod(double a, double b) {
-        return a % b;
-    }
 
     /**
      * Apply COBOL PICTURE storage/truncation semantics to an arithmetic result.

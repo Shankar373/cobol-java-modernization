@@ -211,12 +211,12 @@
       "tests/test_parity_fixtures.py::test_milestone_b_parity[milestone_b_compute_mixed]"
     ],
     "known_limitations": [
-      "Power operator falls back to Math.pow() for fractional exponents (double contamination \u2014 P0)"
+      "Fractional exponents are unsupported and fail-fast with a clear diagnostic (no double math)"
     ],
     "unsupported_patterns": [
       "Non-integer COMPUTE ** exponent"
     ],
-    "recommended_next_test": "Fix CobolArithmetic.power() to pure BigDecimal",
+    "recommended_next_test": "Verify runtime exception on non-integer exponent",
     "notes": ""
   },
   "ARITH.ROUNDED": {

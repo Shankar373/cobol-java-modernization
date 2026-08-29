@@ -195,9 +195,9 @@ CAPABILITIES: Dict[str, Dict[str, Any]] = {
         generator_function="NativeProgramGenerator._emit_compute",
         runtime_helper="CobolArithmetic (all ops)",
         existing_tests=["tests/test_parity_fixtures.py::test_milestone_b_parity[milestone_b_compute_mixed]"],
-        known_limitations=["Power operator falls back to Math.pow() for fractional exponents (double contamination — P0)"],
+        known_limitations=["Fractional exponents are unsupported and fail-fast with a clear diagnostic (no double math)"],
         unsupported_patterns=["Non-integer COMPUTE ** exponent"],
-        recommended_next_test="Fix CobolArithmetic.power() to pure BigDecimal",
+        recommended_next_test="Verify runtime exception on non-integer exponent",
     ),
     "ARITH.ROUNDED": _e(
         EvidenceLevel.DIFFERENTIALLY_VERIFIED,
@@ -698,16 +698,43 @@ CAPABILITIES: Dict[str, Dict[str, Any]] = {
 # Convenience functions (backward-compatible API surface)
 # -----------------------------------------------------------------------
 
+_LEGACY_SHIMS = {
+    "MOVE": EvidenceLevel.UNIT_TESTED,
+    "COMPUTE": EvidenceLevel.UNIT_TESTED,
+    "ADD": EvidenceLevel.UNIT_TESTED,
+    "SUBTRACT": EvidenceLevel.UNIT_TESTED,
+    "MULTIPLY": EvidenceLevel.UNIT_TESTED,
+    "DIVIDE": EvidenceLevel.UNIT_TESTED,
+    "COMP": EvidenceLevel.UNIT_TESTED,
+    "COMP-3": EvidenceLevel.UNIT_TESTED,
+    "IF": EvidenceLevel.UNIT_TESTED,
+    "EVALUATE": EvidenceLevel.UNIT_TESTED,
+    "PERFORM": EvidenceLevel.UNIT_TESTED,
+    "PERFORM_THRU": EvidenceLevel.UNIT_TESTED,
+    "STATIC_CALL": EvidenceLevel.UNIT_TESTED,
+    "DYNAMIC_CALL": EvidenceLevel.GENERATED_ONLY,
+    "EXEC_SQL": EvidenceLevel.GENERATED_ONLY,
+    "EXEC_CICS": EvidenceLevel.PARSED_ONLY,
+    "JCL": EvidenceLevel.GENERATED_ONLY,
+    "IMS_MQ": EvidenceLevel.UNSUPPORTED,
+    "IMS_DB": EvidenceLevel.UNSUPPORTED,
+    "MQ_SERIES": EvidenceLevel.UNSUPPORTED,
+}
+
+
 def classify_feature(name: str) -> str:
     """Return evidence_level for a feature name (backward-compatible)."""
-    spec = CAPABILITIES.get(name) or CAPABILITIES.get(name.upper())
-    if not spec:
-        if name.upper().startswith("CICS."):
-            return EvidenceLevel.PARSED_ONLY
-        if name.upper().startswith("BMS."):
-            return EvidenceLevel.PARSED_ONLY
-        return EvidenceLevel.UNSUPPORTED
-    return spec["evidence_level"]
+    name_upper = name.upper()
+    spec = CAPABILITIES.get(name) or CAPABILITIES.get(name_upper)
+    if spec:
+        return spec["evidence_level"]
+    if name_upper in _LEGACY_SHIMS:
+        return _LEGACY_SHIMS[name_upper]
+    if name_upper.startswith("CICS."):
+        return EvidenceLevel.PARSED_ONLY
+    if name_upper.startswith("BMS."):
+        return EvidenceLevel.PARSED_ONLY
+    return EvidenceLevel.UNSUPPORTED
 
 def get_unsupported_features(features: List[str]) -> List[str]:
     """Filter list of detected features for UNSUPPORTED/PARSED_ONLY items."""

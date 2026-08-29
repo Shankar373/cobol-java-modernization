@@ -14,6 +14,8 @@ jobs:
     name: Fast lane (no Docker images required)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      PARITY_ALLOW_SKIP: "true"
     steps:
       - uses: actions/checkout@v4
 

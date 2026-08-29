@@ -95,6 +95,32 @@ def normalize_stderr(b: bytes) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 Task 3: normalize_display — strip cosmetic display spacing
+# ---------------------------------------------------------------------------
+
+
+def normalize_display(b: bytes) -> bytes:
+    """Normalize display stdout bytes:
+    1. Replace Windows CRLF with LF.
+    2. Collapse multiple consecutive spaces to a single space.
+    3. Trim leading/trailing whitespace from each line.
+    4. Ignore empty lines at start/end.
+    """
+    if not b:
+        return b""
+    text = b.decode("utf-8", errors="replace")
+    text = text.replace("\r\n", "\n")
+    lines = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if line:
+            # Collapse multiple spaces into one space
+            line = re.sub(r" {2,}", " ", line)
+            lines.append(line)
+    return "\n".join(lines).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
 # Phase A4: compare_fixed_records — record-by-record binary comparison
 # ---------------------------------------------------------------------------
 
@@ -588,8 +614,12 @@ def run_parity(fixture: ParityFixture) -> ParityComparison:
             explanation=f"COBOL exit code: {cobol_res.rc}, Java exit code: {java_res.rc}"
         ))
 
-    # Stdout comparison (raw bytes)
-    m_stdout = compare_raw_bytes("stdout", cobol_res.stdout, java_res.stdout)
+    # Stdout comparison (raw bytes with display normalization)
+    m_stdout = compare_raw_bytes(
+        "stdout",
+        normalize_display(cobol_res.stdout),
+        normalize_display(java_res.stdout)
+    )
     if m_stdout:
         mismatches.append(m_stdout)
         

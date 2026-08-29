@@ -98,10 +98,13 @@ public class CobolArithmetic {
     public static BigDecimal power(BigDecimal a, BigDecimal b) {
         try {
             int exponent = b.intValueExact();
+            if (exponent < 0) {
+                BigDecimal basePow = a.pow(-exponent, MC);
+                return BigDecimal.ONE.divide(basePow, MC);
+            }
             return a.pow(exponent, MC);
         } catch (ArithmeticException e) {
-            double res = Math.pow(a.doubleValue(), b.doubleValue());
-            return new BigDecimal(res, MC);
+            throw new ArithmeticException("COBOL_UNSUPPORTED_NUMERIC_FEATURE: Fractional or out-of-range exponentiation (" + a + " ** " + b + ") is unsupported under no-double policy.");
         }
     }
 
