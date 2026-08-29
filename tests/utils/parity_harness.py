@@ -1,10 +1,12 @@
+import hashlib
 import os
+import re
 import shutil
 import tempfile
 import subprocess
 import pytest
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Environment defaults
 PARITY_RUNTIME = os.environ.get("PARITY_RUNTIME", "docker")
@@ -35,6 +37,11 @@ class ExecutionResult:
     duration_seconds: float = 0.0
     termination_status: str = "normal"  # "normal" | "timeout" | "nonzero_exit" | "error"
     error_message: str = ""
+    # Phase A4 extensions
+    file_hashes: Dict[str, str] = field(default_factory=dict)     # SHA-256 hex per output file
+    file_sizes: Dict[str, int] = field(default_factory=dict)      # byte length per output file
+    record_counts: Dict[str, int] = field(default_factory=dict)   # fixed-length record count (populated by caller)
+    diagnostics: List[dict] = field(default_factory=list)         # structured diagnostic entries
 
 @dataclass
 class ParityMismatch:
@@ -45,12 +52,125 @@ class ParityMismatch:
     cobol_hex: str = ""
     java_hex: str = ""
     explanation: str = ""
+    # Phase A4 extensions
+    record_number: int = -1      # 1-based record index for fixed-length files
+    field_name: str = ""         # COBOL field name where mismatch occurred (if known)
+    byte_offset: int = -1        # absolute byte offset within the record
+    cobol_decoded: str = ""      # human-readable decoded COBOL value
+    java_decoded: str = ""       # human-readable decoded Java value
+    likely_cause: str = ""       # e.g. "COMP-3 encoding differs", "trailing space handling"
+    relevant_paragraph: str = "" # COBOL paragraph or section name (if known)
 
 @dataclass
 class ParityComparison:
     status: str  # "PASS" | "FAIL" | "SKIP"
     mismatches: List[ParityMismatch] = field(default_factory=list)
     skip_reason: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Phase A4: normalize_stderr — strip non-observable GnuCOBOL boilerplate
+# ---------------------------------------------------------------------------
+
+_GNUCOBOL_NOISE_PATTERNS = [
+    re.compile(rb"^GnuCOBOL \d+\.\d+\.\d+.*$", re.MULTILINE),
+    re.compile(rb"^cobc \(GnuCOBOL\).*$", re.MULTILINE),
+    re.compile(rb"^\s*libcob .*$", re.MULTILINE),
+    re.compile(rb"^\s*Build.*from.*$", re.MULTILINE),
+    re.compile(rb"^\s*Packaged.*$", re.MULTILINE),
+    re.compile(rb"^\s*C version.*$", re.MULTILINE),
+    re.compile(rb"^\s*$", re.MULTILINE),  # blank lines
+]
+
+
+def normalize_stderr(b: bytes) -> bytes:
+    """Strip GnuCOBOL version headers, timing, and blank lines from stderr
+    before byte-exact comparison so only semantically observable lines differ.
+    """
+    for pat in _GNUCOBOL_NOISE_PATTERNS:
+        b = pat.sub(b"", b)
+    # Collapse consecutive newlines
+    b = re.sub(rb"\n{2,}", b"\n", b)
+    return b.strip()
+
+
+# ---------------------------------------------------------------------------
+# Phase A4: compare_fixed_records — record-by-record binary comparison
+# ---------------------------------------------------------------------------
+
+
+def compare_fixed_records(
+    target: str,
+    record_len: int,
+    cobol_bytes: bytes,
+    java_bytes: bytes,
+) -> List[ParityMismatch]:
+    """Compare two fixed-length record files byte-by-byte, record-by-record.
+
+    Returns a list of ParityMismatch objects — one per differing record.
+    Each mismatch includes the record number, first differing byte offset,
+    and hex context around the difference.
+    """
+    mismatches: List[ParityMismatch] = []
+
+    if record_len <= 0:
+        # Fall back to whole-file comparison
+        m = compare_raw_bytes(target, cobol_bytes, java_bytes)
+        return [m] if m else []
+
+    cobol_records = [
+        cobol_bytes[i: i + record_len]
+        for i in range(0, len(cobol_bytes), record_len)
+        if cobol_bytes[i: i + record_len]
+    ]
+    java_records = [
+        java_bytes[i: i + record_len]
+        for i in range(0, len(java_bytes), record_len)
+        if java_bytes[i: i + record_len]
+    ]
+
+    max_records = max(len(cobol_records), len(java_records))
+    for rec_idx in range(max_records):
+        c_rec = cobol_records[rec_idx] if rec_idx < len(cobol_records) else b""
+        j_rec = java_records[rec_idx] if rec_idx < len(java_records) else b""
+
+        if c_rec == j_rec:
+            continue
+
+        # Find first differing byte within the record
+        first_diff = 0
+        for bi in range(min(len(c_rec), len(j_rec))):
+            if c_rec[bi] != j_rec[bi]:
+                first_diff = bi
+                break
+        else:
+            first_diff = min(len(c_rec), len(j_rec))
+
+        ctx_start = max(0, first_diff - 4)
+        ctx_end_c = min(len(c_rec), first_diff + 8)
+        ctx_end_j = min(len(j_rec), first_diff + 8)
+        c_slice = c_rec[ctx_start:ctx_end_c]
+        j_slice = j_rec[ctx_start:ctx_end_j]
+
+        mismatches.append(
+            ParityMismatch(
+                target=target,
+                offset=rec_idx * record_len + first_diff,
+                cobol_val=c_slice,
+                java_val=j_slice,
+                cobol_hex=c_slice.hex(" "),
+                java_hex=j_slice.hex(" "),
+                explanation=(
+                    f"Record {rec_idx + 1} differs at byte {first_diff} within record. "
+                    f"COBOL record length: {len(c_rec)}, Java record length: {len(j_rec)}"
+                ),
+                record_number=rec_idx + 1,
+                byte_offset=first_diff,
+                likely_cause="Fixed-length record content mismatch — check COMP-3 encoding, sign handling, or trailing-space padding",
+            )
+        )
+
+    return mismatches
 
 def run_cmd_bytes(cmd: List[str], stdin_bytes: bytes = None, timeout: int = 120) -> Tuple[int, bytes, bytes, str]:
     try:
@@ -104,14 +224,22 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
         
         # Read output files
         outputs = {}
+        hashes = {}
+        sizes = {}
         for f_name in fixture.declared_outputs:
             p_path = os.path.join(run_dir, f_name)
             if os.path.exists(p_path):
                 with open(p_path, "rb") as f:
-                    outputs[f_name] = f.read()
+                    data = f.read()
+                outputs[f_name] = data
+                hashes[f_name] = hashlib.sha256(data).hexdigest()
+                sizes[f_name] = len(data)
             else:
                 outputs[f_name] = b""
-        return ExecutionResult(rc, out, err, files=outputs, termination_status=term)
+                hashes[f_name] = ""
+                sizes[f_name] = 0
+        return ExecutionResult(rc, out, err, files=outputs, termination_status=term,
+                               file_hashes=hashes, file_sizes=sizes)
         
     else:
         # Docker canonical runtime execution
@@ -152,14 +280,22 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
 
         # Read output files
         outputs = {}
+        hashes = {}
+        sizes = {}
         for f_name in fixture.declared_outputs:
             p_path = os.path.join(run_dir, f_name)
             if os.path.exists(p_path):
                 with open(p_path, "rb") as f:
-                    outputs[f_name] = f.read()
+                    data = f.read()
+                outputs[f_name] = data
+                hashes[f_name] = hashlib.sha256(data).hexdigest()
+                sizes[f_name] = len(data)
             else:
                 outputs[f_name] = b""
-        return ExecutionResult(rc, out, err, files=outputs, termination_status=term)
+                hashes[f_name] = ""
+                sizes[f_name] = 0
+        return ExecutionResult(rc, out, err, files=outputs, termination_status=term,
+                               file_hashes=hashes, file_sizes=sizes)
 
 def run_java_transpiled(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
     # 1. Transpile COBOL source to Java source
@@ -283,14 +419,22 @@ public class SpringContextHelper {
 
         # Read output files
         outputs = {}
+        hashes = {}
+        sizes = {}
         for f_name in fixture.declared_outputs:
             p_path = os.path.join(run_dir, f_name)
             if os.path.exists(p_path):
                 with open(p_path, "rb") as f:
-                    outputs[f_name] = f.read()
+                    data = f.read()
+                outputs[f_name] = data
+                hashes[f_name] = hashlib.sha256(data).hexdigest()
+                sizes[f_name] = len(data)
             else:
                 outputs[f_name] = b""
-        return ExecutionResult(rc, out, err, files=outputs, termination_status=term)
+                hashes[f_name] = ""
+                sizes[f_name] = 0
+        return ExecutionResult(rc, out, err, files=outputs, termination_status=term,
+                               file_hashes=hashes, file_sizes=sizes)
 
     else:
         # Docker Temurin canonical runtimes execution
@@ -338,14 +482,22 @@ public class SpringContextHelper {
 
         # Read output files
         outputs = {}
+        hashes = {}
+        sizes = {}
         for f_name in fixture.declared_outputs:
             p_path = os.path.join(run_dir, f_name)
             if os.path.exists(p_path):
                 with open(p_path, "rb") as f:
-                    outputs[f_name] = f.read()
+                    data = f.read()
+                outputs[f_name] = data
+                hashes[f_name] = hashlib.sha256(data).hexdigest()
+                sizes[f_name] = len(data)
             else:
                 outputs[f_name] = b""
-        return ExecutionResult(rc, out, err, files=outputs, termination_status=term)
+                hashes[f_name] = ""
+                sizes[f_name] = 0
+        return ExecutionResult(rc, out, err, files=outputs, termination_status=term,
+                               file_hashes=hashes, file_sizes=sizes)
 
 def compare_raw_bytes(target: str, cobol_bytes: bytes, java_bytes: bytes) -> ParityMismatch:
     if cobol_bytes == java_bytes:
@@ -441,8 +593,12 @@ def run_parity(fixture: ParityFixture) -> ParityComparison:
     if m_stdout:
         mismatches.append(m_stdout)
         
-    # Stderr comparison (raw bytes)
-    m_stderr = compare_raw_bytes("stderr", cobol_res.stderr, java_res.stderr)
+    # Stderr comparison — normalize before comparing to strip GnuCOBOL boilerplate
+    m_stderr = compare_raw_bytes(
+        "stderr",
+        normalize_stderr(cobol_res.stderr),
+        normalize_stderr(java_res.stderr),
+    )
     if m_stderr:
         mismatches.append(m_stderr)
 
