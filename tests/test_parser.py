@@ -147,3 +147,62 @@ def test_parser_unsupported_and_diagnostics():
     assert len(parser.diagnostics) > 0
     assert parser.diagnostics[0].line == 3
     assert parser.diagnostics[0].token_value == "@"
+
+def test_parser_arithmetic_regression_parsing():
+    template = (
+        "000100 IDENTIFICATION DIVISION.\n"
+        "000200 PROGRAM-ID. TESTPROG.\n"
+        "000300 PROCEDURE DIVISION.\n"
+        "000400 MAIN-PARA.\n"
+        "000500     {}\n"
+    )
+    cases = [
+        (template.format("COMPUTE X = A - 1."), "A - 1"),
+        (template.format("COMPUTE X = A -1."), "A - 1"),
+        (template.format("COMPUTE X = A - -1."), "A - -1"),
+    ]
+    for source, expected_expr in cases:
+        lexer = CobolLexer("test.cob", format_mode="fixed")
+        tokens = lexer.tokenize(source)
+        parser = CobolParser(tokens, "test.cob")
+        ir = parser.parse()
+        stmt = [n for n in ir.nodes.values() if n.kind == "STATEMENT" and n.properties["statement_type"] == "COMPUTE"][0]
+        assert stmt.properties["expression"] == expected_expr
+
+    # Test SUBTRACT 1 FROM A GIVING X
+    lexer = CobolLexer("test.cob", format_mode="fixed")
+    tokens = lexer.tokenize(template.format("SUBTRACT 1 FROM A GIVING X."))
+    parser = CobolParser(tokens, "test.cob")
+    ir = parser.parse()
+    stmt = [n for n in ir.nodes.values() if n.kind == "STATEMENT" and n.properties["statement_type"] == "SUBTRACT"][0]
+    assert stmt.properties["value"] == "1"
+    assert stmt.properties["targets"][0]["name"] == "X"
+
+    # Test SUBTRACT 1 FROM A (in-place)
+    lexer = CobolLexer("test.cob", format_mode="fixed")
+    tokens = lexer.tokenize(template.format("SUBTRACT 1 FROM A."))
+    parser = CobolParser(tokens, "test.cob")
+    ir = parser.parse()
+    stmt = [n for n in ir.nodes.values() if n.kind == "STATEMENT" and n.properties["statement_type"] == "SUBTRACT"][0]
+    assert stmt.properties["value"] == "1"
+    assert stmt.properties["targets"][0]["name"] == "A"
+def test_parser_call_modifiers_parsing():
+    template = (
+        "000100 IDENTIFICATION DIVISION.\n"
+        "000200 PROGRAM-ID. TESTPROG.\n"
+        "000300 PROCEDURE DIVISION.\n"
+        "000400 MAIN-PARA.\n"
+        "000500     CALL \"SUBLIB\" USING BY REFERENCE A BY CONTENT B BY VALUE C.\n"
+    )
+    lexer = CobolLexer("test.cob", format_mode="fixed")
+    tokens = lexer.tokenize(template)
+    parser = CobolParser(tokens, "test.cob")
+    ir = parser.parse()
+    stmt = [n for n in ir.nodes.values() if n.kind == "STATEMENT" and n.properties["statement_type"] == "CALL"][0]
+    assert stmt.properties["target"] == "SUBLIB"
+    assert stmt.properties["arguments"] == ["A", "B", "C"]
+    assert stmt.properties["arguments_info"] == [
+        {"value": "A", "mode": "REFERENCE"},
+        {"value": "B", "mode": "CONTENT"},
+        {"value": "C", "mode": "VALUE"}
+    ]

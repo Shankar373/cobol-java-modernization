@@ -18,5 +18,5 @@ def test_move_multiple_targets():
     }
     
     java_stmt = trans.translate_statement(node_move)
-    expected = 'var_b = new BigDecimal("100");\n        var_c = 100;'
+    expected = 'var_b.assign(new BigDecimal("100"), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);\n        var_c = 100;'
     assert java_stmt == expected
