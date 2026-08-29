@@ -1,0 +1,229 @@
+{
+  "PIC_USAGE": {
+    "parser_location": "modernize/parser.py:parse_data_item",
+    "semantic_ir": "VARIABLE / DATA_ITEM",
+    "generator_location": "modernize/native_generator.py:get_java_type",
+    "runtime_helper": "None",
+    "test_files": ["tests/test_native_type_mapping.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Numeric (9), alphanumeric (X), signed numeric (S9)",
+    "known_limitations": "Implied decimals (V) map to BigDecimal division checks",
+    "evidence_links": [
+      "milestone_b_zero_fill_formatting",
+      "milestone_b_unsigned_drops_sign"
+    ]
+  },
+  "COMP_3": {
+    "parser_location": "modernize/parser.py:parse_data_item",
+    "semantic_ir": "VARIABLE (usage='COMP-3')",
+    "generator_location": "modernize/native_generator.py:get_java_type",
+    "runtime_helper": "parseSigned / formatSigned",
+    "test_files": ["tests/test_phase8_arithmetic_errors.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Standard computational packed decimal COMP-3 structures",
+    "known_limitations": "Implied signs are formatted as signed overpunches",
+    "evidence_links": [
+      "milestone_b_comp3_roundtrip"
+    ]
+  },
+  "ARITHMETIC_ROUNDING": {
+    "parser_location": "modernize/parser.py:parse_add_statement",
+    "semantic_ir": "STATEMENT (ADD/SUB/MUL/DIV)",
+    "generator_location": "modernize/native_generator.py:_translate_statement_inner",
+    "runtime_helper": "checkSizeError",
+    "test_files": ["tests/test_phase8_arithmetic_errors.py", "tests/test_parity_fixtures.py"],
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
+    "supported_subset": "Standard addition, subtraction, multiplication, and division statements",
+    "known_limitations": "Divisions without explicit ROUNDED clause default to local truncation scaling",
+    "evidence_links": [
+      "milestone_b_pic9_integer_arithmetic_baseline",
+      "milestone_b_pics9_signed_arithmetic",
+      "milestone_b_pic9v99_implied_decimal_assignment",
+      "milestone_b_division_scale_normalization",
+      "milestone_b_rounded_arithmetic",
+      "milestone_b_non_rounded_truncation_arithmetic",
+      "milestone_b_positive_target_field_overflow",
+      "milestone_b_negative_target_field_overflow",
+      "milestone_b_multi_receiver",
+      "milestone_b_divide_remainder",
+      "milestone_b_division_terminating",
+      "milestone_b_compute_mixed",
+      "milestone_b_negative_halfway",
+      "milestone_b_divide_by_zero_with_size_error",
+      "milestone_b_divide_by_zero_without_size_error",
+      "milestone_b_high_scale_divide",
+      "milestone_b_negative_subtract"
+    ]
+  },
+  "MOVE": {
+    "parser_location": "modernize/parser.py:parse_move_statement",
+    "semantic_ir": "STATEMENT (MOVE)",
+    "generator_location": "modernize/native_generator.py:generate_assignment",
+    "runtime_helper": "padString",
+    "test_files": ["tests/test_native_move_multi.py", "tests/test_parity_fixtures.py"],
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
+    "supported_subset": "Numeric/alphanumeric conversions, value padding, and truncation",
+    "known_limitations": "Group-to-group moves are mapped as string-padded chunk operations",
+    "evidence_links": [
+      "milestone_a_basic_move"
+    ]
+  },
+  "COMPUTE": {
+    "parser_location": "modernize/parser.py:parse_compute_statement",
+    "semantic_ir": "STATEMENT (COMPUTE)",
+    "generator_location": "modernize/native_generator.py:_translate_statement_inner",
+    "runtime_helper": "ExpressionTranslator",
+    "test_files": ["tests/test_phase8_expressions.py", "tests/test_parity_fixtures.py"],
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
+    "supported_subset": "standard math expression formulas and infix operators",
+    "known_limitations": "Div-by-zero checks are evaluated inline",
+    "evidence_links": [
+      "milestone_a_integer_compute_add"
+    ]
+  },
+  "REDEFINES": {
+    "parser_location": "modernize/parser.py:parse_data_item",
+    "semantic_ir": "VARIABLE (redefines)",
+    "generator_location": "modernize/native_generator.py:generate_class_source",
+    "runtime_helper": "Formatted getters/setters",
+    "test_files": ["tests/test_phase8_redefines.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Base level numeric and string redefinitions",
+    "known_limitations": "Redefines overlapping dynamic arrays are not backed by byte-buffer memory slices",
+    "evidence_links": []
+  },
+  "OCCURS_DEPENDING_ON": {
+    "parser_location": "modernize/parser.py:parse_data_item",
+    "semantic_ir": "VARIABLE (occurs, depending_on)",
+    "generator_location": "modernize/native_generator.py:_translate_subscripts",
+    "runtime_helper": "checkBounds",
+    "test_files": ["tests/test_native_occurs.py", "tests/test_phase8_occurs_depending.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Multi-dimensional Occurs tables, dynamic occurrences depending on limit variable",
+    "known_limitations": "Subscript indices are mapped to 0-based offset integers",
+    "evidence_links": []
+  },
+  "COPYBOOKS": {
+    "parser_location": "modernize/lexer.py:preprocess_copybooks",
+    "semantic_ir": "None (Expanded in lexer preprocessor)",
+    "generator_location": "Inline statements",
+    "runtime_helper": "None",
+    "test_files": ["tests/test_lexer.py", "tests/test_proleap_copybooks.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Standard copybooks resolved via local directories list",
+    "known_limitations": "Bypasses dynamic path overrides",
+    "evidence_links": []
+  },
+  "FILE_LINE_SEQUENTIAL_WRITE": {
+    "parser_location": "modernize/parser.py:parse_write_statement",
+    "semantic_ir": "STATEMENT (WRITE)",
+    "generator_location": "modernize/native_generator.py:generate_io_methods",
+    "runtime_helper": "BufferedWriter",
+    "test_files": ["tests/test_parity_fixtures.py"],
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
+    "supported_subset": "Writing ASCII/UTF-8 line-sequential text records with trailing whitespace trimmed.",
+    "known_limitations": "Does not support EBCDIC conversions or RDW formatting",
+    "evidence_links": [
+      "milestone_a_line_sequential_file"
+    ]
+  },
+  "FILE_SEQUENTIAL_RELATIVE_INDEXED": {
+    "parser_location": "modernize/parser.py:parse_read_statement",
+    "semantic_ir": "STATEMENT (READ/WRITE/REWRITE/DELETE)",
+    "generator_location": "modernize/native_generator.py:generate_io_methods",
+    "runtime_helper": "BufferedReader / BufferedWriter, SpringContextHelper.jdbcTemplate",
+    "test_files": ["tests/test_phase8_file_semantics.py", "tests/test_vsam_rrds.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Fixed-length sequential, database emulated relative, and indexed random access",
+    "known_limitations": "Trailing whitespace trimming must not be applied to fixed-width or binary records",
+    "evidence_links": []
+  },
+  "FILE_STATUS": {
+    "parser_location": "modernize/parser.py:parse_file_control",
+    "semantic_ir": "FILE_CONTROL (status_var)",
+    "generator_location": "modernize/native_generator.py:generate_io_methods",
+    "runtime_helper": "Inline assignments",
+    "test_files": ["tests/test_phase8_file_semantics.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Status codes '00', '10', '23', '35'",
+    "known_limitations": "Standard status variables must be defined in WORKING-STORAGE",
+    "evidence_links": []
+  },
+  "PERFORM_THRU": {
+    "parser_location": "modernize/parser.py:parse_perform_statement",
+    "semantic_ir": "STATEMENT (PERFORM)",
+    "generator_location": "modernize/native_generator.py:_translate_statement_inner",
+    "runtime_helper": "Paragraph runners index loop",
+    "test_files": ["tests/test_native_perform_varying.py", "tests/test_native_paragraph_control.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Loop increments, conditional looping, paragraph block boundaries execution",
+    "known_limitations": "Paragraph loops require paragraph index lists to support performing across boundaries",
+    "evidence_links": []
+  },
+  "GOTO": {
+    "parser_location": "modernize/parser.py:parse_goto_statement",
+    "semantic_ir": "STATEMENT (GOTO)",
+    "generator_location": "modernize/native_generator.py:_translate_statement_inner",
+    "runtime_helper": "nextParagraphIndex",
+    "test_files": ["tests/test_phase8_control_flow.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Simple GOTO statements",
+    "known_limitations": "GOTO DEPENDING ON is unsupported",
+    "evidence_links": []
+  },
+  "CALL_LINKAGE": {
+    "parser_location": "modernize/parser.py:parse_call_statement",
+    "semantic_ir": "STATEMENT (CALL)",
+    "generator_location": "modernize/native_generator.py:_generate_call_block",
+    "runtime_helper": "CobolRef, CicsProgramRegistry",
+    "test_files": ["tests/test_native_call_translation.py", "tests/test_dependencies.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Static program targets, BY REFERENCE parameter updates",
+    "known_limitations": "BY CONTENT parameters are copied but lack structural isolation",
+    "evidence_links": []
+  },
+  "EMBEDDED_SQL": {
+    "parser_location": "modernize/parser.py:parse_exec_sql",
+    "semantic_ir": "STATEMENT (EXEC_SQL)",
+    "generator_location": "modernize/native_generator.py:_translate_statement_inner",
+    "runtime_helper": "SpringContextHelper.jdbcTemplate",
+    "test_files": ["tests/test_db2_dialect_null_indicators.py", "tests/test_db2_acceptance.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "SELECT, INSERT, UPDATE, DELETE queries, Cursor declarations, COMMIT, and ROLLBACK",
+    "known_limitations": "H2 is emulated. REAL_DB2 mode requires specific Docker configurations",
+    "evidence_links": []
+  },
+  "CICS": {
+    "parser_location": "modernize/parser.py:parse_exec_cics",
+    "semantic_ir": "STATEMENT (EXEC_CICS)",
+    "generator_location": "modernize/native_generator.py:_translate_statement_inner",
+    "runtime_helper": "CicsTransactionContext, CicsProgramRegistry",
+    "test_files": ["tests/test_cics_modernization.py", "tests/test_cics_map_semantics.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "SEND, RECEIVE, LINK, RETURN, XCTL commands",
+    "known_limitations": "Context maps mock terminal outputs",
+    "evidence_links": []
+  },
+  "JCL": {
+    "parser_location": "modernize/jcl_parser.py:JclParser",
+    "semantic_ir": "JclJob",
+    "generator_location": "modernize/jcl_generator.py:JclGenerator",
+    "runtime_helper": "JclExecutionContext",
+    "test_files": ["tests/test_jcl_modernization.py"],
+    "evidence_level": "UNIT_TESTED",
+    "supported_subset": "Step return codes checking, step transition parameters",
+    "known_limitations": "Advanced JCL step conditional structures (e.g. COND=ONLY/EVEN) are ignored or bypassed",
+    "evidence_links": []
+  },
+  "IMS_DB_MQ": {
+    "parser_location": "None",
+    "semantic_ir": "None",
+    "generator_location": "None",
+    "runtime_helper": "None",
+    "test_files": [],
+    "evidence_level": "UNSUPPORTED",
+    "supported_subset": "None",
+    "known_limitations": "Completely unsupported in the current modernization pipeline",
+    "evidence_links": []
+  }
+}
