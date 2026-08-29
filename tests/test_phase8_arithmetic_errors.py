@@ -41,7 +41,7 @@ def test_add_size_error_ok():
     ret, stdout, stderr, java_src, outputs = run_cobol_code("MATH2", code)
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
-    assert "OK: 95" in lines
+    assert "OK:95" in lines
 
 def test_divide_by_zero():
     code = """

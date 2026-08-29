@@ -1,0 +1,1 @@
+-- Empty customer SQL schema seed

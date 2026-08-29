@@ -7,7 +7,7 @@ from modernize.native_pipeline import NativePipeline
 
 # 1 & 2: String literals quoting and escaping tests
 def test_string_literal_translation():
-    trans = NativeExpressionTranslator({}, is_child=False)
+    trans = NativeExpressionTranslator({"WS-STATUS": "String"}, is_child=False)
     
     # Simple single quote literals
     assert trans.translate("'READY'") == '"READY"'

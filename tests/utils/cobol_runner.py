@@ -100,13 +100,104 @@ public class JclExecutionContext {
             timeout=180
         )
         
-        # Write and compile CobolFormatHelper.java to prevent compilation failures for programs with complex PICTURE editing
+         # Write and compile CobolFormatHelper.java to prevent compilation failures for programs with complex PICTURE editing
         format_helper_src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "modernize", "java_helpers", "CobolFormatHelper.java"), "r", encoding="utf-8").read()
         with open(os.path.join(jcl_context_dir, "CobolFormatHelper.java"), "w", encoding="utf-8") as f:
             f.write(format_helper_src)
             
         subprocess.run(
             ["javac", os.path.join(jcl_context_dir, "CobolFormatHelper.java")],
+            capture_output=True,
+            text=True,
+            timeout=180
+        )
+
+        # Write and compile CobolNumeric helpers
+        runtime_dir = os.path.join(temp_dir, "com", "systema", "modernized", "runtime")
+        os.makedirs(runtime_dir, exist_ok=True)
+        helpers_src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "modernize", "java_helpers", "src", "main", "java", "com", "systema", "modernized", "runtime")
+        
+        for f_name in os.listdir(helpers_src_dir):
+            if f_name.endswith(".java"):
+                path = os.path.join(helpers_src_dir, f_name)
+                with open(path, "r", encoding="utf-8") as f:
+                    src = f.read()
+                with open(os.path.join(runtime_dir, f_name), "w", encoding="utf-8") as f:
+                    f.write(src)
+        
+        # Compile all java files in runtime directory
+        java_files = [os.path.join(runtime_dir, f) for f in os.listdir(runtime_dir) if f.endswith(".java")]
+        subprocess.run(
+            ["javac", "-cp", temp_dir] + java_files,
+            capture_output=True,
+            text=True,
+            timeout=180
+        )
+
+        # Write and compile CicsProgramRegistry.java
+        registry_src = """package com.systema.modernized;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
+public class CicsProgramRegistry {
+    private static final Map<String, Supplier<Object>> registry = new HashMap<>();
+    public static void register(String name, Supplier<Object> supplier) {
+        registry.put(name.toUpperCase(), supplier);
+    }
+    public static Object invoke(String name, String commarea) throws Exception {
+        Supplier<Object> supplier = registry.get(name.toUpperCase());
+        if (supplier == null) {
+            throw new IllegalArgumentException("CICS_INVALID_PROGRAM: Program " + name + " not registered in CICS registry");
+        }
+        Object program = supplier.get();
+        try {
+            java.lang.reflect.Field field = program.getClass().getField("commarea");
+            field.set(program, commarea);
+        } catch (NoSuchFieldException e) {}
+        program.getClass().getMethod("execute").invoke(program);
+        try {
+            java.lang.reflect.Field field = program.getClass().getField("commarea");
+            return field.get(program);
+        } catch (NoSuchFieldException e) {
+            return commarea;
+        }
+    }
+}
+"""
+        with open(os.path.join(jcl_context_dir, "CicsProgramRegistry.java"), "w", encoding="utf-8") as f:
+            f.write(registry_src)
+            
+        subprocess.run(
+            ["javac", os.path.join(jcl_context_dir, "CicsProgramRegistry.java")],
+            capture_output=True,
+            text=True,
+            timeout=180
+        )
+
+        # Write and compile SpringContextHelper.java
+        spring_helper_src = """package com.systema.modernized;
+public class SpringContextHelper {
+    public static class MockResultSet {
+        public String getString(String columnLabel) throws Exception { return null; }
+        public String getString(int columnIndex) throws Exception { return null; }
+    }
+    public interface MockRowMapper<T> {
+        T mapRow(MockResultSet rs, int rowNum) throws Exception;
+    }
+    public static class MockJdbcTemplate {
+        public <T> java.util.List<T> query(String sql, MockRowMapper<T> rowMapper, Object... args) { return null; }
+        public void execute(String sql) {}
+        public int update(String sql, Object... args) { return 0; }
+        public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) { return null; }
+    }
+    public static MockJdbcTemplate jdbcTemplate = null;
+}
+"""
+        with open(os.path.join(jcl_context_dir, "SpringContextHelper.java"), "w", encoding="utf-8") as f:
+            f.write(spring_helper_src)
+            
+        subprocess.run(
+            ["javac", os.path.join(jcl_context_dir, "SpringContextHelper.java")],
             capture_output=True,
             text=True,
             timeout=180

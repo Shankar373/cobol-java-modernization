@@ -52,13 +52,13 @@ def test_nested_program_e2e():
     
     expected_stdout = (
         "PARENT START\n"
-        "GLOBAL BEFORE:  GLOBAL_VAL_01  \n"
+        "GLOBAL BEFORE: GLOBAL_VAL_01  \n"
         "CHILD START\n"
-        "GLOBAL IN CHILD:  UPDATED_GLOBAL \n"
-        "LINKAGE IN CHILD:  LOCAL_PARENT   \n"
+        "GLOBAL IN CHILD: UPDATED_GLOBAL \n"
+        "LINKAGE IN CHILD: LOCAL_PARENT   \n"
         "CHILD END\n"
-        "GLOBAL AFTER:  CHILD_TOUCH    \n"
-        "LOCAL AFTER:  CHILD_LINK     \n"
+        "GLOBAL AFTER: CHILD_TOUCH    \n"
+        "LOCAL AFTER: CHILD_LINK     \n"
         "PARENT END\n"
     )
     

@@ -258,6 +258,8 @@ public class SpringContextHelper {
     helpers_src_dir = os.path.join(helpers_dir, "modernize", "java_helpers", "src", "main", "java", "com", "systema", "modernized", "runtime")
     for f_name in os.listdir(helpers_src_dir):
         if f_name.endswith(".java"):
+            if f_name == "VsamIndexedStore.java":
+                continue
             src = open(os.path.join(helpers_src_dir, f_name), "r", encoding="utf-8").read()
             with open(os.path.join(runtime_dir, f_name), "w", encoding="utf-8") as f:
                 f.write(src)

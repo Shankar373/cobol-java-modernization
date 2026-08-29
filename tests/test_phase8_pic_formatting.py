@@ -36,22 +36,22 @@ def test_pic_formatting_e2e():
     temp_out = tempfile.mkdtemp()
     
     expected_stdout = (
-        "POS CURR:  $12,345.67\n"
-        "NEG CURR:  $12,345.67\n"
-        "ZERO CURR:       $0.00\n"
-        "POS PLUS:   +12,345.67\n"
-        "NEG PLUS:   -12,345.67\n"
-        "POS MINUS:    12,345.67\n"
-        "NEG MINUS:   -12,345.67\n"
-        "POS ZSUPP:  12,345.67\n"
-        "ZERO ZSUPP:       0.00\n"
-        "POS AST:  12,345.67\n"
-        "ZERO AST:  *****0.12\n"
-        "POS CR:  12,345.67  \n"
-        "NEG CR:  12,345.67CR\n"
-        "POS DB:  12,345.67  \n"
-        "NEG DB:  12,345.67DB\n"
-        "OVERFLOW:  ******\n"
+        "POS CURR: $12,345.67\n"
+        "NEG CURR: $12,345.67\n"
+        "ZERO CURR:      $0.00\n"
+        "POS PLUS:  +12,345.67\n"
+        "NEG PLUS:  -12,345.67\n"
+        "POS MINUS:   12,345.67\n"
+        "NEG MINUS:  -12,345.67\n"
+        "POS ZSUPP: 12,345.67\n"
+        "ZERO ZSUPP:      0.00\n"
+        "POS AST: 12,345.67\n"
+        "ZERO AST: *****0.12\n"
+        "POS CR: 12,345.67  \n"
+        "NEG CR: 12,345.67CR\n"
+        "POS DB: 12,345.67  \n"
+        "NEG DB: 12,345.67DB\n"
+        "OVERFLOW: ******\n"
     )
     
     try:

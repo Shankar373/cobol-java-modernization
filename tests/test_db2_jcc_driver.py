@@ -25,13 +25,13 @@ def test_db2_jcc_driver_in_pom_and_classpath(monkeypatch):
         src_key = list(p.program_ir.keys())[0]
         p.stage_generate(src_key)
         
-        # Check generated pom.xml contains DB2 JCC dependency
+        # Check generated pom.xml does NOT contain DB2 JCC dependency, but contains postgresql
         pom_path = os.path.join(p.generated_dir, "pom.xml")
         assert os.path.exists(pom_path)
         with open(pom_path, "r") as fh:
             pom_content = fh.read()
-        assert "com.ibm.db2" in pom_content
-        assert "jcc" in pom_content
+        assert "com.ibm.db2" not in pom_content
+        assert "postgresql" in pom_content
         
         # Verify driver is resolved in Maven classpath
         mvn_exe = "mvn.cmd" if os.name == "nt" else "mvn"
@@ -46,8 +46,9 @@ def test_db2_jcc_driver_in_pom_and_classpath(monkeypatch):
         with open(cp_file, "r") as fh:
             classpath = fh.read()
             
-        # Verify db2 JCC jar is in the classpath
-        assert "db2" in classpath.lower() or "jcc" in classpath.lower()
+        # Verify postgresql jar is in the classpath, not DB2
+        assert "postgresql" in classpath.lower()
+        assert "db2" not in classpath.lower()
         
     finally:
         shutil.rmtree(tmp_out, ignore_errors=True)

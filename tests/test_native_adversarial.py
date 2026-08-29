@@ -37,8 +37,8 @@ def test_adversarial_validation_complete():
     assert "import java.util.Objects;" in java_src
     
     # 2. Verify OCCURS array declaration
-    assert "public BigDecimal[] item_val = new BigDecimal[5];" in java_src
-    assert "java.util.Arrays.fill(item_val, BigDecimal.ZERO);" in java_src
+    assert "public com.systema.modernized.runtime.CobolNumeric[] item_val = new com.systema.modernized.runtime.CobolNumeric[5];" in java_src
+    assert "item_val[i] = new com.systema.modernized.runtime.CobolNumeric(new com.systema.modernized.runtime.CobolNumericSpec(false, 4, 2, com.systema.modernized.runtime.CobolUsage.DISPLAY, com.systema.modernized.runtime.CobolSignPosition.TRAILING, false));" in java_src
     
     # 3. Verify Level-88 helper method
     assert "public boolean isStatusOpen() { return Objects.equals(ws_status, \"O\"); }" in java_src
@@ -57,6 +57,6 @@ def test_adversarial_validation_complete():
     assert "for (ws_i = 1; !(ws_i > ws_limit); ws_i += 1) {" in java_src
     
     # 8. Verify subscripted element assignment
-    assert "item_val[ws_i - 1] = new BigDecimal(\"2.50\");" in java_src
+    assert "item_val[ws_i - 1].assign(new BigDecimal(\"2.50\"), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);" in java_src
     
-    assert 'System.out.println("ARRAY_ITEM(" + " " + String.format("%01d", ws_i) + " " + ")=" + " " + String.format("%05d", item_val[ws_i - 1].movePointRight(2).longValue()));' in java_src
+    assert "writeBytes(new com.systema.modernized.runtime.CobolNumeric(item_val[ws_i - 1].getValue(), new com.systema.modernized.runtime.CobolNumericSpec(false, 4, 2, com.systema.modernized.runtime.CobolUsage.DISPLAY, com.systema.modernized.runtime.CobolSignPosition.TRAILING, false)).toDisplayString().getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));" in java_src

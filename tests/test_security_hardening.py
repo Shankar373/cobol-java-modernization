@@ -108,6 +108,28 @@ class TestAuthFailClosed:
             server.shutdown()
             server.server_close()
 
+    def test_non_loopback_rejects_default_credentials(self, tmp_path, monkeypatch):
+        """A network-bound server with default 'admin:admin' credentials must refuse."""
+        import threading
+        port = _free_port()
+        monkeypatch.setenv("UI_AUTH_CREDENTIALS", "admin:admin")
+        server = ui.ThreadingHTTPServer(("0.0.0.0", port), ui.Handler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            import urllib.request, urllib.error
+            url = f"http://127.0.0.1:{port}/api/state"
+            try:
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    raise AssertionError(
+                        f"default credentials allowed on 0.0.0.0 binding "
+                        f"(status {resp.status})")
+            except urllib.error.HTTPError as e:
+                assert e.code == 503, f"expected 503 fail-closed on default credentials, got {e.code}"
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 class TestGitUrlPolicy:
     def test_scheme_allowlist(self, tmp_path, monkeypatch):

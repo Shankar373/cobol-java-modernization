@@ -252,6 +252,7 @@ public class CobolNumeric {
         
         if (spec.signed) {
             if (spec.signSeparate) {
+                // SIGN IS SEPARATE: always emit explicit +/-
                 String sign = currentVal.signum() >= 0 ? "+" : "-";
                 if (spec.signPosition == CobolSignPosition.LEADING) {
                     return sign + digitsStr;
@@ -259,8 +260,19 @@ public class CobolNumeric {
                     return digitsStr + sign;
                 }
             } else {
-                String sign = currentVal.signum() >= 0 ? "+" : "-";
-                return sign + digitsStr;
+                // No separate sign byte.
+                // DISPLAY-usage fields (PIC S9(n)) render with an explicit +/- sign
+                // (GnuCOBOL -fsign=ASCII behaviour).
+                // COMP / COMP-3 / COMP-5 binary/packed fields suppress the '+' for
+                // positive values — the sign lives in the binary encoding, not the
+                // display representation.
+                if (spec.usage == CobolUsage.DISPLAY) {
+                    String sign = currentVal.signum() < 0 ? "-" : "+";
+                    return sign + digitsStr;
+                } else {
+                    // COMP / COMP_3 / COMP_5
+                    return currentVal.signum() < 0 ? "-" + digitsStr : digitsStr;
+                }
             }
         } else {
             return digitsStr;

@@ -2,12 +2,12 @@
 
 Tests prove:
 - Dependency audit runs automatically from stage_refactor.
-- Dependency failure blocks PRODUCTION_READY (native_dep_ok=False -> PRODUCTION_CANDIDATE).
+- Dependency failure blocks MVP_CERTIFIED (native_dep_ok=False -> CERTIFIED_WITH_REVIEW).
 - Negative equivalence runs automatically from stage_compare.
 - Each mutation case is detected.
-- Missing neg_equiv evidence prevents PRODUCTION_READY.
-- Missing dep_audit evidence prevents PRODUCTION_READY.
-- All gates passing yields PRODUCTION_READY.
+- Missing neg_equiv evidence prevents MVP_CERTIFIED.
+- Missing dep_audit evidence prevents MVP_CERTIFIED.
+- All gates passing yields MVP_CERTIFIED.
 """
 import os
 import sys
@@ -207,7 +207,7 @@ class TestVerdictGates:
             "executed": True, "status": "PASS", "verdict": "PASS",
         }})
         p.set_data("neg_equiv", {})  # no executed key
-        assert p._compute_verdict() == "PRODUCTION_CANDIDATE"
+        assert p._compute_verdict() == "CERTIFIED_WITH_REVIEW"
 
     def test_missing_dep_audit_prevents_production_ready(self, tmp_path):
         p = self._all_gates_pipeline(tmp_path)
@@ -216,7 +216,7 @@ class TestVerdictGates:
             "executed": True, "status": "PASS", "verdict": "PASS",
         })
         verdict = p._compute_verdict()
-        assert verdict != "PRODUCTION_READY"
+        assert verdict != "MVP_CERTIFIED"
 
     def test_dep_audit_fail_prevents_production_ready(self, tmp_path):
         p = self._all_gates_pipeline(tmp_path)
@@ -226,7 +226,7 @@ class TestVerdictGates:
         p.set_data("neg_equiv", {
             "executed": True, "status": "PASS", "verdict": "PASS",
         })
-        assert p._compute_verdict() != "PRODUCTION_READY"
+        assert p._compute_verdict() != "MVP_CERTIFIED"
 
     def test_neg_equiv_fail_prevents_production_ready(self, tmp_path):
         p = self._all_gates_pipeline(tmp_path)
@@ -236,7 +236,7 @@ class TestVerdictGates:
         p.set_data("neg_equiv", {
             "executed": True, "status": "FAIL", "verdict": "FAIL",
         })
-        assert p._compute_verdict() == "PRODUCTION_CANDIDATE"
+        assert p._compute_verdict() == "CERTIFIED_WITH_REVIEW"
 
     def test_all_gates_pass_yields_production_ready(self, tmp_path):
         p = self._all_gates_pipeline(tmp_path)
@@ -246,7 +246,7 @@ class TestVerdictGates:
         p.set_data("neg_equiv", {
             "executed": True, "status": "PASS", "verdict": "PASS",
         })
-        assert p._compute_verdict() == "PRODUCTION_READY"
+        assert p._compute_verdict() == "MVP_CERTIFIED"
 
     def test_executed_false_dep_audit_blocks(self, tmp_path):
         """executed=False must never satisfy the gate even if status=PASS."""
@@ -257,7 +257,7 @@ class TestVerdictGates:
         p.set_data("neg_equiv", {
             "executed": True, "status": "PASS", "verdict": "PASS",
         })
-        assert p._compute_verdict() != "PRODUCTION_READY"
+        assert p._compute_verdict() != "MVP_CERTIFIED"
 
     def test_executed_false_neg_equiv_blocks(self, tmp_path):
         """executed=False must never satisfy the gate even if status=PASS."""
@@ -268,7 +268,7 @@ class TestVerdictGates:
         p.set_data("neg_equiv", {
             "executed": False, "status": "PASS",
         })
-        assert p._compute_verdict() == "PRODUCTION_CANDIDATE"
+        assert p._compute_verdict() == "CERTIFIED_WITH_REVIEW"
 
 
 # ---------------------------------------------------------------------------

@@ -287,12 +287,41 @@ class JclParser:
 
     def parse_cond_param(self, cond_val, line_num):
         # Parses COND=(code,operator[,step]) or COND=((code,operator[,step]),(code,operator))
+        # Also handles COND=ONLY and COND=EVEN
         conds = []
         if not cond_val:
             return conds
         
-        # Strip outer parentheses if double parentheses, e.g. ((4,LT),(8,LE,STEP1))
         val = cond_val.strip()
+        val_upper = val.upper()
+        
+        # Check for standalone EVEN / ONLY
+        if val_upper == "EVEN":
+            return [("EVEN", None, None)]
+        if val_upper == "ONLY":
+            return [("ONLY", None, None)]
+
+        has_even = False
+        has_only = False
+        if "EVEN" in val_upper:
+            has_even = True
+            # remove EVEN term to parse the rest
+            val = re.sub(r',?\bEVEN\b,?', '', val, flags=re.IGNORECASE).strip("(), ")
+        if "ONLY" in val_upper:
+            has_only = True
+            # remove ONLY term to parse the rest
+            val = re.sub(r',?\bONLY\b,?', '', val, flags=re.IGNORECASE).strip("(), ")
+            
+        if has_even:
+            conds.append(("EVEN", None, None))
+        if has_only:
+            conds.append(("ONLY", None, None))
+            
+        if not val or val == "()":
+            return conds
+        
+        # Strip outer parentheses if double parentheses, e.g. ((4,LT),(8,LE,STEP1))
+        val = val.strip()
         
         # Helper to parse a single condition tuple like "4,LT" or "4,LT,STEP1"
         def parse_single_tuple(t_str):

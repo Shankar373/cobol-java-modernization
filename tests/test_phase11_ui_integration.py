@@ -44,7 +44,7 @@ def mock_ui_env(tmp_path, monkeypatch):
             "compare": {"status": "done", "topology": "CONSOLE_OUTPUT", "equivalence_mode": "strict"},
             "refactor": {"status": "done"},
             "validate": {"status": "done", "gate2_passed": True},
-            "report": {"status": "done", "detail": "PRODUCTION_READY"},
+            "report": {"status": "done", "detail": "MVP_CERTIFIED"},
             "package": {"status": "done"}
         },
         "data": {
@@ -105,7 +105,7 @@ def mock_ui_env(tmp_path, monkeypatch):
     (mod_dir_a / "App.java").write_text("public class App {}", encoding="utf-8")
     
     # Write manifest file
-    (out_a / "pipeline_execution_manifest.json").write_text(json.dumps({"final_verdict": "PRODUCTION_READY"}), encoding="utf-8")
+    (out_a / "pipeline_execution_manifest.json").write_text(json.dumps({"final_verdict": "MVP_CERTIFIED"}), encoding="utf-8")
     
     # State JSON for run B (no validation, fails comparison)
     state_b = {
@@ -236,9 +236,9 @@ class TestUiIntegration:
         run_b = runs[mock_ui_env["run_id_b"]]
         
         # Checked via Pipeline._compute_verdict() - let's check their values
-        # Since negative equivalence and dependencies pass, A should be PRODUCTION_READY
+        # Since negative equivalence and dependencies pass, A should be MVP_CERTIFIED
         # Since B failed comparison, B should be FAILED
-        assert run_a["verdict"] in ["PRODUCTION_READY", "PRODUCTION_CANDIDATE"]
+        assert run_a["verdict"] in ["MVP_CERTIFIED", "CERTIFIED_WITH_REVIEW"]
         assert run_b["verdict"] == "FAILED"
 
     def test_artifact_listing_and_filtering(self, mock_ui_env):

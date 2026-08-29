@@ -137,13 +137,13 @@ def test_sequential_file_operations_success():
     print("STDERR:", stderr)
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
-    assert "OPEN IN STATUS:  00" in lines
-    assert "OPEN OUT STATUS:  00" in lines
-    assert "READ STATUS:  00  VAL:  HELLO" in lines
-    assert "WRITE STATUS:  00" in lines
-    assert "READ EOF STATUS:  10" in lines
-    assert "CLOSE IN STATUS:  00" in lines
-    assert "CLOSE OUT STATUS:  00" in lines
+    assert "OPEN IN STATUS: 00" in lines
+    assert "OPEN OUT STATUS: 00" in lines
+    assert "READ STATUS: 00 VAL: HELLO" in lines
+    assert "WRITE STATUS: 00" in lines
+    assert "READ EOF STATUS: 10" in lines
+    assert "CLOSE IN STATUS: 00" in lines
+    assert "CLOSE OUT STATUS: 00" in lines
     assert outputs.get("out.dat") == "HELLO\n"
 
 def test_open_input_file_not_found():
@@ -169,7 +169,7 @@ def test_open_input_file_not_found():
     ret, stdout, stderr, java_src, outputs = run_cobol_code("MISSINGTEST", code)
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
-    assert "OPEN STATUS:  35" in lines
+    assert "OPEN STATUS: 35" in lines
 
 def test_indexed_operations():
     code = """
@@ -246,17 +246,17 @@ def test_indexed_operations():
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
     assert "WRITE K1234 SUCCESS" in lines
-    assert "WRITE STATUS:  00" in lines
+    assert "WRITE STATUS: 00" in lines
     assert "WRITE DUP INVALID" in lines
-    assert "DUP WRITE STATUS:  22" in lines
-    assert "READ K1234 SUCCESS:  VAL01" in lines
-    assert "READ STATUS:  00" in lines
+    assert "DUP WRITE STATUS: 22" in lines
+    assert "READ K1234 SUCCESS: VAL01" in lines
+    assert "READ STATUS: 00" in lines
     assert "READ K9999 INVALID" in lines
-    assert "MISSING READ STATUS:  23" in lines
+    assert "MISSING READ STATUS: 23" in lines
     assert "REWRITE SUCCESS" in lines
-    assert "REWRITE STATUS:  00" in lines
+    assert "REWRITE STATUS: 00" in lines
     assert "REWRITE MISSING INVALID" in lines
-    assert "REWRITE MISSING STATUS:  23" in lines
+    assert "REWRITE MISSING STATUS: 23" in lines
     
     # Zero dependencies check
     forbidden = ["jp.osscons", "libcobj", "CobolResolve", "opensourcecobol"]
@@ -337,9 +337,9 @@ def test_vsam_delete_and_start():
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
     assert "START EQUAL SUCCESS" in lines
-    assert "READ EQUAL VAL:  VAL02" in lines
+    assert "READ EQUAL VAL: VAL02" in lines
     assert "START GREATER SUCCESS" in lines
-    assert "READ GREATER VAL:  VAL02" in lines
+    assert "READ GREATER VAL: VAL02" in lines
     assert "DELETE SUCCESS" in lines
     assert "READ DELETED RECORD INVALID" in lines
 

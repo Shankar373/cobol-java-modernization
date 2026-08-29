@@ -129,15 +129,22 @@ class JclGenerator:
         
         # 1. Bypass check method
         lines.append(f"    private static boolean shouldBypassStep_{name.replace('.', '_')}() {{")
-        if not conds:
-            lines.append("        return false;")
-        else:
-            for code, op, stepname in conds:
-                if stepname:
-                    lines.append(f"        if (JclExecutionContext.compareRc({code}, \"{op}\", JclExecutionContext.getStepReturnCode(\"{stepname.upper()}\"))) return true;")
-                else:
-                    lines.append(f"        if (JclExecutionContext.checkAnyStepCond({code}, \"{op}\")) return true;")
-            lines.append("        return false;")
+        has_even = any(code == "EVEN" for code, op, stepname in conds)
+        has_only = any(code == "ONLY" for code, op, stepname in conds)
+        normal_conds = [(code, op, stepname) for code, op, stepname in conds if code not in ("EVEN", "ONLY")]
+        
+        lines.append("        boolean abended = JclExecutionContext.hasJobAbended();")
+        if has_only:
+            lines.append("        if (!abended) return true;")
+        elif not has_even:
+            lines.append("        if (abended) return true;")
+            
+        for code, op, stepname in normal_conds:
+            if stepname:
+                lines.append(f"        if (JclExecutionContext.compareRc({code}, \"{op}\", JclExecutionContext.getStepReturnCode(\"{stepname.upper()}\"))) return true;")
+            else:
+                lines.append(f"        if (JclExecutionContext.checkAnyStepCond({code}, \"{op}\")) return true;")
+        lines.append("        return false;")
         lines.append("    }")
         lines.append("")
 
@@ -200,8 +207,15 @@ class JclGenerator:
             lines.append("                    }")
             lines.append("                } catch (Exception e2) {}")
             lines.append("            }")
+            lines.append("            if (rc >= 8) {")
+            lines.append("                com.systema.modernized.JclExecutionContext.setJobAbended(true);")
+            lines.append("            }")
             lines.append("        } catch (ClassNotFoundException e) {")
             lines.append(f"            System.err.println(\"Warning: Program class '{class_name}' not found for step '{name}'\");")
+            lines.append("        } catch (Throwable t) {")
+            lines.append(f"            System.err.println(\"Step {name} failed/abended: \" + t);")
+            lines.append("            rc = 16;")
+            lines.append("            com.systema.modernized.JclExecutionContext.setJobAbended(true);")
             lines.append("        }")
         
         # Cleanup SYSIN files in finally block

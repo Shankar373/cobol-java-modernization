@@ -120,29 +120,29 @@ def run_db2_pipeline_e2e(repo_name, expected_stdout):
         shutil.rmtree(temp_out, ignore_errors=True)
 
 def test_db2_select_e2e():
-    expected = "SQLCODE:  000000000\nSQLSTATE:  00000\nCUST-NAME:  TEST CUSTOMER\n"
+    expected = "SQLCODE: 000000000\nSQLSTATE: 00000\nCUST-NAME: TEST CUSTOMER       \n"
     run_db2_pipeline_e2e("DB2SELECT01", expected)
 
 def test_db2_insert_e2e():
-    expected = "SQLCODE:  000000000\nSQLSTATE:  00000\n"
+    expected = "SQLCODE: 000000000\nSQLSTATE: 00000\n"
     run_db2_pipeline_e2e("DB2INSERT01", expected)
 
 def test_db2_update_e2e():
-    expected = "SQLCODE:  000000000\nSQLSTATE:  00000\n"
+    expected = "SQLCODE: 000000000\nSQLSTATE: 00000\n"
     run_db2_pipeline_e2e("DB2UPDATE01", expected)
 
 def test_db2_delete_e2e():
-    expected = "SQLCODE:  000000000\nSQLSTATE:  00000\n"
+    expected = "SQLCODE: 000000000\nSQLSTATE: 00000\n"
     run_db2_pipeline_e2e("DB2DELETE01", expected)
 
 def test_db2_cursor_e2e():
-    expected = "OPEN SQLCODE:  000000000\nFETCHED:  000000101   TEST CUSTOMER\nFETCHED:  000000102   ANOTHER CUST\nCLOSE SQLCODE:  000000000\n"
+    expected = "OPEN SQLCODE: 000000000\nFETCHED: 000000101 TEST CUSTOMER       \nFETCHED: 000000102 ANOTHER CUST        \nCLOSE SQLCODE: 000000000\n"
     run_db2_pipeline_e2e("DB2CURSOR01", expected)
 
 def test_db2_transaction_e2e():
-    expected = "COMMIT SQLCODE:  000000000\nROLLBACK SQLCODE:  000000000\n"
+    expected = "COMMIT SQLCODE: 000000000\nROLLBACK SQLCODE: 000000000\n"
     run_db2_pipeline_e2e("DB2TRANSACTION01", expected)
 
 def test_db2_nested_e2e():
-    expected = "NESTED SELECT SQLCODE:  000000000\n"
+    expected = "NESTED SELECT SQLCODE: 000000000\n"
     run_db2_pipeline_e2e("DB2NESTED01", expected)

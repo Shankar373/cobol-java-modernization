@@ -94,4 +94,4 @@ def test_evaluate_bigdecimal_subject():
     }
     
     assert trans.translate_statement(node_eval) is None
-    assert trans.translate_statement(node_when_val) == 'if (ws_val.compareTo(new BigDecimal("100.50")) == 0) {'
+    assert trans.translate_statement(node_when_val) == 'if (ws_val.getValue().compareTo(new BigDecimal("100.50")) == 0) {'

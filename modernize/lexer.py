@@ -3,7 +3,7 @@ import re
 
 COBOL_KEYWORDS = {
     "IDENTIFICATION", "PROGRAM-ID", "ENVIRONMENT", "CONFIGURATION", "INPUT-OUTPUT", "FILE-CONTROL",
-    "SELECT", "ASSIGN", "ORGANIZATION", "INDEXED", "ACCESS", "DYNAMIC", "RECORD", "KEY", "STATUS",
+    "SELECT", "ASSIGN", "ORGANIZATION", "INDEXED", "ACCESS", "DYNAMIC", "RECORD", "KEY", "STATUS", "ALTERNATE",
     "DATA", "FILE", "FD", "WORKING-STORAGE", "LINKAGE", "PROCEDURE", "DIVISION", "SECTION",
     "MOVE", "TO", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE", "IF", "ELSE", "PERFORM", "THRU", "UNTIL",
     "DISPLAY", "GOBACK", "EXIT", "INITIALIZE", "READ", "WRITE", "REWRITE", "OPEN", "CLOSE",
@@ -14,7 +14,7 @@ COBOL_KEYWORDS = {
     "BY", "GIVING", "FROM", "INPUT", "OUTPUT", "STRING", "DELIMITED", "INTO", "I-O", "EXTEND", "AT", "END", "IN",
     "GO", "CONTINUE", "NEXT", "SENTENCE", "DEPENDING", "TIMES", "INVALID", "RANDOM", "MODE", "OVERFLOW", "FUNCTION",
     "UNSTRING", "INSPECT", "TALLYING", "REPLACING", "CONVERTING", "POINTER", "CHARACTERS", "FIRST", "END-UNSTRING",
-    "ALL", "LEADING", "WITH", "FOR", "GLOBAL", "PROGRAM", "END-PROGRAM", "SD", "SORT", "MERGE", "RELEASE", "ASCENDING", "DESCENDING", "SET", "ADDRESS", "OF",
+    "ALL", "LEADING", "WITH", "FOR", "GLOBAL", "PROGRAM", "END-PROGRAM", "SD", "SORT", "MERGE", "RELEASE", "ASCENDING", "DESCENDING", "SET", "ADDRESS", "OF", "DUPLICATES",
     "REPORT", "REPORTS", "INITIATE", "GENERATE", "TERMINATE", "LINE", "COLUMN", "SOURCE", "SUM", "CONTROL", "RD",
     "DELETE", "START", "END-DELETE", "END-START", "IS", "REMAINDER", "ROUNDED",
     "SIGN", "TRAILING", "SEPARATE", "CHARACTER"
@@ -370,6 +370,13 @@ class CobolLexer:
                         self.tokens.append(tok)
                         pos += 1
                         continue
+
+                # Exponentiation operator (**)
+                if code_segment[pos:].startswith("**"):
+                    tok = CobolToken("PUNCTUATION", "**", self.file_path, line_num, tok_col, tok_start_offset, tok_start_offset + 2)
+                    self.tokens.append(tok)
+                    pos += 2
+                    continue
 
                 # Comparison operators
                 comp_match = re.match(r'^(<=|>=|<|>)', code_segment[pos:])

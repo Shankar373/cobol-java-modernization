@@ -2,7 +2,7 @@
 
 Verifies the failure scenarios:
 - stage failure must block dependent downstream stages.
-- final verdict must not be PASS/PRODUCTION_READY.
+- final verdict must not be PASS/MVP_CERTIFIED.
 - correct error / terminal status is stored.
 """
 import os
@@ -67,7 +67,7 @@ class TestFailureMatrix:
         p.state["stages"]["ingest"] = {"status": "done"}
         # Mock compilation / generate stage to fail (not executed, but marked error)
         p.state["stages"]["generate"] = {"status": "error"}
-        assert p._compute_verdict() not in ("PRODUCTION_READY", "PRODUCTION_CANDIDATE")
+        assert p._compute_verdict() not in ("MVP_CERTIFIED", "CERTIFIED_WITH_REVIEW")
 
     def test_case_5_equivalence_mismatch(self, tmp_pipeline):
         p = tmp_pipeline

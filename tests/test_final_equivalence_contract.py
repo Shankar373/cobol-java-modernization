@@ -36,7 +36,7 @@ def blank_pipeline(tmp_path):
 
 
 def test_stdout_equivalence_pass(blank_pipeline):
-    """CONSOLE_OUTPUT with matching stdout passes comparison and reaches PRODUCTION_READY."""
+    """CONSOLE_OUTPUT with matching stdout passes comparison and reaches MVP_CERTIFIED."""
     p = blank_pipeline
     # No baseline files, but CONSOLE_OUTPUT with matching stdout
     p.set_data("baseline_files", [])
@@ -54,11 +54,11 @@ def test_stdout_equivalence_pass(blank_pipeline):
     })
 
     verdict = p._compute_verdict()
-    assert verdict == "PRODUCTION_READY"
+    assert verdict == "MVP_CERTIFIED"
 
 
 def test_stdout_equivalence_fail(blank_pipeline):
-    """CONSOLE_OUTPUT with mismatching stdout fails and does not reach PRODUCTION_READY."""
+    """CONSOLE_OUTPUT with mismatching stdout fails and does not reach MVP_CERTIFIED."""
     p = blank_pipeline
     p.set_data("baseline_files", [])
     p.set_data("compare", {
@@ -75,7 +75,7 @@ def test_stdout_equivalence_fail(blank_pipeline):
     })
 
     verdict = p._compute_verdict()
-    assert verdict != "PRODUCTION_READY"
+    assert verdict != "MVP_CERTIFIED"
     assert verdict == "EQUIVALENCE_UNVERIFIED"  # no baseline files and no passing stdout equiv
 
 

@@ -9,7 +9,7 @@ docs/FINAL_GAP_ANALYSIS.md:
   3. compile failure             -> stage fails; PARTIAL/UNVERIFIED at best
   4. runtime failure             -> FAILED
   5. partial comparison          -> FAILED
-  6. skipped mandatory stage     -> cannot reach PRODUCTION_READY
+  6. skipped mandatory stage     -> cannot reach MVP_CERTIFIED
   7. fabricated console neg-equiv-> UNVERIFIED, never PASS without execution
   8. corrupt diagnostics         -> UNSUPPORTED (fail-closed)
   9. missing stderr/stdout evidence -> gate failure (fail-closed defaults)
@@ -69,7 +69,7 @@ class TestExecutionFailures:
         pipeline.set_data("transpile", {"n_ok": 0, "n_total": 2})
         v = pipeline._compute_verdict()
         assert v in ("PARTIAL", "UNVERIFIED")
-        assert v not in ("VERIFIED", "PRODUCTION_READY")
+        assert v not in ("VERIFIED", "MVP_CERTIFIED")
 
     def test_runtime_failure_rows_fail_gate(self, pipeline):
         """A java-only/baseline-only row without logical evidence must fail gate 1."""
@@ -122,8 +122,8 @@ class TestSkippedStages:
         pipeline.set_data("generate", {"dependency_audit": {"executed": True, "status": "PASS"}})
         # neg_equiv deliberately absent
         v = pipeline._compute_verdict()
-        assert v != "PRODUCTION_READY"
-        assert v in ("PRODUCTION_CANDIDATE", "NATIVE_SPRING_UNIFIED")
+        assert v != "MVP_CERTIFIED"
+        assert v in ("CERTIFIED_WITH_REVIEW", "NATIVE_SPRING_UNIFIED")
 
     def test_skip_legacy_flag_alone_grants_nothing(self, pipeline):
         """The flag must never appear as positive evidence anywhere."""
@@ -132,7 +132,7 @@ class TestSkippedStages:
         pipeline.set_data("transpile", {"n_ok": 1, "n_total": 1})
         pipeline.set_data("baseline_files", [])
         v = pipeline._compute_verdict()
-        pass_tiers = {"PRODUCTION_READY", "PRODUCTION_CANDIDATE", "NATIVE_JAVA_VERIFIED",
+        pass_tiers = {"MVP_CERTIFIED", "CERTIFIED_WITH_REVIEW", "NATIVE_JAVA_VERIFIED",
                       "NATIVE_SPRING_UNIFIED"}
         assert v not in pass_tiers
 
@@ -148,7 +148,7 @@ class TestFabricatedEvidence:
 
     def test_corrupt_diagnostics_block_support(self, pipeline, tmp_path):
         """Corrupt diagnostics JSON must fail CLOSED to UNSUPPORTED."""
-        _done(pipeline, "ingest")
+        _done(pipeline, "ingest", "discover", "analyze", "baseline", "transpile")
         gen = tmp_path / "out" / "generated"
         gen.mkdir()
         (gen / "native_translation_diagnostics.json").write_text(
@@ -156,7 +156,7 @@ class TestFabricatedEvidence:
         assert pipeline._compute_verdict() == "UNSUPPORTED"
 
     def test_blocked_diagnostic_entry_returns_unsupported(self, pipeline, tmp_path):
-        _done(pipeline, "ingest")
+        _done(pipeline, "ingest", "discover", "analyze", "baseline", "transpile")
         gen = tmp_path / "out" / "generated"
         gen.mkdir()
         (gen / "native_translation_diagnostics.json").write_text(

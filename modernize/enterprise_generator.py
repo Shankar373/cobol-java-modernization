@@ -64,12 +64,23 @@ class EnterpriseApplicationGenerator:
         self._write_properties(resources_dir, is_jpa_applicable)
         self._write_main_application(java_base)
         self._write_spring_context_helper(java_base)
+        self._write_db2_error_mapper(java_base)
         self._write_jcl_execution_context(java_base)
         self._write_cobol_format_helper(java_base)
         self._write_cobol_ref(java_base)
         self._write_db2_verify(java_base)
         self._write_cics_program_registry(java_base)
         self._write_cics_transaction_context(java_base)
+        
+        # Copy runtime helper files
+        runtime_dest = os.path.join(java_base, "runtime")
+        os.makedirs(runtime_dest, exist_ok=True)
+        runtime_src = os.path.join(os.path.dirname(__file__), "java_helpers", "src", "main", "java", "com", "systema", "modernized", "runtime")
+        if os.path.isdir(runtime_src):
+            for f in os.listdir(runtime_src):
+                if f.endswith(".java"):
+                    shutil.copy2(os.path.join(runtime_src, f), os.path.join(runtime_dest, f))
+
         self._write_dockerfile(dest_dir)
 
     def _check_batch_evidence(self) -> bool:
@@ -256,6 +267,11 @@ class EnterpriseApplicationGenerator:
         lines.append("            <artifactId>h2</artifactId>")
         lines.append("            <scope>runtime</scope>")
         lines.append("        </dependency>")
+        lines.append("        <dependency>")
+        lines.append("            <groupId>org.postgresql</groupId>")
+        lines.append("            <artifactId>postgresql</artifactId>")
+        lines.append("            <scope>runtime</scope>")
+        lines.append("        </dependency>")
             
         if self._check_batch_evidence():
             lines.append("        <dependency>")
@@ -300,34 +316,54 @@ class EnterpriseApplicationGenerator:
         lines = []
         lines.append("spring.application.name=modernized")
         
-        # Check REAL_DB2_MODE at code generation time to set appropriate defaults, while allowing environment override
-        db_url_default = "jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
-        db_driver_default = "org.h2.Driver"
-        db_user_default = "sa"
-        db_pass_default = ""
-        jpa_platform_default = "org.hibernate.dialect.H2Dialect"
-        
-        if os.environ.get("REAL_DB2_MODE") == "1":
-            db_url_default = os.environ.get("DB2_URL") or "jdbc:db2://localhost:50000/SAMPLE"
-            db_driver_default = "com.ibm.db2.jcc.DB2Driver"
-            db_user_default = os.environ.get("DB2_USERNAME") or "db2user"
-            db_pass_default = os.environ.get("DB2_PASSWORD") or ""
-            jpa_platform_default = "org.hibernate.dialect.DB2Dialect"
+        url_var = "SPRING_DATASOURCE_URL"
+        driver_var = "SPRING_DATASOURCE_DRIVER"
+        user_var = "SPRING_DATASOURCE_USERNAME"
+        pass_var = "SPRING_DATASOURCE_PASSWORD"
+        dialect_var = "SPRING_JPA_DIALECT"
 
-        lines.append(f"spring.datasource.url=${{DB2_URL:{db_url_default}}}")
-        lines.append(f"spring.datasource.driverClassName=${{DB2_DRIVER:{db_driver_default}}}")
-        lines.append(f"spring.datasource.username=${{DB2_USERNAME:{db_user_default}}}")
-        lines.append(f"spring.datasource.password=${{DB2_PASSWORD:{db_pass_default}}}")
+        # PostgreSQL default configuration values (Track B target)
+        pg_url_default = "jdbc:postgresql://localhost:5432/postgres"
+        pg_driver_default = "org.postgresql.Driver"
+        pg_user_default = "postgres"
+        pg_pass_default = "postgres"
+        pg_dialect_default = "org.hibernate.dialect.PostgreSQLDialect"
+
+        # Check if legacy DB2 or H2 overrides are present in environment variables
+        if os.environ.get("REAL_DB2_MODE") == "1":
+            url_var = "DB2_URL"
+            driver_var = "DB2_DRIVER"
+            user_var = "DB2_USERNAME"
+            pass_var = "DB2_PASSWORD"
+            dialect_var = "DB2_DIALECT"
+            db2_url = os.environ.get("DB2_URL") or "jdbc:db2://localhost:50000/SAMPLE"
+            pg_url_default = db2_url
+            pg_driver_default = "com.ibm.db2.jcc.DB2Driver"
+            pg_user_default = os.environ.get("DB2_USERNAME") or "db2user"
+            pg_pass_default = os.environ.get("DB2_PASSWORD") or ""
+            pg_dialect_default = "org.hibernate.dialect.DB2Dialect"
+        elif not os.environ.get("SPRING_DATASOURCE_URL"):
+            # Fallback to local H2 in-memory test database for automated test suites if no PG is running
+            pg_url_default = "jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE"
+            pg_driver_default = "org.h2.Driver"
+            pg_user_default = "sa"
+            pg_pass_default = ""
+            pg_dialect_default = "org.hibernate.dialect.H2Dialect"
+
+        lines.append(f"spring.datasource.url=${{{url_var}:{pg_url_default}}}")
+        lines.append(f"spring.datasource.driverClassName=${{{driver_var}:{pg_driver_default}}}")
+        lines.append(f"spring.datasource.username=${{{user_var}:{pg_user_default}}}")
+        lines.append(f"spring.datasource.password=${{{pass_var}:{pg_pass_default}}}")
         
         # Handle schema mapping in application.properties if configured
-        db_schema = os.environ.get("DB2_SCHEMA")
+        db_schema = os.environ.get("DB2_SCHEMA") or os.environ.get("SPRING_DATASOURCE_SCHEMA")
         if db_schema:
             lines.append(f"spring.datasource.hikari.schema={db_schema}")
             if is_jpa:
                 lines.append(f"spring.jpa.properties.hibernate.default_schema={db_schema}")
 
         if is_jpa:
-            lines.append(f"spring.jpa.database-platform=${{DB2_DIALECT:{jpa_platform_default}}}")
+            lines.append(f"spring.jpa.database-platform=${{{dialect_var}:{pg_dialect_default}}}")
             lines.append("spring.hibernate.ddl-auto=update")
             
         if self._check_batch_evidence():
@@ -371,6 +407,46 @@ class EnterpriseApplicationGenerator:
         path = os.path.join(java_base, "SpringContextHelper.java")
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
+
+    def _write_db2_error_mapper(self, java_base: str):
+        mapper_src = """package com.systema.modernized;
+public class Db2ErrorMapper {
+    public static int getSqlCode(Exception e) {
+        if (e instanceof org.springframework.dao.EmptyResultDataAccessException) {
+            return 100;
+        }
+        Throwable cause = e.getCause();
+        if (cause instanceof java.sql.SQLException) {
+            java.sql.SQLException sqle = (java.sql.SQLException) cause;
+            String state = sqle.getSQLState();
+            if ("23505".equals(state)) return -803; // duplicate key
+            if ("42P01".equals(state) || "42S02".equals(state)) return -204; // table undefined
+            if ("42703".equals(state) || "42S22".equals(state)) return -206; // column undefined
+            int code = sqle.getErrorCode();
+            return code != 0 ? -Math.abs(code) : -1;
+        }
+        return -1;
+    }
+    
+    public static String getSqlState(Exception e) {
+        if (e instanceof org.springframework.dao.EmptyResultDataAccessException) {
+            return "02000";
+        }
+        Throwable cause = e.getCause();
+        if (cause instanceof java.sql.SQLException) {
+            java.sql.SQLException sqle = (java.sql.SQLException) cause;
+            String state = sqle.getSQLState();
+            if ("42P01".equals(state) || "42S02".equals(state)) return "42704"; // table undefined
+            if ("42703".equals(state) || "42S22".equals(state)) return "42704";
+            return state != null ? state : "99999";
+        }
+        return "99999";
+    }
+}
+"""
+        path = os.path.join(java_base, "Db2ErrorMapper.java")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(mapper_src)
 
     def _write_jcl_execution_context(self, java_base: str):
         jcl_context_src = """package com.systema.modernized;
@@ -469,7 +545,7 @@ public class CicsProgramRegistry {
                     }
                 }
                 String className = sb.toString();
-                Class.forName("com.systema.modernized.native_gen." + className);
+                Class.forName("com.systema.modernized." + className);
                 supplier = registry.get(name.toUpperCase());
             } catch (Exception e) {}
         }

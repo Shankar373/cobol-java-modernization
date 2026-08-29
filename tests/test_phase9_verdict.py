@@ -1,6 +1,6 @@
 """Phase 9 - Evidence-driven Verdict Tests
 
-Verifies _compute_verdict() never returns PRODUCTION_READY without gate evidence,
+Verifies _compute_verdict() never returns MVP_CERTIFIED without gate evidence,
 returns correct tier based on what evidence is present.
 """
 import os
@@ -118,7 +118,7 @@ class TestVerdictTiers:
         _set_data(p, "generate", {"dependency_audit": {"executed": True, "status": "PASS"}})
         # execute not done -> NATIVE_SPRING_UNIFIED
         v = p._compute_verdict()
-        assert v in ("NATIVE_SPRING_UNIFIED", "PRODUCTION_CANDIDATE")
+        assert v in ("NATIVE_SPRING_UNIFIED", "CERTIFIED_WITH_REVIEW")
 
     def test_enterprise_gate_requires_real_audit_evidence(self, blank_pipeline):
         """Generating a Spring project without dependency-audit evidence caps the
@@ -136,7 +136,7 @@ class TestVerdictTiers:
         assert v == "NATIVE_JAVA_VERIFIED"
 
     def test_production_ready_requires_all_gates(self, blank_pipeline):
-        """PRODUCTION_READY must never be returned when neg_equiv is absent."""
+        """MVP_CERTIFIED must never be returned when neg_equiv is absent."""
         p = blank_pipeline
         _set_stage_done(p, "ingest")
         _set_stage_done(p, "generate")
@@ -150,14 +150,14 @@ class TestVerdictTiers:
         _set_data(p, "generate", {})
         _set_data(p, "execute", {"status": "ok"})
         _set_data(p, "validate", {"status": "passed"})
-        # neg_equiv missing -> NOT PRODUCTION_READY
+        # neg_equiv missing -> NOT MVP_CERTIFIED
         v = p._compute_verdict()
-        assert v != "PRODUCTION_READY", (
-            f"Expected PRODUCTION_CANDIDATE not PRODUCTION_READY without neg_equiv; got {v}"
+        assert v != "MVP_CERTIFIED", (
+            f"Expected CERTIFIED_WITH_REVIEW not MVP_CERTIFIED without neg_equiv; got {v}"
         )
 
     def test_production_ready_with_all_gates(self, blank_pipeline):
-        """PRODUCTION_READY when every gate has positive evidence (Phase 10: executed=True required)."""
+        """MVP_CERTIFIED when every gate has positive evidence (Phase 10: executed=True required)."""
         p = blank_pipeline
         _set_stage_done(p, "ingest")
         _set_stage_done(p, "generate")
@@ -168,7 +168,7 @@ class TestVerdictTiers:
         _set_data(p, "baseline_files", ["out.txt"])
         _set_data(p, "compare", {"status": "PASS", "checks": [{"ok": True}], "rows": [],
                                  "stdout_equiv_ok": True})
-        # Phase 10: executed=True is required for both gates to reach PRODUCTION_READY.
+        # Phase 10: executed=True is required for both gates to reach MVP_CERTIFIED.
         _set_data(p, "collect", {"dependency_audit": {
             "executed": True, "status": "PASS", "verdict": "PASS",
         }})
@@ -181,7 +181,7 @@ class TestVerdictTiers:
             "executed": True, "status": "PASS", "verdict": "PASS",
         })
         v = p._compute_verdict()
-        assert v == "PRODUCTION_READY"
+        assert v == "MVP_CERTIFIED"
 
     def test_baseline_unproducible_verdict(self, blank_pipeline):
         p = blank_pipeline
@@ -193,5 +193,5 @@ class TestVerdictTiers:
     def test_verdict_never_fabricates_pass_on_fresh_run(self, blank_pipeline):
         """Absolutely no pass-equivalent on a fresh pipeline."""
         v = blank_pipeline._compute_verdict()
-        pass_equiv = {"PRODUCTION_READY", "PRODUCTION_CANDIDATE", "VERIFIED", "NATIVE_JAVA_VERIFIED"}
+        pass_equiv = {"MVP_CERTIFIED", "CERTIFIED_WITH_REVIEW", "VERIFIED", "NATIVE_JAVA_VERIFIED"}
         assert v not in pass_equiv, f"Fresh pipeline must not return pass-tier verdict; got {v}"

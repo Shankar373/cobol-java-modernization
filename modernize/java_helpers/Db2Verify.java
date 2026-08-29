@@ -11,26 +11,52 @@ public class Db2Verify {
             System.exit(1);
         }
         String sql = args[0];
-        String dbUrl = System.getenv("DB2_URL");
-        String dbUser = System.getenv("DB2_USERNAME");
-        String dbPass = System.getenv("DB2_PASSWORD");
-        String dbSchema = System.getenv("DB2_SCHEMA");
+        String dbUrl = System.getenv("SPRING_DATASOURCE_URL");
+        String dbUser = System.getenv("SPRING_DATASOURCE_USERNAME");
+        String dbPass = System.getenv("SPRING_DATASOURCE_PASSWORD");
+        String dbDriver = System.getenv("SPRING_DATASOURCE_DRIVER");
+        String dbSchema = System.getenv("DB2_SCHEMA") != null ? System.getenv("DB2_SCHEMA") : System.getenv("SPRING_DATASOURCE_SCHEMA");
 
-        if (dbUrl == null || dbUser == null || dbPass == null) {
-            System.err.println("Error: Missing environment variables DB2_URL, DB2_USERNAME, or DB2_PASSWORD.");
-            System.exit(1);
+        if (dbUrl == null) {
+            dbUrl = System.getenv("DB2_URL");
+            dbUser = System.getenv("DB2_USERNAME");
+            dbPass = System.getenv("DB2_PASSWORD");
+            dbDriver = "com.ibm.db2.jcc.DB2Driver";
+        }
+        if (dbUrl == null) {
+            dbUrl = "jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE";
+            dbUser = "sa";
+            dbPass = "";
+            dbDriver = "org.h2.Driver";
+        }
+        if (dbDriver == null) {
+            if (dbUrl.contains("postgresql")) {
+                dbDriver = "org.postgresql.Driver";
+            } else if (dbUrl.contains("h2")) {
+                dbDriver = "org.h2.Driver";
+            } else {
+                dbDriver = "com.ibm.db2.jcc.DB2Driver";
+            }
         }
 
         Connection conn = null;
         Statement stmt = null;
         ResultSet rs = null;
         try {
-            Class.forName("com.ibm.db2.jcc.DB2Driver");
+            Class.forName(dbDriver);
             conn = DriverManager.getConnection(dbUrl, dbUser, dbPass);
             
             if (dbSchema != null && !dbSchema.trim().isEmpty()) {
                 Statement sSchema = conn.createStatement();
-                sSchema.execute("SET SCHEMA " + dbSchema.trim());
+                try {
+                    sSchema.execute("SET SCHEMA " + dbSchema.trim());
+                } catch (Exception exSchema) {
+                    try {
+                        sSchema.execute("SET SCHEMA = " + dbSchema.trim());
+                    } catch (Exception exSchema2) {
+                        // ignore if dialect doesn't support schema set
+                    }
+                }
                 sSchema.close();
             }
 

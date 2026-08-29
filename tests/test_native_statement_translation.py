@@ -27,7 +27,7 @@ def test_translate_move():
         }
     }
     java_code_literal = trans.translate_statement(node_move_literal)
-    assert java_code_literal == 'var_c = new BigDecimal("100.50");'
+    assert java_code_literal == 'var_c.assign(new BigDecimal("100.50"), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);'
 
 def test_translate_arithmetic():
     var_types = {"VAR-X": "BigDecimal", "VAR-Y": "BigDecimal"}
@@ -41,7 +41,7 @@ def test_translate_arithmetic():
         }
     }
     java_add = trans.translate_statement(node_add)
-    assert java_add == 'var_x = var_x.add(new BigDecimal("10.00"));'
+    assert java_add == 'var_x.assign(com.systema.modernized.runtime.CobolArithmetic.add(var_x.getValue(), new BigDecimal("10.00")), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);'
 
 def test_translate_display():
     var_types = {"VAR-A": "String", "VAR-B": "BigDecimal"}
@@ -58,7 +58,16 @@ def test_translate_display():
         }
     }
     java_display = trans.translate_statement(node_display)
-    assert java_display == 'System.out.println("Total: " + " " + var_a + " " + String.valueOf(var_b));'
+    expected = (
+        "{\n"
+        "        writeBytes(\"Total: \".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));\n"
+        "        writeBytes(var_a.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));\n"
+        "        writeBytes(String.valueOf(var_b.getValue()).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));\n"
+        "        System.out.write(10);\n"
+        "        System.out.flush();\n"
+        "    }"
+    )
+    assert java_display == expected
 
 
 def test_translate_move_function_numval():
@@ -72,7 +81,7 @@ def test_translate_move_function_numval():
         }
     }
     java_code = trans.translate_statement(node_move)
-    assert java_code == "tx_amount = com.systema.modernized.CobolFormatHelper.numval(tx_amount_text);"
+    assert java_code == 'tx_amount.assign(com.systema.modernized.CobolFormatHelper.numval(tx_amount_text), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);'
 
 
 def test_translate_spaces_condition():
@@ -93,7 +102,7 @@ def test_translate_function_mod():
         }
     }
     java_code = trans.translate_statement(node_move)
-    assert java_code == "ws_result = (com.systema.modernized.CobolFormatHelper.mod(BigDecimal.valueOf(ws_year), new BigDecimal(\"4\"))).intValue();"
+    assert java_code == 'ws_result = (com.systema.modernized.CobolFormatHelper.mod(BigDecimal.valueOf(ws_year), new BigDecimal("4"))).intValue();'
 
 
 def test_translate_condition_function_mod():

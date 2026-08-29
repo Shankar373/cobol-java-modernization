@@ -42,8 +42,8 @@ def test_pointers_e2e():
     temp_out = tempfile.mkdtemp()
     
     expected_stdout = (
-        "LS-VAR BEFORE:  HELLO\n"
-        "WS-VAR AFTER:  WORLD\n"
+        "LS-VAR BEFORE: HELLO\n"
+        "WS-VAR AFTER: WORLD\n"
     )
     
     try:

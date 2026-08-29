@@ -119,12 +119,12 @@ class TestManifestRequiredKeys:
         assert data["stages"]["ingest"]["status"] == "done"
 
     def test_final_verdict_not_production_ready_without_gates(self, pipeline_after_report):
-        """Without full gate evidence, manifest must not claim PRODUCTION_READY."""
+        """Without full gate evidence, manifest must not claim MVP_CERTIFIED."""
         p, out = pipeline_after_report
         p.stage_report()
         data = json.loads((out / "pipeline_execution_manifest.json").read_text(encoding="utf-8"))
-        assert data["final_verdict"] != "PRODUCTION_READY", (
-            f"Manifest claimed PRODUCTION_READY without evidence; got {data['final_verdict']}"
+        assert data["final_verdict"] != "MVP_CERTIFIED", (
+            f"Manifest claimed MVP_CERTIFIED without evidence; got {data['final_verdict']}"
         )
 
     def test_final_verdict_matches_compute_verdict(self, pipeline_after_report):

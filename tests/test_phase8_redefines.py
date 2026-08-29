@@ -106,7 +106,7 @@ class TestBackingStorage:
             "PROCEDURE DIVISION. P. STOP RUN."
         )
         _, java = parse_and_gen(cobol)
-        assert "char[]" in java and "_backing" in java
+        assert "byte[]" in java and "_backing" in java
 
     def test_no_independent_field_for_redefines(self):
         cobol = (
@@ -137,7 +137,7 @@ class TestBackingStorage:
             "PROCEDURE DIVISION. P. STOP RUN."
         )
         _, java = parse_and_gen(cobol)
-        assert "new char[8]" in java
+        assert "new byte[8]" in java
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +166,8 @@ class TestAccessors:
             "PROCEDURE DIVISION. P. STOP RUN."
         )
         _, java = parse_and_gen(cobol)
-        assert "_backing[off + i] = padded.charAt(i)" in java
+        assert "System.arraycopy(" in java
+        assert "getBytes(" in java
 
     def test_getter_reads_from_backing(self):
         cobol = (

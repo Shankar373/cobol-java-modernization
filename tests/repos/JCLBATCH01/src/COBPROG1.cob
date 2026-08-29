@@ -28,9 +28,10 @@
                AT END MOVE 'Y' TO WS-EOF-SYS
            END-READ.
            MOVE SPACES TO OUT-REC.
-           STRING "PROG1:" IN-REC DELIMITED BY SIZE
+           STRING "PROG1:" DELIMITED BY SIZE
+                  IN-REC DELIMITED BY "  "
                   " " DELIMITED BY SIZE
-                  SYSIN-REC DELIMITED BY SIZE
+                  SYSIN-REC DELIMITED BY "  "
                   INTO OUT-REC.
            WRITE OUT-REC.
            CLOSE INPUT-FILE SYSIN-FILE OUTPUT-FILE.

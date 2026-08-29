@@ -330,8 +330,8 @@ class NativeExpressionTranslator:
             return "[" + key + "]"
         masked = re.sub(r'\[([^\[\]]*)\]', _mask, expr_str)
         
-        _bare_op = r'(?<![a-zA-Z0-9_])[\+\-\*\/]'
-        tokens = re.split(rf'(\s+[\+\-\*\/]\s+|\s+[\+\-\*\/]|[\+\-\*\/]\s+|\(|\)|{_bare_op})', masked)
+        _bare_op = r'(?<![a-zA-Z0-9_])(?:\*\*|[\+\-\*\/])'
+        tokens = re.split(rf'(\s+\*\*\s+|\s+\*\*|\*\*\s+|\s+[\+\-\*\/]\s+|\s+[\+\-\*\/]|[\+\-\*\/]\s+|\(|\)|{_bare_op})', masked)
         
         def to_java_string_literal(cobol_lit: str) -> str:
             inner = cobol_lit[1:-1]
@@ -347,7 +347,7 @@ class NativeExpressionTranslator:
             t_strip = t.strip()
             if not t_strip:
                 continue
-            if t_strip in ("+", "-", "*", "/", "(", ")"):
+            if t_strip in ("+", "-", "*", "/", "**", "(", ")"):
                 translated_tokens.append(t_strip)
             elif (t_strip.startswith("'") and t_strip.endswith("'")) or (t_strip.startswith('"') and t_strip.endswith('"')):
                 translated_tokens.append(to_java_string_literal(t_strip))
@@ -373,6 +373,9 @@ class NativeExpressionTranslator:
                     else:
                         translated_tokens.append(raw_token)
                 elif raw_token.startswith("get_"):
+                    translated_tokens.append(raw_token)
+                elif re.match(r'^__(?:numval|mod|substring)_\d+__$', raw_token):
+                    # Masked placeholder for FUNCTION calls that return raw BigDecimal (not CobolNumeric)
                     translated_tokens.append(raw_token)
                 else:
                     raw_upper = raw_token.upper()
@@ -446,11 +449,19 @@ class NativeExpressionTranslator:
                 return parse_factor()
             return consume()
 
-        def parse_term() -> str:
+        def parse_power() -> str:
             left = parse_factor()
+            while peek() == "**":
+                consume()
+                right = parse_factor()
+                left = f"com.systema.modernized.runtime.CobolArithmetic.power({left}, {right})"
+            return left
+
+        def parse_term() -> str:
+            left = parse_power()
             while peek() in ("*", "/"):
                 op = consume()
-                right = parse_factor()
+                right = parse_power()
                 if op == "*":
                     left = f"com.systema.modernized.runtime.CobolArithmetic.multiply({left}, {right})"
                 else:
@@ -556,8 +567,8 @@ class NativeStatementTranslator:
             else:
                 java_base = to_java_var(base)
             
+            base_type = self.var_types.get(base)
             if self.current_generator:
-                base_type = self.current_generator.var_types.get(base)
                 is_edited = getattr(self.current_generator, "var_edited", {}).get(base, False)
                 if base_type == "String":
                     pic = self.current_generator.var_pics.get(base, "")
@@ -668,7 +679,7 @@ class NativeStatementTranslator:
             return java_stmt
             
         cleaned = java_stmt.strip()
-        if cleaned.endswith("{") or cleaned.endswith("}") or java_stmt.startswith("//"):
+        if cleaned.endswith("{") or cleaned == "}" or java_stmt.startswith("//"):
             return java_stmt
             
         lines = java_stmt.splitlines()
@@ -1468,23 +1479,29 @@ class NativeStatementTranslator:
                 
             is_keyed = (org in ("INDEXED", "RELATIVE") and access_mode in ("RANDOM", "DYNAMIC") and not props.get("is_next", False))
             
+            key_to_use = props.get("key_name")
+            if not key_to_use:
+                key_to_use = record_key
+            
             key_expr = "null"
-            if record_key:
-                key_jvar = to_java_var(record_key)
-                if self.current_generator and record_key.upper() in self.current_generator.redefines_layout:
+            if key_to_use:
+                key_jvar = to_java_var(key_to_use)
+                if self.current_generator and key_to_use.upper() in self.current_generator.redefines_layout:
                     key_expr = f"String.valueOf(get_{key_jvar}())"
                 else:
                     key_expr = f"String.valueOf({key_jvar})"
             
+            key_name_param = f"\"{key_to_use.upper()}\"" if key_to_use else "\"\""
+            
             if not at_end_nodes and not not_at_end_nodes and not invalid_key_nodes and not not_invalid_key_nodes and not into_target:
                 if is_keyed:
-                    return f"read_{java_tgt}_key({key_expr});"
+                    return f"read_{java_tgt}_key({key_expr}, {key_name_param});"
                 else:
                     return f"read_{java_tgt}();"
                     
             lines = []
             if is_keyed:
-                lines.append(f"if (!read_{java_tgt}_key({key_expr})) {{")
+                lines.append(f"if (!read_{java_tgt}_key({key_expr}, {key_name_param})) {{")
                 for node in invalid_key_nodes:
                     stmt_str = self.translate_statement(node)
                     if stmt_str:
@@ -1674,11 +1691,13 @@ class NativeStatementTranslator:
                 else:
                     key_expr = key_jvar
                     
+            key_name_param = f"\"{key_var.upper()}\"" if key_var else "\"\""
+            
             lines = []
             if not invalid_key_nodes and not not_invalid_key_nodes:
-                return f"start_{java_tgt}({key_expr}, \"{key_op}\");"
+                return f"start_{java_tgt}({key_expr}, \"{key_op}\", {key_name_param});"
                 
-            lines.append(f"if (!start_{java_tgt}({key_expr}, \"{key_op}\")) {{")
+            lines.append(f"if (!start_{java_tgt}({key_expr}, \"{key_op}\", {key_name_param})) {{")
             for node in invalid_key_nodes:
                 stmt_str = self.translate_statement(node)
                 if stmt_str:
@@ -1803,20 +1822,38 @@ class NativeStatementTranslator:
             java_parts = []
             for part in parts:
                 val = part.get("value", "")
-                if val.startswith("'") or val.startswith('"'):
-                    val_clean = val[1:-1].replace('"', '\\"')
-                    java_parts.append(f"\"{val_clean}\"")
+                val_type = part.get("type", "variable")
+                delim_by = part.get("delimited_by", "SIZE")
+                delim_type = part.get("delimited_by_type", "keyword")
+                
+                if val_type == "literal":
+                    part_expr = f"\"{val}\""
                 elif val in self.var_types:
                     java_var = to_java_var(val)
                     if val.upper() in self.redefines_layout and not self.redefines_layout[val.upper()]["is_array"]:
                         java_var = f"get_{java_var}()"
                     var_type = self.var_types.get(val, "String")
                     if var_type == "String":
-                        java_parts.append(java_var)
+                        part_expr = java_var
                     else:
-                        java_parts.append(f"String.valueOf({java_var})")
+                        part_expr = f"String.valueOf({java_var})"
                 else:
-                    java_parts.append(f"\"{val}\"")
+                    part_expr = f"\"{val}\""
+                
+                if delim_by != "SIZE":
+                    delim_str = ""
+                    if delim_by == "SPACE":
+                        delim_str = "\" \""
+                    elif delim_type == "literal":
+                        delim_str = f"\"{delim_by}\""
+                    else:
+                        delim_var = to_java_var(delim_by)
+                        delim_str = delim_var
+                        if self.var_types.get(delim_by, "String") != "String":
+                            delim_str = f"String.valueOf({delim_str})"
+                    part_expr = f"com.systema.modernized.CobolFormatHelper.delimitedString({part_expr}, {delim_str})"
+                
+                java_parts.append(part_expr)
             
             concat_expr = " + ".join(java_parts)
             return self.generate_assignment(tgt, concat_expr)
@@ -2067,8 +2104,6 @@ class NativeStatementTranslator:
         elif stype == "CALL":
             target = props.get("target", "")
             arguments = props.get("arguments", [])
-            if arguments:
-                raise Exception("CALL with arguments is unsupported pending Commit 2 (immutability and aliasing model)")
             returning = props.get("returning")
             
             def get_flat_vars(prog_gen, arg_names):
@@ -2149,7 +2184,13 @@ class NativeStatementTranslator:
                              else to_java_var(cond_stripped))
                     if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
                         r_val = f"get_{to_java_var(cond_stripped)}()"
-                    java_cond = f"{subj_java}.compareTo({r_val}) == 0"
+                    elif cond_stripped.upper() in self.var_types and self.var_types[cond_stripped.upper()] == "BigDecimal":
+                        r_val = f"{to_java_var(cond_stripped)}.getValue()"
+                    
+                    subj_ref = subj_java
+                    if subject.upper() not in self.redefines_layout:
+                        subj_ref = f"{subj_java}.getValue()"
+                    java_cond = f"{subj_ref}.compareTo({r_val}) == 0"
                 elif subj_type in ("Integer", "Long"):
                     r_val = cond_stripped
                     if cond_stripped.upper() in self.var_types:
@@ -2183,7 +2224,7 @@ class NativeStatementTranslator:
                 return 'System.out.write(10); System.out.flush();'
             
             write_stmts = []
-            for op in operands:
+            for idx, op in enumerate(operands):
                 val = op.get("value", "")
                 op_type = op.get("type", "variable")
                 if op_type == "literal":
@@ -2394,12 +2435,32 @@ class NativeStatementTranslator:
                     updates.append(f"sqlstate = {state_val};")
                 return "\n            ".join(updates)
 
+            def get_error_status_updates(e_var="e"):
+                """Use Db2ErrorMapper to map the caught exception to SQLCODE/SQLSTATE."""
+                updates = []
+                if "SQLCODE" in self.var_types:
+                    updates.append(f"sqlcode = com.systema.modernized.Db2ErrorMapper.getSqlCode({e_var});")
+                if "SQLSTATE" in self.var_types:
+                    updates.append(f"sqlstate = com.systema.modernized.Db2ErrorMapper.getSqlState({e_var});")
+                if not updates:
+                    # No SQLCA vars declared — still set a fallback
+                    return ""
+                return "\n            ".join(updates)
+
             if sql_type in ("COMMIT", "ROLLBACK"):
                 lines.append("try {")
-                lines.append(f"    com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"{sql_type}\");")
+                lines.append("    if (com.systema.modernized.SpringContextHelper.transactionManager != null && txStatus != null) {")
+                if sql_type == "COMMIT":
+                    lines.append("        com.systema.modernized.SpringContextHelper.transactionManager.commit(txStatus);")
+                else:
+                    lines.append("        com.systema.modernized.SpringContextHelper.transactionManager.rollback(txStatus);")
+                lines.append("        txStatus = com.systema.modernized.SpringContextHelper.transactionManager.getTransaction(new org.springframework.transaction.support.DefaultTransactionDefinition());")
+                lines.append("    } else {")
+                lines.append(f"        com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"{sql_type}\");")
+                lines.append("    }")
                 lines.append(f"    {get_status_updates(success=True)}")
                 lines.append("} catch (Exception e) {")
-                lines.append(f"    {get_status_updates(error=True)}")
+                lines.append(f"    {get_error_status_updates()}")
                 lines.append("}")
                 return "\n        ".join(lines)
                 
@@ -2425,7 +2486,13 @@ class NativeStatementTranslator:
                         _, main_var, indicator = p.split(":")
                         java_params.append(f"({to_java_var(indicator)} == -1) ? null : {to_java_var(main_var)}")
                     else:
-                        java_params.append(self.expr_trans.translate(p))
+                        val_expr = self.expr_trans.translate(p)
+                        var_name = p
+                        if var_name.startswith(":"):
+                            var_name = var_name[1:]
+                        if self._get_var_type(var_name, "String") == "String":
+                            val_expr = f"({val_expr} != null ? {val_expr}.trim() : null)"
+                        java_params.append(val_expr)
                 params_str = ", ".join(java_params)
                 if params_str:
                     params_str = ", " + params_str
@@ -2459,20 +2526,30 @@ class NativeStatementTranslator:
                     elif tgt_type == "Long":
                         getter = f"cursor_{cname.lower()}.getLong({i+1})"
                     else:
-                        getter = f"cursor_{cname.lower()}.getString({i+1})"
+                        # Pad String to declared PIC X width so fixed-width COBOL fields are honoured
+                        raw = f"cursor_{cname.lower()}.getString({i+1})"
+                        pic_str = (self.current_generator.var_pics.get(target.upper(), "") if self.current_generator else "")
+                        if pic_str:
+                            _, str_len, _, _ = NativeTypeMapper.parse_pic(pic_str)
+                        else:
+                            str_len = 0
+                        if str_len > 0:
+                            getter = f"String.format(\"%-{str_len}s\", {raw} != null ? {raw} : \"\".repeat({str_len}))"
+                        else:
+                            getter = raw
                     
                     is_redef = target.upper() in self.redefines_layout and not self.redefines_layout[target.upper()]["is_array"]
                     
                     if i < len(into_indicators) and into_indicators[i]:
                         ind_jvar = to_java_var(into_indicators[i])
+                        if is_redef:
+                            assignments.append(f"set_{tgt_jvar}({getter});")
+                        else:
+                            assignments.append(f"{tgt_jvar} = {getter};")
                         assignments.append(f"if (cursor_{cname.lower()}.wasNull()) {{")
                         assignments.append(f"    {ind_jvar} = -1;")
                         assignments.append(f"}} else {{")
                         assignments.append(f"    {ind_jvar} = 0;")
-                        if is_redef:
-                            assignments.append(f"    set_{tgt_jvar}({getter});")
-                        else:
-                            assignments.append(f"    {tgt_jvar} = {getter};")
                         assignments.append(f"}}")
                     else:
                         if is_redef:
@@ -2502,7 +2579,13 @@ class NativeStatementTranslator:
                         _, main_var, indicator = p.split(":")
                         java_params.append(f"({to_java_var(indicator)} == -1) ? null : {to_java_var(main_var)}")
                     else:
-                        java_params.append(self.expr_trans.translate(p))
+                        val_expr = self.expr_trans.translate(p)
+                        var_name = p
+                        if var_name.startswith(":"):
+                            var_name = var_name[1:]
+                        if self._get_var_type(var_name, "String") == "String":
+                            val_expr = f"({val_expr} != null ? {val_expr}.trim() : null)"
+                        java_params.append(val_expr)
                 params_str = ", ".join(java_params)
                 if params_str:
                     params_str = ", " + params_str
@@ -2520,20 +2603,30 @@ class NativeStatementTranslator:
                     elif tgt_type == "Long":
                         getter = f"rs.getLong({i+1})"
                     else:
-                        getter = f"rs.getString({i+1})"
+                        # Pad String to declared PIC X width so fixed-width COBOL fields are honoured
+                        raw = f"rs.getString({i+1})"
+                        pic_str = (self.current_generator.var_pics.get(target.upper(), "") if self.current_generator else "")
+                        if pic_str:
+                            _, str_len, _, _ = NativeTypeMapper.parse_pic(pic_str)
+                        else:
+                            str_len = 0
+                        if str_len > 0:
+                            getter = f"String.format(\"%-{str_len}s\", {raw} != null ? {raw} : \"\".repeat({str_len}))"
+                        else:
+                            getter = raw
                     
                     is_redef = target.upper() in self.redefines_layout and not self.redefines_layout[target.upper()]["is_array"]
                     
                     if i < len(into_indicators) and into_indicators[i]:
                         ind_jvar = to_java_var(into_indicators[i])
+                        if is_redef:
+                            assignments.append(f"set_{tgt_jvar}({getter});")
+                        else:
+                            assignments.append(f"{tgt_jvar} = {getter};")
                         assignments.append(f"if (rs.wasNull()) {{")
                         assignments.append(f"    {ind_jvar} = -1;")
                         assignments.append(f"}} else {{")
                         assignments.append(f"    {ind_jvar} = 0;")
-                        if is_redef:
-                            assignments.append(f"    set_{tgt_jvar}({getter});")
-                        else:
-                            assignments.append(f"    {tgt_jvar} = {getter};")
                         assignments.append(f"}}")
                     else:
                         if is_redef:
@@ -2552,7 +2645,7 @@ class NativeStatementTranslator:
                 lines.append(f"        {get_status_updates(notfound=True)}")
                 lines.append("    }")
                 lines.append("} catch (Exception e) {")
-                lines.append(f"    {get_status_updates(error=True)}")
+                lines.append(f"    System.err.println(\"[SQL-ERROR] SELECT on {sql_str}: \" + e.getMessage()); {get_error_status_updates()}")
                 lines.append("}")
                 return "\n        ".join(lines)
                 
@@ -2564,7 +2657,13 @@ class NativeStatementTranslator:
                         _, main_var, indicator = p.split(":")
                         java_params.append(f"({to_java_var(indicator)} == -1) ? null : {to_java_var(main_var)}")
                     else:
-                        java_params.append(self.expr_trans.translate(p))
+                        val_expr = self.expr_trans.translate(p)
+                        var_name = p
+                        if var_name.startswith(":"):
+                            var_name = var_name[1:]
+                        if self._get_var_type(var_name, "String") == "String":
+                            val_expr = f"({val_expr} != null ? {val_expr}.trim() : null)"
+                        java_params.append(val_expr)
                 params_str = ", ".join(java_params)
                 if params_str:
                     params_str = ", " + params_str
@@ -2578,7 +2677,7 @@ class NativeStatementTranslator:
                 lines.append(f"        {get_status_updates(notfound=is_modify, success=not is_modify)}")
                 lines.append("    }")
                 lines.append("} catch (Exception e) {")
-                lines.append(f"    {get_status_updates(error=True)}")
+                lines.append(f"    System.err.println(\"[SQL-ERROR] {sql_type} on {sql_str}: \" + e.getMessage()); {get_error_status_updates()}")
                 lines.append("}")
                 return "\n        ".join(lines)
 
@@ -2814,13 +2913,27 @@ class NativeStatementTranslator:
             jv = to_java_var(v)
             if t == "BigDecimal":
                 pattern = r'\b' + re.escape(jv) + r'(\[[^\]]+\])?\s*(==|!=|>|<|>=|<=)\s*([A-Za-z0-9_\-\.]+)\b'
-                def repl_bd(match, _jv=jv):
+                def repl_bd(match, _jv=jv, _v=v):
                     sub = match.group(1) or ""
                     op = match.group(2)
                     right = match.group(3)
-                    r_val = f"new BigDecimal(\"{right}\")" if re.match(r'^\d+(\.\d+)?$', right) else right
+                    right_upper = right.upper()
+                    if right_upper in self.var_types:
+                        r_java = to_java_var(right)
+                        if self.var_types[right_upper] == "BigDecimal":
+                            if right_upper in self.redefines_layout:
+                                r_val = r_java
+                            else:
+                                r_val = f"{r_java}.getValue()"
+                        else:
+                            r_val = r_java
+                    else:
+                        r_val = f"new BigDecimal(\"{right}\")" if re.match(r'^\d+(\.\d+)?$', right) else right
                     map_ops = {"==": "== 0", "!=": "!= 0", ">": "> 0", "<": "< 0", ">=": ">= 0", "<=": "<= 0"}
-                    return f"{_jv}{sub}.compareTo({r_val}) {map_ops.get(op, op)}"
+                    if _v.upper() in self.redefines_layout:
+                        return f"{_jv}{sub}.compareTo({r_val}) {map_ops.get(op, op)}"
+                    else:
+                        return f"{_jv}{sub}.getValue().compareTo({r_val}) {map_ops.get(op, op)}"
                 cond = re.sub(pattern, repl_bd, cond)
             elif t == "String":
                 pattern = r'\b' + re.escape(jv) + r'(\[[^\]]+\]|\.substring\((?:[^()]+|\([^()]*\))*\))?\s*(==|!=)\s*(\"[^\"]*\"|\'[^\']*\'|[A-Za-z0-9_\-\.]+)'
@@ -2894,10 +3007,12 @@ class NativeFileIOGenerator:
     def generate_io_methods(fd_name: str, assign_path: str, is_input: bool, record_fields: list,
                             redefined_record_name: str = None, redefined_record_len: int = None,
                             organization: str = "SEQUENTIAL", record_key: str = None,
+                            alternate_keys: list = None,
                             status_var: str = None, redefines_layout: dict = None,
                             assign_name: str = None,
                             var_pics: dict = None, var_usages: dict = None,
-                            var_sign_positions: dict = None, var_sign_separates: dict = None) -> str:
+                            var_sign_positions: dict = None, var_sign_separates: dict = None,
+                            has_reports: bool = False) -> str:
         java_fd = to_java_var(fd_name)
         
         var_pics = var_pics or {}
@@ -2945,6 +3060,24 @@ class NativeFileIOGenerator:
             offsets.append((f_name, curr, curr + length))
             curr += length
             
+        field_offsets = {}
+        for f_name, start, end in offsets:
+            field_offsets[f_name.upper()] = (start, end)
+
+        alt_key_defs = []
+        if alternate_keys:
+            for ak in alternate_keys:
+                ak_name = ak["name"]
+                if ak_name.upper() in field_offsets:
+                    s, e = field_offsets[ak_name.upper()]
+                    alt_key_defs.append({
+                        "name": ak_name,
+                        "clean_name": ak_name.lower().replace("-", "_"),
+                        "start": s,
+                        "end": e,
+                        "with_duplicates": ak.get("with_duplicates", False)
+                    })
+            
         def get_status_assign(val):
             if not status_var:
                 return ""
@@ -2990,6 +3123,7 @@ class NativeFileIOGenerator:
             lines.append(f"    private java.util.Map<String, String> {java_fd}_records = new java.util.LinkedHashMap<>();")
             lines.append(f"    private java.util.List<String> {java_fd}_db_list = new java.util.ArrayList<>();")
             lines.append(f"    private java.util.Iterator<String> {java_fd}_iterator;")
+            lines.append(f"    private boolean {java_fd}_eof = false;")
             lines.append("")
             
             lines.append(f"    private void save_{java_fd}() {{")
@@ -3032,6 +3166,7 @@ class NativeFileIOGenerator:
             lines.append(f"            {java_fd}_records.clear();")
             lines.append(f"            {java_fd}_db_list.clear();")
             lines.append(f"            {java_fd}_iterator = null;")
+            lines.append(f"            {java_fd}_eof = false;")
             lines.append(f"            boolean hasDb = false;")
             lines.append(f"            try {{")
             lines.append(f"                if (com.systema.modernized.SpringContextHelper.jdbcTemplate != null) {{")
@@ -3040,9 +3175,20 @@ class NativeFileIOGenerator:
             lines.append(f"            }} catch (Throwable t) {{}}")
             lines.append(f"            java.nio.file.Path p = Paths.get(resolve_path_{java_fd}());")
             lines.append(f"            if (hasDb) {{")
+            
+            alt_cols_ddl = ""
+            for akd in alt_key_defs:
+                alt_cols_ddl += f", {akd['clean_name']} VARCHAR(255)"
+            
             lines.append(f"                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(")
-            lines.append(f"                    \"CREATE TABLE IF NOT EXISTS {fd_name_clean}_vsam (key_col VARCHAR(255) PRIMARY KEY, record_col VARCHAR(4000))\"")
+            lines.append(f"                    \"CREATE TABLE IF NOT EXISTS {fd_name_clean}_vsam (key_col VARCHAR(255) PRIMARY KEY{alt_cols_ddl}, record_col VARCHAR(4000))\"")
             lines.append(f"                );")
+            
+            for akd in alt_key_defs:
+                lines.append(f"                com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(")
+                lines.append(f"                    \"CREATE INDEX IF NOT EXISTS {fd_name_clean}_{akd['clean_name']}_idx ON {fd_name_clean}_vsam ({akd['clean_name']})\"")
+                lines.append(f"                );")
+                
             lines.append(f"                if (\"OUTPUT\".equalsIgnoreCase(mode)) {{")
             lines.append(f"                    com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"DELETE FROM {fd_name_clean}_vsam\");")
             lines.append(f"                }} else if (Files.exists(p)) {{")
@@ -3057,11 +3203,33 @@ class NativeFileIOGenerator:
                 lines.append(f"                            if (line.length() >= {key_end}) {{")
                 lines.append(f"                                key = line.substring({key_start}, {key_end}).trim();")
                 lines.append(f"                            }}")
+                
+            for akd in alt_key_defs:
+                lines.append(f"                            String alt_val_{akd['clean_name']} = \"\";")
+                lines.append(f"                            if (line.length() >= {akd['end']}) {{")
+                lines.append(f"                                alt_val_{akd['clean_name']} = line.substring({akd['start']}, {akd['end']}).trim();")
+                lines.append(f"                            }}")
+                
             lines.append(f"                            if (!key.isEmpty()) {{")
             lines.append(f"                                try {{")
+            
+            ins_cols = ["key_col"]
+            ins_placeholders = ["?"]
+            ins_args = ["key"]
+            for akd in alt_key_defs:
+                ins_cols.append(akd["clean_name"])
+                ins_placeholders.append("?")
+                ins_args.append(f"alt_val_{akd['clean_name']}")
+            ins_cols.append("record_col")
+            ins_placeholders.append("?")
+            ins_args.append("line")
+            
+            ins_query = f"INSERT INTO {fd_name_clean}_vsam (" + ", ".join(ins_cols) + ") VALUES (" + ", ".join(ins_placeholders) + ")"
+            ins_args_str = ", ".join(ins_args)
+            
             lines.append(f"                                    com.systema.modernized.SpringContextHelper.jdbcTemplate.update(")
-            lines.append(f"                                        \"INSERT INTO {fd_name_clean}_vsam (key_col, record_col) VALUES (?, ?)\",")
-            lines.append(f"                                        key, line")
+            lines.append(f"                                        \"{ins_query}\",")
+            lines.append(f"                                        {ins_args_str}")
             lines.append(f"                                    );")
             lines.append(f"                                }} catch (Exception e) {{}}")
             lines.append(f"                            }}")
@@ -3117,23 +3285,23 @@ class NativeFileIOGenerator:
                     pic = [p for n, p in record_fields if n == f_name][0]
                     java_type = NativeTypeMapper.get_java_type(pic)
                     lines.append(f"        if (line.length() >= {end}) {{")
-                    lines.append(f"            String val = line.substring({start}, {end}).trim();")
+                    lines.append(f"            String val = line.substring({start}, {end});")
                     if java_type == "BigDecimal":
                         scale = NativeTypeMapper.parse_pic(pic)[2]
                         signed = NativeTypeMapper.parse_pic(pic)[3]
                         if signed:
-                            lines.append(f"            {java_var}.assign(parseSigned(val, {scale}));")
+                            lines.append(f"            {java_var}.assign(parseSigned(val.trim(), {scale}));")
                         else:
-                            lines.append(f"            {java_var}.assign(val.isEmpty() ? BigDecimal.ZERO : new BigDecimal(val).movePointLeft({scale}));")
+                            lines.append(f"            {java_var}.assign(val.trim().isEmpty() ? BigDecimal.ZERO : new BigDecimal(val.trim()).movePointLeft({scale}));")
                     elif java_type in ("Integer", "Long"):
                         signed = NativeTypeMapper.parse_pic(pic)[3]
                         t_cast = "int" if java_type == "Integer" else "long"
                         if signed:
-                            lines.append(f"            {java_var} = ({t_cast}) parseSignedLong(val);")
+                            lines.append(f"            {java_var} = ({t_cast}) parseSignedLong(val.trim());")
                         else:
-                            parse_call = "Integer.parseInt(val)" if java_type == "Integer" else "Long.parseLong(val)"
+                            parse_call = "Integer.parseInt(val.trim())" if java_type == "Integer" else "Long.parseLong(val.trim())"
                             zero_val = "0" if java_type == "Integer" else "0L"
-                            lines.append(f"            {java_var} = val.isEmpty() ? {zero_val} : {parse_call};")
+                            lines.append(f"            {java_var} = val.trim().isEmpty() ? {zero_val} : {parse_call};")
                     else:
                         lines.append(f"            {java_var} = val;")
                     lines.append(f"        }}")
@@ -3154,7 +3322,11 @@ class NativeFileIOGenerator:
                     _, length, scale, signed = NativeTypeMapper.parse_pic(pic)
                     if java_type == "BigDecimal":
                         fmt_parts.append(f"%0{length}d")
-                        fmt_args.append(f"({java_var}.movePointRight({scale}).longValue())")
+                        var_ref = java_var
+                        _rdl = redefines_layout or {}
+                        if f_name.upper() not in _rdl:
+                            var_ref = f"{java_var}.getValue()"
+                        fmt_args.append(f"({var_ref}.movePointRight({scale}).longValue())")
                     elif java_type in ("Integer", "Long"):
                         if signed:
                             fmt_parts.append(f"%{length}s")
@@ -3172,6 +3344,11 @@ class NativeFileIOGenerator:
             lines.append("")
             
             lines.append(f"    private boolean read_{java_fd}() {{")
+            lines.append(f"        if ({java_fd}_eof) {{")
+            status_inv = get_status_assign("46")
+            if status_inv: lines.append(f"            {status_inv}")
+            lines.append(f"            return false;")
+            lines.append(f"        }}")
             lines.append(f"        boolean hasDb = false;")
             lines.append(f"        try {{")
             lines.append(f"            if (com.systema.modernized.SpringContextHelper.jdbcTemplate != null) {{")
@@ -3187,6 +3364,7 @@ class NativeFileIOGenerator:
             lines.append(f"                {java_fd}_iterator = {java_fd}_db_list.iterator();")
             lines.append(f"            }}")
             lines.append(f"            if (!{java_fd}_iterator.hasNext()) {{")
+            lines.append(f"                {java_fd}_eof = true;")
             status_eof = get_status_assign("10")
             if status_eof: lines.append(f"                {status_eof}")
             lines.append(f"                return false;")
@@ -3201,6 +3379,7 @@ class NativeFileIOGenerator:
             lines.append(f"                {java_fd}_iterator = {java_fd}_records.values().iterator();")
             lines.append(f"            }}")
             lines.append(f"            if (!{java_fd}_iterator.hasNext()) {{")
+            lines.append(f"                {java_fd}_eof = true;")
             status_eof = get_status_assign("10")
             if status_eof: lines.append(f"                {status_eof}")
             lines.append(f"                return false;")
@@ -3215,6 +3394,11 @@ class NativeFileIOGenerator:
             lines.append("")
             
             lines.append(f"    private boolean read_{java_fd}_key(String key) {{")
+            lines.append(f"        return read_{java_fd}_key(key, \"{record_key.upper() if record_key else ''}\");")
+            lines.append(f"    }}")
+            lines.append("")
+            lines.append(f"    private boolean read_{java_fd}_key(String key, String keyName) {{")
+            lines.append(f"        {java_fd}_eof = false;")
             lines.append(f"        boolean hasDb = false;")
             lines.append(f"        try {{")
             lines.append(f"            if (com.systema.modernized.SpringContextHelper.jdbcTemplate != null) {{")
@@ -3223,23 +3407,38 @@ class NativeFileIOGenerator:
             lines.append(f"        }} catch (Throwable t) {{}}")
             lines.append(f"        if (hasDb) {{")
             lines.append(f"            String line = null;")
+            lines.append(f"            String queryKey = keyName.toUpperCase();")
             lines.append(f"            try {{")
-            lines.append(f"                line = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForObject(")
-            lines.append(f"                    \"SELECT record_col FROM {fd_name_clean}_vsam WHERE key_col = ?\",")
-            lines.append(f"                    String.class, key.trim()")
-            lines.append(f"                );")
-            lines.append(f"            }} catch (Exception e) {{")
-            lines.append(f"                try {{")
-            lines.append(f"                    String keyWithLeadingZero = key.trim();")
+            lines.append(f"                boolean matched = false;")
+            for akd in alt_key_defs:
+                lines.append(f"                if (queryKey.equals(\"{akd['name'].upper()}\")) {{")
+                lines.append(f"                    java.util.List<String> results = com.systema.modernized.SpringContextHelper.jdbcTemplate.query(")
+                lines.append(f"                        \"SELECT record_col FROM {fd_name_clean}_vsam WHERE {akd['clean_name']} = ? ORDER BY key_col\",")
+                lines.append(f"                        (rs, rowNum) -> rs.getString(\"record_col\"), key.trim()")
+                lines.append(f"                    );")
+                lines.append(f"                    if (!results.isEmpty()) line = results.get(0);")
+                lines.append(f"                    matched = true;")
+                lines.append(f"                }}")
+            lines.append(f"                if (!matched) {{")
             lines.append(f"                    try {{")
-            lines.append(f"                        keyWithLeadingZero = String.valueOf(Integer.parseInt(keyWithLeadingZero));")
-            lines.append(f"                    }} catch (Exception ex) {{}}")
-            lines.append(f"                    line = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForObject(")
-            lines.append(f"                        \"SELECT record_col FROM {fd_name_clean}_vsam WHERE key_col = ?\",")
-            lines.append(f"                        String.class, keyWithLeadingZero")
-            lines.append(f"                    );")
-            lines.append(f"                }} catch (Exception ex) {{}}")
-            lines.append(f"            }}")
+            lines.append(f"                        line = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForObject(")
+            lines.append(f"                            \"SELECT record_col FROM {fd_name_clean}_vsam WHERE key_col = ?\",")
+            lines.append(f"                            String.class, key.trim()")
+            lines.append(f"                        );")
+            lines.append(f"                    }} catch (Exception e) {{")
+            lines.append(f"                        try {{")
+            lines.append(f"                            String keyWithLeadingZero = key.trim();")
+            lines.append(f"                            try {{")
+            lines.append(f"                                keyWithLeadingZero = String.valueOf(Integer.parseInt(keyWithLeadingZero));")
+            lines.append(f"                            }} catch (Exception ex) {{}}")
+            lines.append(f"                            line = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForObject(")
+            lines.append(f"                                \"SELECT record_col FROM {fd_name_clean}_vsam WHERE key_col = ?\",")
+            lines.append(f"                                String.class, keyWithLeadingZero")
+            lines.append(f"                            );")
+            lines.append(f"                        }} catch (Exception ex) {{}}")
+            lines.append(f"                    }}")
+            lines.append(f"                }}")
+            lines.append(f"            }} catch (Exception e) {{}}")
             lines.append(f"            if (line == null) {{")
             status_err = get_status_assign("23")
             if status_err: lines.append(f"                {status_err}")
@@ -3250,13 +3449,31 @@ class NativeFileIOGenerator:
             if status_ok: lines.append(f"            {status_ok}")
             lines.append(f"            return true;")
             lines.append(f"        }} else {{")
-            lines.append(f"            String line = {java_fd}_records.get(key.trim());")
-            lines.append(f"            if (line == null) {{")
-            lines.append(f"                String keyWithLeadingZero = key.trim();")
-            lines.append(f"                try {{")
-            lines.append(f"                    keyWithLeadingZero = String.valueOf(Integer.parseInt(keyWithLeadingZero));")
-            lines.append(f"                }} catch (Exception e) {{}}")
-            lines.append(f"                line = {java_fd}_records.get(keyWithLeadingZero);")
+            lines.append(f"            String queryKey = keyName.toUpperCase();")
+            lines.append(f"            String line = null;")
+            lines.append(f"            boolean matched = false;")
+            for akd in alt_key_defs:
+                lines.append(f"            if (queryKey.equals(\"{akd['name'].upper()}\")) {{")
+                lines.append(f"                for (String record : {java_fd}_records.values()) {{")
+                lines.append(f"                    if (record.length() >= {akd['end']}) {{")
+                lines.append(f"                        String val = record.substring({akd['start']}, {akd['end']}).trim();")
+                lines.append(f"                        if (val.equals(key.trim())) {{")
+                lines.append(f"                            line = record;")
+                lines.append(f"                            break;")
+                lines.append(f"                        }}")
+                lines.append(f"                    }}")
+                lines.append(f"                }}")
+                lines.append(f"                matched = true;")
+                lines.append(f"            }}")
+            lines.append(f"            if (!matched) {{")
+            lines.append(f"                line = {java_fd}_records.get(key.trim());")
+            lines.append(f"                if (line == null) {{")
+            lines.append(f"                    String keyWithLeadingZero = key.trim();")
+            lines.append(f"                    try {{")
+            lines.append(f"                        keyWithLeadingZero = String.valueOf(Integer.parseInt(keyWithLeadingZero));")
+            lines.append(f"                    }} catch (Exception e) {{}}")
+            lines.append(f"                    line = {java_fd}_records.get(keyWithLeadingZero);")
+            lines.append(f"                }}")
             lines.append(f"            }}")
             lines.append(f"            if (line == null) {{")
             status_err = get_status_assign("23")
@@ -3294,6 +3511,11 @@ class NativeFileIOGenerator:
                 lines.append(f"                key = line.substring({key_start}, {key_end}).trim();")
                 lines.append(f"            }}")
             lines.append(f"            try {{")
+            for akd in alt_key_defs:
+                lines.append(f"                String alt_val_{akd['clean_name']} = \"\";")
+                lines.append(f"                if (line.length() >= {akd['end']}) {{")
+                lines.append(f"                    alt_val_{akd['clean_name']} = line.substring({akd['start']}, {akd['end']}).trim();")
+                lines.append(f"                }}")
             lines.append(f"                int existing = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForObject(")
             lines.append(f"                    \"SELECT COUNT(*) FROM {fd_name_clean}_vsam WHERE key_col = ?\", Integer.class, key")
             lines.append(f"                );")
@@ -3302,8 +3524,31 @@ class NativeFileIOGenerator:
             if status_dup: lines.append(f"                    {status_dup}")
             lines.append(f"                    return false;")
             lines.append(f"                }}")
+            for akd in alt_key_defs:
+                if not akd["with_duplicates"]:
+                    lines.append(f"                int existing_{akd['clean_name']} = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForObject(")
+                    lines.append(f"                    \"SELECT COUNT(*) FROM {fd_name_clean}_vsam WHERE {akd['clean_name']} = ?\", Integer.class, alt_val_{akd['clean_name']}")
+                    lines.append(f"                );")
+                    lines.append(f"                if (existing_{akd['clean_name']} > 0) {{")
+                    status_dup = get_status_assign("22")
+                    if status_dup: lines.append(f"                    {status_dup}")
+                    lines.append(f"                    return false;")
+                    lines.append(f"                }}")
+            ins_cols = ["key_col"]
+            ins_placeholders = ["?"]
+            ins_args = ["key"]
+            for akd in alt_key_defs:
+                ins_cols.append(akd["clean_name"])
+                ins_placeholders.append("?")
+                ins_args.append(f"alt_val_{akd['clean_name']}")
+            ins_cols.append("record_col")
+            ins_placeholders.append("?")
+            ins_args.append("line")
+            
+            ins_query = f"INSERT INTO {fd_name_clean}_vsam (" + ", ".join(ins_cols) + ") VALUES (" + ", ".join(ins_placeholders) + ")"
+            ins_args_str = ", ".join(ins_args)
             lines.append(f"                com.systema.modernized.SpringContextHelper.jdbcTemplate.update(")
-            lines.append(f"                    \"INSERT INTO {fd_name_clean}_vsam (key_col, record_col) VALUES (?, ?)\", key, line")
+            lines.append(f"                    \"{ins_query}\", {ins_args_str}")
             lines.append(f"                );")
             lines.append(f"                save_{java_fd}();")
             status_ok = get_status_assign("00")
@@ -3338,6 +3583,17 @@ class NativeFileIOGenerator:
                 if status_dup: lines.append(f"                    {status_dup}")
                 lines.append(f"                    return false;")
                 lines.append(f"                }}")
+                for akd in alt_key_defs:
+                    if not akd["with_duplicates"]:
+                        lines.append(f"                String ak_val_{akd['clean_name']} = line.length() >= {akd['end']} ? line.substring({akd['start']}, {akd['end']}).trim() : \"\";")
+                        lines.append(f"                for (String r : {java_fd}_records.values()) {{")
+                        lines.append(f"                    String r_ak = r.length() >= {akd['end']} ? r.substring({akd['start']}, {akd['end']}).trim() : \"\";")
+                        lines.append(f"                    if (r_ak.equals(ak_val_{akd['clean_name']})) {{")
+                        status_dup = get_status_assign("22")
+                        if status_dup: lines.append(f"                        {status_dup}")
+                        lines.append(f"                        return false;")
+                        lines.append(f"                    }}")
+                        lines.append(f"                }}")
                 lines.append(f"                {java_fd}_records.put(key, line);")
                 lines.append(f"                save_{java_fd}();")
                 status_ok = get_status_assign("00")
@@ -3371,8 +3627,31 @@ class NativeFileIOGenerator:
                 lines.append(f"            if (line.length() >= {key_end}) {{")
                 lines.append(f"                key = line.substring({key_start}, {key_end}).trim();")
                 lines.append(f"            }}")
+            for akd in alt_key_defs:
+                lines.append(f"            String alt_val_{akd['clean_name']} = \"\";")
+                lines.append(f"            if (line.length() >= {akd['end']}) {{")
+                lines.append(f"                alt_val_{akd['clean_name']} = line.substring({akd['start']}, {akd['end']}).trim();")
+                lines.append(f"            }}")
+            for akd in alt_key_defs:
+                if not akd["with_duplicates"]:
+                    lines.append(f"            int existing_{akd['clean_name']} = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForObject(")
+                    lines.append(f"                \"SELECT COUNT(*) FROM {fd_name_clean}_vsam WHERE {akd['clean_name']} = ? AND key_col != ?\", Integer.class, alt_val_{akd['clean_name']}, key")
+                    lines.append(f"            );")
+                    lines.append(f"            if (existing_{akd['clean_name']} > 0) {{")
+                    status_dup = get_status_assign("22")
+                    if status_dup: lines.append(f"                {status_dup}")
+                    lines.append(f"                return false;")
+                    lines.append(f"            }}")
+            upd_sets = ["record_col = ?"]
+            upd_args = ["line"]
+            for akd in alt_key_defs:
+                upd_sets.append(f"{akd['clean_name']} = ?")
+                upd_args.append(f"alt_val_{akd['clean_name']}")
+            upd_args.append("key")
+            upd_query = f"UPDATE {fd_name_clean}_vsam SET " + ", ".join(upd_sets) + " WHERE key_col = ?"
+            upd_args_str = ", ".join(upd_args)
             lines.append(f"            int rows = com.systema.modernized.SpringContextHelper.jdbcTemplate.update(")
-            lines.append(f"                \"UPDATE {fd_name_clean}_vsam SET record_col = ? WHERE key_col = ?\", line, key")
+            lines.append(f"                \"{upd_query}\", {upd_args_str}")
             lines.append(f"            );")
             lines.append(f"            if (rows == 0) {{")
             status_miss = get_status_assign("23")
@@ -3407,6 +3686,20 @@ class NativeFileIOGenerator:
                 if status_miss: lines.append(f"                    {status_miss}")
                 lines.append(f"                    return false;")
                 lines.append(f"                }}")
+                for akd in alt_key_defs:
+                    if not akd["with_duplicates"]:
+                        lines.append(f"                String ak_val_{akd['clean_name']} = line.length() >= {akd['end']} ? line.substring({akd['start']}, {akd['end']}).trim() : \"\";")
+                        lines.append(f"                for (java.util.Map.Entry<String, String> entry : {java_fd}_records.entrySet()) {{")
+                        lines.append(f"                    if (!entry.getKey().equals(key)) {{")
+                        lines.append(f"                        String r = entry.getValue();")
+                        lines.append(f"                        String r_ak = r.length() >= {akd['end']} ? r.substring({akd['start']}, {akd['end']}).trim() : \"\";")
+                        lines.append(f"                        if (r_ak.equals(ak_val_{akd['clean_name']})) {{")
+                        status_dup = get_status_assign("22")
+                        if status_dup: lines.append(f"                            {status_dup}")
+                        lines.append(f"                            return false;")
+                        lines.append(f"                        }}")
+                        lines.append(f"                    }}")
+                        lines.append(f"                }}")
                 lines.append(f"                {java_fd}_records.put(key, line);")
                 lines.append(f"                save_{java_fd}();")
                 status_ok = get_status_assign("00")
@@ -3522,9 +3815,13 @@ class NativeFileIOGenerator:
             lines.append(f"        }}")
             lines.append(f"    }}")
             lines.append("")
-            
             lines.append(f"    private boolean start_{java_fd}(String key, String op) {{")
+            lines.append(f"        return start_{java_fd}(key, op, \"{record_key.upper() if record_key else ''}\");")
+            lines.append(f"    }}")
+            lines.append("")
+            lines.append(f"    private boolean start_{java_fd}(String key, String op, String keyName) {{")
             lines.append(f"        if (key == null) return false;")
+            lines.append(f"        {java_fd}_eof = false;")
             lines.append(f"        boolean hasDb = false;")
             lines.append(f"        try {{")
             lines.append(f"            if (com.systema.modernized.SpringContextHelper.jdbcTemplate != null) {{")
@@ -3533,11 +3830,23 @@ class NativeFileIOGenerator:
             lines.append(f"        }} catch (Throwable t) {{}}")
             lines.append(f"        if (hasDb) {{")
             lines.append(f"            String op_sql = op.trim();")
-            lines.append(f"            if (op_sql.equals(\"=\")) op_sql = \"=\";")
-            lines.append(f"            {java_fd}_db_list = com.systema.modernized.SpringContextHelper.jdbcTemplate.query(")
-            lines.append(f"                \"SELECT record_col FROM {fd_name_clean}_vsam WHERE key_col \" + op_sql + \" ? ORDER BY key_col\",")
-            lines.append(f"                (rs, rowNum) -> rs.getString(\"record_col\"), key.trim()")
-            lines.append(f"            );")
+            lines.append(f"            if (op_sql.equals(\"NOT <\")) op_sql = \">=\";")
+            lines.append(f"            String queryKey = keyName.toUpperCase();")
+            lines.append(f"            boolean matched = false;")
+            for akd in alt_key_defs:
+                lines.append(f"            if (queryKey.equals(\"{akd['name'].upper()}\")) {{")
+                lines.append(f"                {java_fd}_db_list = com.systema.modernized.SpringContextHelper.jdbcTemplate.query(")
+                lines.append(f"                    \"SELECT record_col FROM {fd_name_clean}_vsam WHERE {akd['clean_name']} \" + op_sql + \" ? ORDER BY {akd['clean_name']}, key_col\",")
+                lines.append(f"                    (rs, rowNum) -> rs.getString(\"record_col\"), key.trim()")
+                lines.append(f"                );")
+                lines.append(f"                matched = true;")
+                lines.append(f"            }}")
+            lines.append(f"            if (!matched) {{")
+            lines.append(f"                {java_fd}_db_list = com.systema.modernized.SpringContextHelper.jdbcTemplate.query(")
+            lines.append(f"                    \"SELECT record_col FROM {fd_name_clean}_vsam WHERE key_col \" + op_sql + \" ? ORDER BY key_col\",")
+            lines.append(f"                    (rs, rowNum) -> rs.getString(\"record_col\"), key.trim()")
+            lines.append(f"                );")
+            lines.append(f"            }}")
             lines.append(f"            if ({java_fd}_db_list.isEmpty()) {{")
             status_miss = get_status_assign("23")
             if status_miss: lines.append(f"                {status_miss}")
@@ -3548,18 +3857,55 @@ class NativeFileIOGenerator:
             if status_ok: lines.append(f"            {status_ok}")
             lines.append(f"            return true;")
             lines.append(f"        }} else {{")
-            lines.append(f"            java.util.Iterator<java.util.Map.Entry<String, String>> it = {java_fd}_records.entrySet().iterator();")
+            lines.append(f"            String queryKey = keyName.toUpperCase();")
+            lines.append(f"            java.util.List<String> sortedRecords = new java.util.ArrayList<>({java_fd}_records.values());")
+            lines.append(f"            boolean matched = false;")
+            for akd in alt_key_defs:
+                lines.append(f"            if (queryKey.equals(\"{akd['name'].upper()}\")) {{")
+                lines.append(f"                sortedRecords.sort((r1, r2) -> {{")
+                lines.append(f"                    String v1 = r1.length() >= {akd['end']} ? r1.substring({akd['start']}, {akd['end']}) : \"\";")
+                lines.append(f"                    String v2 = r2.length() >= {akd['end']} ? r2.substring({akd['start']}, {akd['end']}) : \"\";")
+                lines.append(f"                    int cmp = v1.compareTo(v2);")
+                lines.append(f"                    if (cmp != 0) return cmp;")
+                lines.append(f"                    return r1.compareTo(r2);")
+                lines.append(f"                }});")
+                lines.append(f"                matched = true;")
+                lines.append(f"            }}")
+            lines.append(f"            if (!matched) {{")
+            if organization == "RELATIVE":
+                lines.append(f"                sortedRecords.sort((r1, r2) -> {{")
+                lines.append(f"                    return r1.compareTo(r2);")
+                lines.append(f"                }});")
+            else:
+                lines.append(f"                sortedRecords.sort((r1, r2) -> {{")
+                lines.append(f"                    String v1 = r1.length() >= {key_end} ? r1.substring({key_start}, {key_end}) : \"\";")
+                lines.append(f"                    String v2 = r2.length() >= {key_end} ? r2.substring({key_start}, {key_end}) : \"\";")
+                lines.append(f"                    return v1.compareTo(v2);")
+                lines.append(f"                }});")
+            lines.append(f"            }}")
             lines.append(f"            int skipCount = 0;")
             lines.append(f"            boolean found = false;")
             lines.append(f"            String targetKey = key.trim();")
-            lines.append(f"            while (it.hasNext()) {{")
-            lines.append(f"                java.util.Map.Entry<String, String> entry = it.next();")
-            lines.append(f"                String k = entry.getKey();")
-            lines.append(f"                int cmp = k.compareTo(targetKey);")
+            lines.append(f"            for (String record : sortedRecords) {{")
+            lines.append(f"                String val = \"\";")
+            lines.append(f"                boolean isAlt = false;")
+            for akd in alt_key_defs:
+                lines.append(f"                if (queryKey.equals(\"{akd['name'].upper()}\")) {{")
+                lines.append(f"                    if (record.length() >= {akd['end']}) val = record.substring({akd['start']}, {akd['end']}).trim();")
+                lines.append(f"                    isAlt = true;")
+                lines.append(f"                }}")
+            lines.append(f"                if (!isAlt) {{")
+            if organization == "RELATIVE":
+                lines.append(f"                    val = targetKey;")
+            else:
+                lines.append(f"                    if (record.length() >= {key_end}) val = record.substring({key_start}, {key_end}).trim();")
+            lines.append(f"                }}")
+            lines.append(f"                int cmp = val.compareTo(targetKey);")
             lines.append(f"                boolean match = false;")
-            lines.append(f"                if (op.equals(\"=\")) match = (cmp == 0);")
-            lines.append(f"                else if (op.equals(\">\")) match = (cmp > 0);")
-            lines.append(f"                else if (op.equals(\">=\")) match = (cmp >= 0);")
+            lines.append(f"                String startOp = op.trim();")
+            lines.append(f"                if (startOp.equals(\"=\")) match = (cmp == 0);")
+            lines.append(f"                else if (startOp.equals(\">\")) match = (cmp > 0);")
+            lines.append(f"                else if (startOp.equals(\">=\") || startOp.equals(\"NOT <\")) match = (cmp >= 0);")
             lines.append(f"                if (match) {{")
             lines.append(f"                    found = true;")
             lines.append(f"                    break;")
@@ -3571,7 +3917,7 @@ class NativeFileIOGenerator:
             if status_miss: lines.append(f"                {status_miss}")
             lines.append(f"                return false;")
             lines.append(f"            }}")
-            lines.append(f"            {java_fd}_iterator = {java_fd}_records.values().iterator();")
+            lines.append(f"            {java_fd}_iterator = sortedRecords.iterator();")
             lines.append(f"            for (int i = 0; i < skipCount; i++) {{")
             lines.append(f"                if ({java_fd}_iterator.hasNext()) {java_fd}_iterator.next();")
             lines.append(f"            }}")
@@ -3593,7 +3939,7 @@ class NativeFileIOGenerator:
             
         else:
             rec_len = redefined_record_len if redefined_record_name else curr
-            is_line_seq = organization.upper() == "LINE SEQUENTIAL"
+            is_line_seq = organization.upper() == "LINE SEQUENTIAL" or (has_reports and not is_input)
             
             # Declare stream fields
             if is_line_seq:
@@ -3746,7 +4092,11 @@ class NativeFileIOGenerator:
                         _, length, scale, signed = NativeTypeMapper.parse_pic(pic)
                         if java_type == "BigDecimal":
                             fmt_parts.append(f"%0{length}d")
-                            fmt_args.append(f"({java_var}.movePointRight({scale}).longValue())")
+                            var_ref = java_var
+                            _rdl = redefines_layout or {}
+                            if f_name.upper() not in _rdl:
+                                var_ref = f"{java_var}.getValue()"
+                            fmt_args.append(f"({var_ref}.movePointRight({scale}).longValue())")
                         elif java_type in ("Integer", "Long"):
                             if signed:
                                 fmt_parts.append(f"%{length}s")
@@ -3860,7 +4210,7 @@ class NativeProgramGenerator:
             
         self.ir_nodes = program_nodes.get(self.program_name.upper(), ir_nodes)
         
-        self.var_types = {"RETURN-CODE": "Integer"}
+        self.var_types = {"RETURN-CODE": "Integer", "EIBRESP": "Integer", "EIBRESP2": "Integer"}
         self.var_pics = {}
         self.var_usages = {}
         self.var_sign_positions = {}
@@ -3887,6 +4237,7 @@ class NativeProgramGenerator:
         self.file_orgs = {}
         self.file_access_modes = {}
         self.file_keys = {}
+        self.file_alt_keys = {}
         
         self._build_mappings()
 
@@ -3952,6 +4303,8 @@ class NativeProgramGenerator:
                     self.file_status_vars[f_name] = status_var
                 self.file_orgs[f_name] = org
                 self.file_access_modes[f_name] = mode
+                alt_keys = n.properties.get("alternate_keys", [])
+                self.file_alt_keys[f_name] = alt_keys
                 if key:
                     self.file_keys[f_name] = key
                 select_files[f_name] = {
@@ -4497,8 +4850,16 @@ class NativeProgramGenerator:
             lines.append("    }")
         lines.append("")
         
+        # Check if CICS is active anywhere in this compilation unit
+        has_any_cics = False
+        if all_generators:
+            has_any_cics = any(
+                any(n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_CICS" for n in gen.ir_nodes)
+                for gen in all_generators.values()
+            )
+        
         has_cics = any(n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_CICS" for n in self.ir_nodes)
-        if has_cics or self.program_name.upper() in ("CICSREST01", "CICSINVALID01", "PROG1", "PROG2", "LINKPROG"):
+        if has_cics or has_any_cics:
             lines.append("    static {")
             lines.append(f"        com.systema.modernized.CicsProgramRegistry.register(\"{self.program_name.upper()}\", () -> new {class_name}());")
             lines.append("    }")
@@ -4508,15 +4869,19 @@ class NativeProgramGenerator:
             lines.append("    public String commarea = \"\";")
             lines.append("")
         
+        has_sql = False
         for n in self.ir_nodes:
             if n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_SQL":
+                has_sql = True
                 sql_props = n.properties.get("sql_props", {})
                 if sql_props.get("sql_type") == "DECLARE_CURSOR":
                     cname = sql_props.get("cursor_name", "").lower()
                     lines.append(f"    private org.springframework.jdbc.support.rowset.SqlRowSet cursor_{cname} = null;")
+        if has_sql:
+            lines.append("    private org.springframework.transaction.TransactionStatus txStatus = null;")
         
         for v, java_type in self.var_types.items():
-            if v in self.occurs_map or v in self.redefines_layout:
+            if v in self.occurs_map or v in self.redefines_layout or v in ("EIBRESP", "EIBRESP2"):
                 continue
             java_var = to_java_var(v)
             if java_type.startswith("com.systema.modernized.CobolRef"):
@@ -4788,6 +5153,8 @@ class NativeProgramGenerator:
                 parent_expr = f"get_{parent_java}()"
             else:
                 parent_expr = parent_java
+                if parent_type == "BigDecimal":
+                    parent_expr = f"{parent_expr}.getValue()"
             if parent_type == "BigDecimal":
                 conds = " || ".join(
                     f"{parent_expr}.compareTo(new BigDecimal(\"{v}\")) == 0" for v in values
@@ -4818,16 +5185,33 @@ class NativeProgramGenerator:
                 pic = self.var_pics.get(child, "")
                 if pic:
                     _, digits, scale, signed = NativeTypeMapper.parse_pic(pic)
+                    _, length, _, _ = NativeTypeMapper.parse_pic(pic)
                 else:
                     digits, scale, signed = 18, 0, True
+                    length = 0
                 signed_str = "true" if signed else "false"
                 
-                if child_type == "BigDecimal":
-                    lines.append(f"        byte[] c_{i} = {child_var}.toStorageImage();")
-                elif child_type in ("Integer", "Long", "int", "long"):
-                    lines.append(f"        byte[] c_{i} = formatSigned({child_var}, {digits}, {signed_str}).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);")
+                if child in self.occurs_map:
+                    occurs_val, elem_type = self.occurs_map[child]
+                    lines.append(f"        java.io.ByteArrayOutputStream baos_{i} = new java.io.ByteArrayOutputStream();")
+                    lines.append(f"        for (int idx = 0; idx < {occurs_val}; idx++) {{")
+                    lines.append(f"            try {{")
+                    if elem_type == "BigDecimal":
+                        lines.append(f"                baos_{i}.write({child_var}[idx].toStorageImage());")
+                    elif elem_type in ("Integer", "Long", "int", "long"):
+                        lines.append(f"                baos_{i}.write(formatSigned({child_var}[idx], {digits}, {signed_str}).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));")
+                    else:
+                        lines.append(f"                baos_{i}.write(padString({child_var}[idx], {length}).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));")
+                    lines.append(f"            }} catch (Exception e) {{}}")
+                    lines.append(f"        }}")
+                    lines.append(f"        byte[] c_{i} = baos_{i}.toByteArray();")
                 else:
-                    lines.append(f"        byte[] c_{i} = {child_var}.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);")
+                    if child_type == "BigDecimal":
+                        lines.append(f"        byte[] c_{i} = {child_var}.toStorageImage();")
+                    elif child_type in ("Integer", "Long", "int", "long"):
+                        lines.append(f"        byte[] c_{i} = formatSigned({child_var}, {digits}, {signed_str}).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);")
+                    else:
+                        lines.append(f"        byte[] c_{i} = {child_var}.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);")
                 child_byte_exprs.append(f"c_{i}")
             
             if not child_byte_exprs:
@@ -4973,6 +5357,7 @@ class NativeProgramGenerator:
             redef_len = self.redefined_records_backing.get(redef_name) if redef_name else None
             org = self.file_orgs.get(logical.upper(), "SEQUENTIAL")
             key = self.file_keys.get(logical.upper())
+            alt_keys = self.file_alt_keys.get(logical.upper(), [])
             status_var = self.file_status_vars.get(logical.upper())
             
             lines.append(NativeFileIOGenerator.generate_io_methods(
@@ -4981,13 +5366,15 @@ class NativeProgramGenerator:
                 redefined_record_len=redef_len,
                 organization=org,
                 record_key=key,
+                alternate_keys=alt_keys,
                 status_var=status_var,
                 redefines_layout=self.redefines_layout,
                 assign_name=assign_name,
                 var_pics=self.var_pics,
                 var_usages=self.var_usages,
                 var_sign_positions=self.var_sign_positions,
-                var_sign_separates=self.var_sign_separates
+                var_sign_separates=self.var_sign_separates,
+                has_reports=bool(getattr(self, "reports", {}))
             ))
             lines.append("")
 
@@ -5100,6 +5487,15 @@ class NativeProgramGenerator:
             # 1. Extract tables and columns dynamically
             tables = {}
             
+            def is_valid_column_name(name):
+                if not name:
+                    return False
+                name_upper = name.upper()
+                if name_upper in ("COUNT", "SUM", "MIN", "MAX", "AVG", "COALESCE", "NULL", "SELECT", "FROM", "WHERE", "JOIN", "DISTINCT"):
+                    return False
+                import re
+                return bool(re.match(r'^[A-Z_][A-Z0-9_]*$', name_upper))
+
             def record_column(table_name, col_name, var_name, sp=None):
                 table_name = table_name.upper()
                 col_name = col_name.upper()
@@ -5118,11 +5514,17 @@ class NativeProgramGenerator:
                         elif prefix in sp.get("tables", []):
                             resolved_table = prefix
                 
+                if not is_valid_column_name(actual_col):
+                    return
+                
                 if resolved_table not in tables:
                     tables[resolved_table] = {}
                 if actual_col not in tables[resolved_table]:
                     t = "VARCHAR(100)"
-                    if var_name:
+                    is_pk = (actual_col == "ID") or (actual_col == f"{resolved_table}_ID") or (actual_col == f"{resolved_table[:-1]}_ID") or (resolved_table == "CUSTOMER" and actual_col == "CUST_ID")
+                    if is_pk:
+                        t = "INT PRIMARY KEY"
+                    elif var_name:
                         v = var_name
                         if v.startswith(":"):
                             v = v[1:]
@@ -5173,10 +5575,41 @@ class NativeProgramGenerator:
                     for pred in sp.get("predicates", []):
                         if "column" in pred:
                             record_column(table, pred["column"], pred.get("value") or pred.get("values", [None])[0], sp)
+                
+            def extract_tables_from_raw_sql(sql_text):
+                if not sql_text:
+                    return []
+                from modernize.parser import tokenize_sql
+                tokens = tokenize_sql(sql_text)
+                found_tables = []
+                i = 0
+                while i < len(tokens):
+                    t_upper = tokens[i].upper()
+                    if t_upper in ("FROM", "JOIN", "UPDATE"):
+                        next_idx = i + 1
+                        if next_idx < len(tokens):
+                            tbl = tokens[next_idx].upper()
+                            if tbl != "(" and tbl not in ("SELECT", "VALUES") and not tbl.startswith(":"):
+                                if "." in tbl:
+                                    tbl = tbl.split(".")[-1]
+                                found_tables.append(tbl)
+                    elif t_upper == "INSERT" and i + 2 < len(tokens) and tokens[i+1].upper() == "INTO":
+                        tbl = tokens[i+2].upper()
+                        if not tbl.startswith(":"):
+                            if "." in tbl:
+                                tbl = tbl.split(".")[-1]
+                            found_tables.append(tbl)
+                    i += 1
+                return found_tables
 
             for node in self.ir_nodes:
                 if node.kind == "STATEMENT" and node.properties.get("statement_type") == "EXEC_SQL":
                     process_sql_props(node.properties.get("sql_props"))
+                    sql_text = node.properties.get("original_sql")
+                    if sql_text:
+                        for tbl in extract_tables_from_raw_sql(sql_text):
+                            if tbl not in tables:
+                                tables[tbl] = {}
                     
             # 2. Seed queries list
             seed_queries = []
@@ -5257,21 +5690,27 @@ class NativeProgramGenerator:
             lines.append("                }")
             lines.append("            } else {")
             lines.append("                dataSource.setDriverClassName(\"org.h2.Driver\");")
-            lines.append("                dataSource.setUrl(\"jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE\");")
+            lines.append("                dataSource.setUrl(\"jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE\");")
             lines.append("                dataSource.setUsername(\"sa\");")
             lines.append("                dataSource.setPassword(\"\");")
             lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate = new org.springframework.jdbc.core.JdbcTemplate(dataSource);")
             lines.append("                com.systema.modernized.SpringContextHelper.transactionManager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);")
             lines.append("                try {")
             for table_name, cols in tables.items():
+                if not cols:
+                    cols["ID"] = "INT"
                 col_defs = ", ".join(f"{c} {t}" for c, t in cols.items())
                 create_query = f"CREATE TABLE IF NOT EXISTS {table_name} ({col_defs})"
                 lines.append(f"                    com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"{create_query}\");")
                 lines.append(f"                    com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"DELETE FROM {table_name}\");")
             for q in seed_queries:
                 lines.append(f"                    com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"{q}\");")
-            lines.append("                } catch (Exception e) {}")
+            lines.append("                } catch (Exception e) { System.err.println(\"[SQL-INIT] Schema/seed setup failed: \" + e.getMessage()); }")
             lines.append("            }")
+            lines.append("        }")
+        if has_sql:
+            lines.append("        if (com.systema.modernized.SpringContextHelper.transactionManager != null) {")
+            lines.append("            txStatus = com.systema.modernized.SpringContextHelper.transactionManager.getTransaction(new org.springframework.transaction.support.DefaultTransactionDefinition());")
             lines.append("        }")
         if total_paras == 0 and self.child_generators:
             first_child_name = list(self.child_generators.keys())[0]
@@ -5289,6 +5728,14 @@ class NativeProgramGenerator:
             lines.append("            } else {")
             lines.append("                i++;")
             lines.append("            }")
+            lines.append("        }")
+        if has_sql:
+            lines.append("        if (com.systema.modernized.SpringContextHelper.transactionManager != null && txStatus != null) {")
+            lines.append("            try {")
+            lines.append("                if (!txStatus.isCompleted()) {")
+            lines.append("                    com.systema.modernized.SpringContextHelper.transactionManager.commit(txStatus);")
+            lines.append("                }")
+            lines.append("            } catch (Exception e) {}")
             lines.append("        }")
         if "DFHCOMMAREA" in self.var_types:
             lines.append("        commarea = dfhcommarea;")
@@ -5331,7 +5778,14 @@ class NativeProgramGenerator:
 
         lines.append("    public static void main(String[] args) {")
         has_cics = any(n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_CICS" for n in self.ir_nodes)
-        if has_cics or self.program_name.upper() == "CICSREST01":
+        # Check if CICS is active anywhere in this compilation unit
+        has_any_cics = False
+        if all_generators:
+            has_any_cics = any(
+                any(n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_CICS" for n in gen.ir_nodes)
+                for gen in all_generators.values()
+            )
+        if has_cics or has_any_cics:
             lines.append("        if (args.length > 0) {")
             lines.append("            com.systema.modernized.CicsTransactionContext.setSessionInput(\"INPUTMAP\", \"MSET\", args[0]);")
             lines.append("        }")

@@ -195,14 +195,26 @@ def test_db2_transaction_acceptance():
         shutil.rmtree(tmp_out, ignore_errors=True)
 
 
-# --- G. NULL semantics (xfail) ---
-@pytest.mark.xfail(
-    reason="NULL semantics not yet supported in the native generator — mark as UNSUPPORTED/PARTIAL",
-    session=False
-)
+# --- G. NULL semantics ---
 def test_db2_null_semantics_acceptance():
-    """NULL semantics test — expected to fail until native generator supports NULL."""
-    pass
+    """NULL semantics test — verifies that NULL indicator variables compile and execute."""
+    repo_dir = os.path.join("tests", "repos", "DB2NULL01")
+    tmp_out = tempfile.mkdtemp(prefix="db2_accept_")
+    try:
+        verdict, obs = _run_pipeline(repo_dir, tmp_out)
+        if _is_real_db2_env():
+            assert verdict in ("NATIVE_JAVA_VERIFIED", "NATIVE_JAVA_NOT_VERIFIED"), \
+                f"Unexpected verdict in REAL_DB2 mode: {verdict}"
+            assert obs.get("exit_code", -1) == 0, f"Exit code != 0: {obs}"
+            print(f"[REAL_DB2] NULL semantics verified: verdict={verdict}, exit_code={obs.get('exit_code')}")
+        else:
+            assert verdict in ("NATIVE_JAVA_VERIFIED", "NATIVE_JAVA_NOT_VERIFIED",
+                              "UNVERIFIED"), f"Unexpected verdict: {verdict}"
+            assert obs.get("exit_code", -1) == 0, f"Exit code != 0: {obs}"
+            status = _classify_status()
+            print(f"[H2] NULL semantics emulated: verdict={verdict}, status={status}")
+    finally:
+        shutil.rmtree(tmp_out, ignore_errors=True)
 
 
 # --- H. DECIMAL precision ---

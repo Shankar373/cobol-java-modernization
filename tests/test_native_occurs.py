@@ -25,8 +25,8 @@ def test_occurs_array_declarations():
     assert gen.occurs_map["ITEM-AMOUNT"] == (10, "BigDecimal")
     
     class_src = gen.generate_class_source()
-    assert "public BigDecimal[] item_amount = new BigDecimal[10];" in class_src
-    assert "java.util.Arrays.fill(item_amount, BigDecimal.ZERO);" in class_src
+    assert "public com.systema.modernized.runtime.CobolNumeric[] item_amount = new com.systema.modernized.runtime.CobolNumeric[10];" in class_src
+    assert "item_amount[i] = new com.systema.modernized.runtime.CobolNumeric(new com.systema.modernized.runtime.CobolNumericSpec(false, 4, 2, com.systema.modernized.runtime.CobolUsage.DISPLAY, com.systema.modernized.runtime.CobolSignPosition.TRAILING, false));" in class_src
     assert "public String[] item_name = new String[5];" in class_src
     assert "java.util.Arrays.fill(item_name, \"\");" in class_src
 
@@ -43,7 +43,7 @@ def test_occurs_subscript_translation_in_statements():
         }
     }
     java_stmt = trans.translate_statement(node_move)
-    assert java_stmt == 'item_amount[2] = new BigDecimal("10.50");'
+    assert java_stmt == 'item_amount[2].assign(new BigDecimal("10.50"), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);'
     
     # MOVE ITEM-NAME(WS-I) TO ITEM-NAME(WS-I + 1) -> wait, simple index variable or expression
     node_move_var = {
@@ -62,4 +62,4 @@ def test_occurs_subscript_translation_in_conditions():
     
     cond_str = "ITEM-AMOUNT(WS-I) > 100.00"
     java_cond = trans._translate_condition(cond_str)
-    assert java_cond == "item_amount[ws_i - 1].compareTo(new BigDecimal(\"100.00\")) > 0"
+    assert java_cond == "item_amount[ws_i - 1].getValue().compareTo(new BigDecimal(\"100.00\")) > 0"

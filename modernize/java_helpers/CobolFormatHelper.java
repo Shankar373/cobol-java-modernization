@@ -302,4 +302,12 @@ public class CobolFormatHelper {
             return 0L;
         }
     }
+    public static String delimitedString(String val, String delimiter) {
+        if (val == null) return "";
+        if (delimiter == null || delimiter.isEmpty()) return val;
+        int idx = val.indexOf(delimiter);
+        if (idx == -1) return val;
+        return val.substring(0, idx);
+    }
 }
+

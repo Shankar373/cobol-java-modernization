@@ -94,4 +94,26 @@ public class CobolArithmetic {
     public static BigDecimal remainder(BigDecimal dividend, BigDecimal divisor, CobolNumeric quotient) {
         return remainder(dividend, divisor, quotient.getValue());
     }
+
+    public static BigDecimal power(BigDecimal a, BigDecimal b) {
+        try {
+            int exponent = b.intValueExact();
+            return a.pow(exponent, MC);
+        } catch (ArithmeticException e) {
+            double res = Math.pow(a.doubleValue(), b.doubleValue());
+            return new BigDecimal(res, MC);
+        }
+    }
+
+    public static BigDecimal power(CobolNumeric a, CobolNumeric b) {
+        return power(a.getValue(), b.getValue());
+    }
+
+    public static BigDecimal power(CobolNumeric a, BigDecimal b) {
+        return power(a.getValue(), b);
+    }
+
+    public static BigDecimal power(BigDecimal a, CobolNumeric b) {
+        return power(a, b.getValue());
+    }
 }

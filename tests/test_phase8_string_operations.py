@@ -37,10 +37,10 @@ def test_unstring_basic_and_delimiters():
     # Check NO OVERFLOW was executed
     assert "NO OVERFLOW" in lines
     # Check fields (empty field WS-TGT3 should remain empty)
-    assert "T1: A     :T2: B     :T3:       :T4: C" in lines
+    assert "T1:A    :T2:B    :T3:     :T4:C" in lines
     # WS-PTR should be source length + 2 (A,B,,C padded to 20 -> ptr becomes 22)
     # WS-TALLY should count how many target fields were processed (4 fields)
-    assert "PTR: 22  TALLY: 04" in lines
+    assert "PTR:22 TALLY:04" in lines
 
 def test_unstring_overflow():
     code = """
@@ -84,7 +84,7 @@ def test_inspect_tallying():
     ret, stdout, stderr, java_src, outputs = run_cobol_code("INSP1", code)
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
-    assert "C1: 05  C2: 01  C3: 20" in lines
+    assert "C1:05 C2:01 C3:20" in lines
 
 def test_inspect_replacing():
     code = """
@@ -107,9 +107,9 @@ def test_inspect_replacing():
     ret, stdout, stderr, java_src, outputs = run_cobol_code("INSP2", code)
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
-    assert "ALL: XBXXXCX" in lines
-    assert "FIRST: YBAAACA" in lines
-    assert "LEAD: ZBAAACA" in lines
+    assert "ALL:XBXXXCX" in lines
+    assert "FIRST:YBAAACA" in lines
+    assert "LEAD:ZBAAACA" in lines
 
 def test_inspect_converting():
     code = """
@@ -126,7 +126,7 @@ def test_inspect_converting():
     ret, stdout, stderr, java_src, outputs = run_cobol_code("INSP3", code)
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
-    assert "CONV: XBYDZFG" in lines
+    assert "CONV:XBYDZFG" in lines
 
 def test_initialize_statement():
     code = """
@@ -145,7 +145,7 @@ def test_initialize_statement():
     ret, stdout, stderr, java_src, outputs = run_cobol_code("INIT1", code)
     assert ret == 0
     lines = [l.strip() for l in stdout.strip().splitlines()]
-    assert "STR:       :NUM: 000" in lines
+    assert "STR:     :NUM:000" in lines
 
 def test_exit_program_statement():
     code = """

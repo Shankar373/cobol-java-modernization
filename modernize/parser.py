@@ -477,6 +477,8 @@ class CobolParser:
         access_mode = "SEQUENTIAL"
         record_key = None
         
+        alternate_keys = []
+        
         while not self.is_at_end() and not self.check("PUNCTUATION", "."):
             if self.match("KEYWORD", "ASSIGN"):
                 self.match("KEYWORD", "TO")
@@ -511,6 +513,26 @@ class CobolParser:
                 self.consume("KEYWORD", "KEY")
                 self.match_is_keyword()
                 record_key = self.consume("IDENTIFIER", None, "Expected record key identifier").value
+            elif self.match("KEYWORD", "ALTERNATE") or self.match("IDENTIFIER", "ALTERNATE"):
+                if self.match("KEYWORD", "RECORD"):
+                    self.match("KEYWORD", "KEY")
+                elif self.match("KEYWORD", "KEY"):
+                    pass
+                self.match_is_keyword()
+                alt_key_name = self.consume("IDENTIFIER", None, "Expected alternate record key identifier").value
+                with_duplicates = False
+                if self.match("KEYWORD", "WITH"):
+                    if self.check("KEYWORD", "DUPLICATES") or self.check("IDENTIFIER", "DUPLICATES"):
+                        self.current += 1
+                        with_duplicates = True
+                    else:
+                        self.consume("KEYWORD", "DUPLICATES")
+                elif self.match("KEYWORD", "DUPLICATES") or self.match("IDENTIFIER", "DUPLICATES"):
+                    with_duplicates = True
+                alternate_keys.append({
+                    "name": alt_key_name,
+                    "with_duplicates": with_duplicates
+                })
             elif self.match("KEYWORD", "RELATIVE") or self.match("IDENTIFIER", "RELATIVE"):
                 if self.check("KEYWORD", "KEY") or (self.check("IDENTIFIER") and self.peek().value.upper() == "KEY"):
                     self.current += 1
@@ -534,6 +556,7 @@ class CobolParser:
                 "organization": org_type,
                 "access_mode": access_mode,
                 "record_key": record_key,
+                "alternate_keys": alternate_keys,
                 "status_var": status_var
             },
             source_file=self.file_path,
@@ -1049,7 +1072,7 @@ class CobolParser:
             end_verb = f"END-{op}"
             
             while True:
-                if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "GIVING") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended:
+                if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "GIVING") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended or is_tok_statement_start(self.peek()):
                     break
                 ident_tok = self.consume_val_or_subscript("Expected identifier or literal value")
                 ident = ident_tok.value
@@ -1067,7 +1090,7 @@ class CobolParser:
             remainder_tgt = None
             if self.match("KEYWORD", "GIVING"):
                 while True:
-                    if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended:
+                    if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended or is_tok_statement_start(self.peek()):
                         break
                     
                     if self.match("KEYWORD", "REMAINDER"):
@@ -1339,13 +1362,17 @@ class CobolParser:
             while not self.is_at_end() and not self.check("KEYWORD", "INTO"):
                 val_tok = self.consume_val("Expected value in STRING")
                 delim_val = "SIZE"
+                delim_type = "keyword"
                 if self.match("KEYWORD", "DELIMITED"):
                     self.match("KEYWORD", "BY")
                     delim_tok = self.consume_val("Expected delimiter in STRING")
                     delim_val = delim_tok.value
+                    delim_type = "literal" if delim_tok.type == "LITERAL_STRING" else "variable"
                 parts.append({
                     "value": val_tok.value,
-                    "delimited_by": delim_val
+                    "type": "literal" if val_tok.type == "LITERAL_STRING" else "variable",
+                    "delimited_by": delim_val,
+                    "delimited_by_type": delim_type
                 })
             
             self.consume("KEYWORD", "INTO", "Expected INTO keyword in STRING")
@@ -1558,7 +1585,7 @@ class CobolParser:
             args_info = []
             if self.match("KEYWORD", "USING"):
                 current_mode = "REFERENCE"
-                while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not (self.check("KEYWORD") and self.peek().value.upper() in ("RETURNING", "GIVING")):
+                while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not (self.check("KEYWORD") and self.peek().value.upper() in ("RETURNING", "GIVING")) and not is_tok_statement_start(self.peek()):
                     if self.match("KEYWORD", "BY"):
                         next_val = self.peek().value.upper()
                         if next_val == "REFERENCE":
@@ -1636,11 +1663,17 @@ class CobolParser:
             elif op == "READ":
                 if self.match("KEYWORD", "NEXT"):
                     is_next = True
+                if self.match("KEYWORD", "RECORD"):
+                    pass
                 if self.match("KEYWORD", "INTO"):
                     into_tok = self.consume("IDENTIFIER", None, "Expected target identifier after INTO")
                     into_target = into_tok.value
                 if self.match("KEYWORD", "NEXT"):
                     is_next = True
+                if self.match("KEYWORD", "KEY"):
+                    self.match("KEYWORD", "IS")
+                    key_tok = self.consume("IDENTIFIER", None, "Expected key variable identifier in READ statement")
+                    key_name = key_tok.value
             elif op == "DELETE":
                 self.match("KEYWORD", "RECORD")
             elif op == "START":
@@ -2792,7 +2825,7 @@ class CobolParser:
 
 def tokenize_sql(sql_text):
     tokens = []
-    pattern = re.compile(r'(?i):[a-z0-9_-]+|[a-z0-9_-]+\.[a-z0-9_-]+|[a-z0-9_-]+|\'[^\']*\'|"[^"]*"|<=|>=|<>|!=|=|<|>|\(|\)|,|\.')
+    pattern = re.compile(r'(?i):[a-z0-9_-]+|[a-z0-9_-]+\.[a-z0-9_-]+|[a-z0-9_-]+|\'[^\']*\'|"[^"]*"|<=|>=|<>|!=|=|<|>|\(|\)|,|\.|\*|\+|\/')
     for m in pattern.finditer(sql_text):
         tokens.append(m.group(0))
     return tokens
@@ -2890,6 +2923,7 @@ def parse_sql_tokens(tokens):
         if tokens[2].upper() != "CURSOR" or tokens[3].upper() != "FOR":
             raise ValueError("Expected CURSOR FOR after declare cursor name")
         subquery_props = parse_sql_tokens(tokens[4:])
+        subquery_props["original_sql"] = " ".join(tokens[4:])
         return {
             "sql_type": "DECLARE_CURSOR",
             "cursor_name": cursor_name,

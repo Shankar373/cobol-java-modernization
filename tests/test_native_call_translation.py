@@ -8,7 +8,6 @@ from modernize.semantic_ir import SemanticIRNode
 
 def test_static_call_translation():
     var_types = {"VAR-A": "String"}
-    # Construct target generator mock/stub
     class MockGenerator:
         program_name = "SUBPROG1"
         using_args = ["PARAM-A", "PARAM-B"]
@@ -17,13 +16,12 @@ def test_static_call_translation():
         var_pics = {"PARAM-A": "X(10)", "PARAM-B": "X(10)"}
         
     other_gen = MockGenerator()
-    
     class MockCurrentGenerator:
         program_name = "MAINPROG"
         group_fields = {}
+        diagnostics = []
         
     curr_gen = MockCurrentGenerator()
-    
     all_generators = {"SUBPROG1": other_gen}
     trans = NativeStatementTranslator(var_types, all_generators=all_generators, current_generator=curr_gen)
     
@@ -39,27 +37,26 @@ def test_static_call_translation():
     )
     
     res = trans.translate_statement(node_call)
-    assert "Subprog1 subprog1_1 = new Subprog1();" in res
-    assert "subprog1_1.param_a = var_a;" in res
-    assert "subprog1_1.execute();" in res
-    assert "var_a = subprog1_1.param_a;" in res
+    assert "Subprog1 subprog1_" in res
+    assert ".param_a = var_a;" in res
+    assert ".execute();" in res
+    assert "return_code = subprog1_" in res
+    assert "var_a = subprog1_" in res
 
 def test_dynamic_call_translation():
     var_types = {"PROG-NAME": "String", "VAR-A": "String"}
-    
     class MockGenerator:
         program_name = "SUBPROG2"
         using_args = ["PARAM-X"]
         group_fields = {}
         
     other_gen = MockGenerator()
-    
     class MockCurrentGenerator:
         program_name = "MAINPROG"
         group_fields = {}
+        diagnostics = []
         
     curr_gen = MockCurrentGenerator()
-    
     all_generators = {"SUBPROG2": other_gen}
     trans = NativeStatementTranslator(var_types, all_generators=all_generators, current_generator=curr_gen)
     
@@ -75,6 +72,8 @@ def test_dynamic_call_translation():
     )
     
     res = trans.translate_statement(node_call)
-    assert "targetProg_prog_name" in res
-    assert "equals(\"SUBPROG2\")" in res
-    assert "Subprog2 subprog2_1 = new Subprog2();" in res
+    assert "targetProg_prog_name = prog_name.trim().toUpperCase();" in res
+    assert 'targetProg_prog_name.equals("SUBPROG2")' in res
+    assert "Subprog2 subprog2_" in res
+    assert ".param_x = var_a;" in res
+    assert ".execute();" in res

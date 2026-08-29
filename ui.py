@@ -437,11 +437,11 @@ class Handler(BaseHTTPRequestHandler):
         if getattr(self.server, "no_auth", False):
             return True
         auth_env = os.environ.get("UI_AUTH_CREDENTIALS")
-        if not auth_env:
-            # Fail-closed for non-loopback bindings: a network-exposed instance
-            # without configured credentials refuses all requests.
-            host, _ = self.server.server_address[:2]
-            if str(host) not in ("127.0.0.1", "::1", "localhost"):
+        host, _ = self.server.server_address[:2]
+        is_external = str(host) not in ("127.0.0.1", "::1", "localhost")
+        
+        if is_external:
+            if not auth_env:
                 self.send_response(503)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
                 message = (b"Authentication required: set UI_AUTH_CREDENTIALS "
@@ -450,6 +450,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(message)
                 return False
+            if auth_env == "admin:admin":
+                self.send_response(503)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                message = (b"Security Violation: Default credentials 'admin:admin' are not "
+                           b"permitted when binding to non-loopback interfaces. "
+                           b"Set a secure UI_AUTH_CREDENTIALS value.")
+                self.send_header("Content-Length", str(len(message)))
+                self.end_headers()
+                self.wfile.write(message)
+                return False
+        
+        if not auth_env:
             return True
         auth_hdr = self.headers.get("Authorization")
         if not auth_hdr or not auth_hdr.startswith("Basic "):

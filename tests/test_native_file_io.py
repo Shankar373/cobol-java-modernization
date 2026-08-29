@@ -13,11 +13,11 @@ def test_generate_io_methods_input():
     ]
     res = NativeFileIOGenerator.generate_io_methods("FILE-A", "input.dat", True, record_fields)
     
-    assert "private BufferedReader file_a_reader;" in res
-    assert "file_a_reader = Files.newBufferedReader(Paths.get(resolve_path_file_a()));" in res
-    assert "field_a = val_field_a;" in res
-    assert "field_b = val_field_b.isEmpty() ? 0 : Integer.parseInt(val_field_b);" in res
-    assert "field_c = val_field_c.isEmpty() ? BigDecimal.ZERO : new BigDecimal(val_field_c).movePointLeft(2);" in res
+    assert "private java.io.InputStream file_a_stream_in;" in res
+    assert "file_a_stream_in = new java.io.BufferedInputStream(new java.io.FileInputStream(resolve_path_file_a()));" in res
+    assert "field_a = new String(buf, 0, 5, java.nio.charset.StandardCharsets.ISO_8859_1);" in res
+    assert "field_b = (int) new com.systema.modernized.runtime.CobolNumeric(buf, 5, 3, new com.systema.modernized.runtime.CobolNumericSpec(true, 18, 0, com.systema.modernized.runtime.CobolUsage.DISPLAY, com.systema.modernized.runtime.CobolSignPosition.TRAILING, false)).getValue().intValue();" in res
+    assert "field_c.assign(new com.systema.modernized.runtime.CobolNumeric(buf, 8, 6, new com.systema.modernized.runtime.CobolNumericSpec(true, 18, 0, com.systema.modernized.runtime.CobolUsage.DISPLAY, com.systema.modernized.runtime.CobolSignPosition.TRAILING, false)).getValue());" in res
 
 def test_generate_io_methods_output():
     record_fields = [
@@ -26,7 +26,20 @@ def test_generate_io_methods_output():
     ]
     res = NativeFileIOGenerator.generate_io_methods("FILE-B", "output.dat", False, record_fields)
     
-    assert "private BufferedWriter file_b_writer;" in res
-    assert "file_b_writer = Files.newBufferedWriter(Paths.get(resolve_path_file_b()));" in res
+    assert "private java.io.OutputStream file_b_stream_out;" in res
+    assert "file_b_stream_out = new java.io.BufferedOutputStream(new java.io.FileOutputStream(resolve_path_file_b()));" in res
     assert "write_file_b" in res
-    assert "String.format(\"%-10s%05d\"" in res
+    assert "byte[] c_out_field_a = padString(out_field_a, 10).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);" in res
+
+def test_sequential_preserves_trailing_spaces():
+    record_fields = [
+        ("OUT-FIELD-A", "X(10)"),
+        ("OUT-FIELD-B", "9(5)")
+    ]
+    # Fixed-length SEQUENTIAL must preserve spaces (no replaceAll)
+    res_seq = NativeFileIOGenerator.generate_io_methods("FILE-B", "output.dat", False, record_fields, organization="SEQUENTIAL")
+    assert ".replaceAll(" not in res_seq
+
+    # LINE SEQUENTIAL must trim spaces
+    res_line_seq = NativeFileIOGenerator.generate_io_methods("FILE-B", "output.dat", False, record_fields, organization="LINE SEQUENTIAL")
+    assert ".replaceAll(\"\\\\s+$\", \"\")" in res_line_seq
