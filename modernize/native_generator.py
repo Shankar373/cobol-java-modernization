@@ -5353,20 +5353,9 @@ class NativeProgramGenerator:
                 lines.append(f"        java.util.Arrays.fill({java_arr}, \"\");")
                 lines.append(f"    }}")
 
-        if has_sql and not self.is_child:
-            lines.append("    {")
-            lines.append("        // Wire H2 DataSource for JDBC / SQL emulation")
-            lines.append("        if (com.systema.modernized.SpringContextHelper.jdbcTemplate == null) {")
-            lines.append("            org.springframework.jdbc.datasource.SimpleDriverDataSource ds = new org.springframework.jdbc.datasource.SimpleDriverDataSource();")
-            lines.append("            ds.setDriverClass(org.h2.Driver.class);")
-            lines.append("            ds.setUrl(\"jdbc:h2:mem:db2mem;DB_CLOSE_DELAY=-1\");")
-            lines.append("            ds.setUsername(\"sa\");")
-            lines.append("            ds.setPassword(\"\");")
-            lines.append("            com.systema.modernized.SpringContextHelper.jdbcTemplate = new org.springframework.jdbc.core.JdbcTemplate(ds);")
-            lines.append("            com.systema.modernized.SpringContextHelper.transactionManager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(ds);")
-            lines.append("        }")
-            lines.append("    }")
-            lines.append("")
+        # NOTE: DataSource initialization is handled in main() / entry method via
+        # the PGHOST-aware block that chooses PostgreSQL, DB2, or H2 fallback.
+        # A class-level initializer block here would pre-empt that logic.
 
         # Emit REDEFINES Storage & Accessors
         redefs_lines = self._generate_redefines_storage()
@@ -6047,6 +6036,15 @@ class NativeProgramGenerator:
             lines.append("                dataSource.setPassword(pgPass);")
             lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate = new org.springframework.jdbc.core.JdbcTemplate(dataSource);")
             lines.append("                com.systema.modernized.SpringContextHelper.transactionManager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);")
+            # Apply per-repo seed data to PG for test isolation (same as H2 path)
+            if tables or seed_queries:
+                lines.append("                try {")
+                for table_name in tables:
+                    lines.append(f"                    try {{ com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE\"); }} catch (Exception _e) {{ try {{ com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"DELETE FROM {table_name}\"); }} catch (Exception _e2) {{}} }}")
+                for q in seed_queries:
+                    q_esc = q.replace("\\", "\\\\")
+                    lines.append(f"                    try {{ com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"{q_esc}\"); }} catch (Exception _e) {{ /* ignore duplicate seed */ }}")
+                lines.append("                } catch (Exception e) { System.err.println(\"[PG-SEED] Per-repo seed failed: \" + e.getMessage()); }")
             lines.append("            } else if (\"1\".equals(dbMode)) {")
             lines.append("                String dbUrl = System.getenv(\"DB2_URL\");")
             lines.append("                String dbUser = System.getenv(\"DB2_USERNAME\");")
