@@ -3503,6 +3503,11 @@ class Pipeline:
         build_cmds = ["cd /repo"]
         ocesql_temp = os.path.abspath(os.path.join(self.out, "ocesql_temp"))
         os.makedirs(ocesql_temp, exist_ok=True)
+        for path_to_chmod in [self.repo, ocesql_temp]:
+            try:
+                os.chmod(path_to_chmod, 0o777)
+            except Exception:
+                pass
 
         if has_sql:
             for s in rm_legacy:

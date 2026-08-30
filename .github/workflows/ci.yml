@@ -90,6 +90,10 @@ jobs:
             --progress=plain \
             .
 
+      - name: Pull JDK image for parity tests
+        run: |
+          docker pull eclipse-temurin:17-jdk-noble
+
       - name: Verify gnucobol-ocesql toolchain
         run: |
           echo "--- GnuCOBOL version ---"
