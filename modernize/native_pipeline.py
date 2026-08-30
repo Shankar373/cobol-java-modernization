@@ -534,6 +534,12 @@ class NativePipeline:
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
     <groupId>com.systema.modernized</groupId>
     <artifactId>native-modernized</artifactId>
     <version>1.0.0</version>
@@ -1131,13 +1137,13 @@ public class CicsTransactionContext {
         if not os.path.exists(os.path.join(self.generated_dir, "pom.xml")):
             return False
 
-        # Run mvn clean compile
+        # Run mvn compile
         try:
             mvn_exe = "mvn.cmd" if sys.platform == "win32" else "mvn"
             mvn_args = [mvn_exe]
             if os.environ.get("REAL_DB2_MODE") != "1":
                 mvn_args.append("-o")
-            mvn_args += ["clean", "compile"]
+            mvn_args += ["compile"]
             res = subprocess.run(mvn_args, cwd=self.generated_dir, capture_output=True, text=True, timeout=180)
         except subprocess.TimeoutExpired:
             self.log("Maven compilation timed out after 180 seconds.")

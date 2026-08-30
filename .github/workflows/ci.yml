@@ -57,8 +57,8 @@ jobs:
       # ── Maven dependency cache ─────────────────────────────────────────────
       - name: Seed Maven cache deterministically
         run: |
-          mvn -B -f docker/maven-seed-pom.xml dependency:resolve
-          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve
+          mvn -B -f docker/maven-seed-pom.xml dependency:resolve dependency:resolve-plugins
+          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve dependency:resolve-plugins
 
       - name: Verify seeded Maven artifacts (AGENTS.md §10)
         run: |

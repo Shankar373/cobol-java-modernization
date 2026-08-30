@@ -14,6 +14,8 @@
 requests>=2.31,<3
 playwright>=1.47,<2
 pytest>=7.0
+pyyaml
+
 
 # External tool prerequisites (NOT pip-installable; documented here because
 # the test suite shells out to them):
