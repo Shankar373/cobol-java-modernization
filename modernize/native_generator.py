@@ -6022,7 +6022,8 @@ class NativeProgramGenerator:
                                             seed_queries.append(f"INSERT INTO {table_name} ({cols_str}) VALUES ({vals_str})")
 
             lines.append("        if (com.systema.modernized.SpringContextHelper.jdbcTemplate == null) {")
-            lines.append("            org.springframework.jdbc.datasource.DriverManagerDataSource dataSource = new org.springframework.jdbc.datasource.DriverManagerDataSource();")
+            lines.append("            org.springframework.jdbc.datasource.SingleConnectionDataSource dataSource = new org.springframework.jdbc.datasource.SingleConnectionDataSource();")
+            lines.append("            dataSource.setSuppressClose(true);")
             lines.append("            String pgHost = System.getenv(\"PGHOST\");")
             lines.append("            String dbMode = System.getenv(\"REAL_DB2_MODE\");")
             lines.append("            if (pgHost != null) {")

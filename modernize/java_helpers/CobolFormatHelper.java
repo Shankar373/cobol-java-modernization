@@ -83,9 +83,13 @@ public class CobolFormatHelper {
             }
         }
 
-        // Truncate high-order digits on overflow to match standard COBOL rules
+        // Check for numeric overflow
         if (intPart.length() > intPlaceholdersCount) {
-            intPart = intPart.substring(intPart.length() - intPlaceholdersCount);
+            StringBuilder stars = new StringBuilder();
+            for (int i = 0; i < pattern.length(); i++) {
+                stars.append('*');
+            }
+            return stars.toString();
         }
 
         // Traverse integer pattern right-to-left to place digits
