@@ -3392,6 +3392,22 @@ class Pipeline:
     # -- 3. baseline ---------------------------------------------------------
     def stage_baseline(self):
         d = self.data("discover")
+        # Ensure repository directory and all subdirectories/files are writable recursively
+        for root, dirs, files in os.walk(self.repo):
+            for dname in dirs:
+                try:
+                    os.chmod(os.path.join(root, dname), 0o777)
+                except Exception:
+                    pass
+            for fname in files:
+                try:
+                    os.chmod(os.path.join(root, fname), 0o666)
+                except Exception:
+                    pass
+        try:
+            os.chmod(self.repo, 0o777)
+        except Exception:
+            pass
         if self.skip_legacy:
             bl = load_snapshot_dir(os.path.join(self.out, "baseline", "legacy"))
             self.set_data("legacy", {

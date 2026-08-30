@@ -20,7 +20,7 @@ def test_perform_varying_translation():
     }
     
     java_stmt = trans.translate_statement(node_perf)
-    expected = "for (ws_i = 1; !(ws_i > ws_limit); ws_i += 1) {"
+    expected = "for (ws_i = 1; !(ws_i > ws_limit) && !programExited; ws_i += 1) {"
     assert java_stmt == expected
 
 def test_perform_varying_bigdecimal_index_translation():

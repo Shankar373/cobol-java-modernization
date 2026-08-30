@@ -137,7 +137,9 @@ class NativePipeline:
                     if os.path.exists(src_od):
                         os.makedirs(dst_od, exist_ok=True)
                         for f in os.listdir(src_od):
-                            shutil.copy2(os.path.join(src_od, f), os.path.join(dst_od, f))
+                            src_file = os.path.join(src_od, f)
+                            if os.path.isfile(src_file):
+                                shutil.copy2(src_file, os.path.join(dst_od, f))
                 self.log("Baseline prepared and copied successfully.")
             else:
                 self.log("Bypassing legacy baseline compile for Report Writer program")

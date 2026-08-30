@@ -23,6 +23,14 @@ def run_db2_pipeline_e2e(repo_name, expected_stdout):
             fh.write(expected_stdout)
             
         p = NativePipeline(repo_dir, temp_out)
+        
+        # Set PG connection parameters in environment for the host Java run.
+        os.environ["PGHOST"] = "localhost"
+        os.environ["PGPORT"] = "5432"
+        os.environ["PGUSER"] = "modernize"
+        os.environ["PGPASSWORD"] = "modernize"
+        os.environ["PGDATABASE"] = "modernization_db"
+
         verdict = p.run()
         
         # Verify NativePipeline returned success

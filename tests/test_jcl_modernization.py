@@ -8,9 +8,9 @@ from modernize.jcl_parser import JclParser
 from modernize.native_pipeline import NativePipeline
 
 def test_jcl_parser_unit():
-    jcl_path = r"c:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\tests\repos\JCLBATCH01\src\JCLBATCH01.jcl"
+    jcl_path = os.path.join("tests", "repos", "JCLBATCH01", "src", "JCLBATCH01.jcl")
     content = open(jcl_path, "r", encoding="utf-8").read()
-    parser = JclParser(content, repo_dir=r"c:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\tests\repos\JCLBATCH01")
+    parser = JclParser(content, repo_dir=os.path.join("tests", "repos", "JCLBATCH01"))
     job = parser.parse()
     
     assert job.name == "JCLBATCH01"
@@ -36,7 +36,7 @@ def test_jcl_parser_unit():
     assert step2["conds"][0] == (0, "NE", "STEP1")
 
 def test_jcl_parser_invalid():
-    jcl_path = r"c:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\tests\repos\JCLINVALID01\src\JCLINVALID01.jcl"
+    jcl_path = os.path.join("tests", "repos", "JCLINVALID01", "src", "JCLINVALID01.jcl")
     content = open(jcl_path, "r", encoding="utf-8").read()
     parser = JclParser(content)
     job = parser.parse()
@@ -53,8 +53,8 @@ def test_jcl_parser_invalid():
     assert any("UNRESOLVED_DATASET" in r for r in reasons)
 
 def test_jcl_pipeline_e2e():
-    repo = r"c:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\tests\repos\JCLBATCH01"
-    out_dir = r"c:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\target\modernized_test"
+    repo = os.path.join("tests", "repos", "JCLBATCH01")
+    out_dir = os.path.join("target", "modernized_test")
     
     # Create input dataset
     input_file = os.path.join(repo, "MY.INPUT.DATA")

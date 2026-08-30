@@ -8,15 +8,16 @@ from modernize.native_pipeline import NativePipeline
 def test_ksds_baseline_differential():
     """Phase 1: Real GnuCOBOL KSDS baseline vs modernized Spring Boot + PostgreSQL.
     Verifies execution parity of WRITE, READ, START, READ NEXT, REWRITE, and DELETE."""
+    pg_container = os.environ.get("PG_CONTAINER_NAME", "db")
     # Seed/Cleanup Postgres DB table for VSAM KSDS emulation
     cleanup_cmd = [
-        "docker", "exec", "-i", "modernization-platform-db-1",
+        "docker", "exec", "-i", pg_container,
         "psql", "-U", "modernize", "-d", "modernization_db",
         "-c", "DROP TABLE IF EXISTS customer_vsam;"
     ]
     subprocess.run(cleanup_cmd, check=True)
 
-    repo_dir = r"c:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\tests\repos\ksds_baseline_01"
+    repo_dir = os.path.join("tests", "repos", "ksds_baseline_01")
     tmp_out = tempfile.mkdtemp(prefix="ksds_baseline_")
 
     try:

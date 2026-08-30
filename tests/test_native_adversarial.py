@@ -54,7 +54,7 @@ def test_adversarial_validation_complete():
     assert "ws_target_2 = 10;" in java_src
     
     # 7. Verify PERFORM VARYING translation
-    assert "for (ws_i = 1; !(ws_i > ws_limit); ws_i += 1) {" in java_src
+    assert "for (ws_i = 1; !(ws_i > ws_limit) && !programExited; ws_i += 1) {" in java_src
     
     # 8. Verify subscripted element assignment
     assert "item_val[ws_i - 1].assign(new BigDecimal(\"2.50\"), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);" in java_src
