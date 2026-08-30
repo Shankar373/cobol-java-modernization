@@ -91,6 +91,8 @@ class EnterpriseApplicationGenerator:
 
     def _write_jpa_entity(self, java_base: str, mname: str, fields: list, is_jpa: bool):
         cname = to_java_class(mname)
+        # BUG-G007: sanitize table/column names — hyphens are invalid in SQL identifiers
+        table_name = mname.lower().replace("-", "_")
         lines = []
         lines.append("package com.systema.modernized.domain;")
         lines.append("")
@@ -99,7 +101,7 @@ class EnterpriseApplicationGenerator:
             lines.append("import java.math.BigDecimal;")
             lines.append("")
             lines.append("@Entity")
-            lines.append(f"@Table(name = \"{mname.lower()}\")")
+            lines.append(f"@Table(name = \"{table_name}\")")
         else:
             lines.append("import java.math.BigDecimal;")
             lines.append("")
@@ -119,8 +121,14 @@ class EnterpriseApplicationGenerator:
             jtype = f.get("type", "String")
             if not camel:
                 continue
+            if is_jpa:
+                # BUG-G007: use sanitized raw_name as column name
+                raw_name = f.get("raw_name", camel)
+                col_name = raw_name.lower().replace("-", "_")
+                lines.append(f"    @Column(name = \"{col_name}\")")
             lines.append(f"    private {jtype} {camel};")
-            
+            lines.append("")
+
         lines.append("")
         
         # Getters and setters
@@ -265,7 +273,6 @@ class EnterpriseApplicationGenerator:
         lines.append("        <dependency>")
         lines.append("            <groupId>com.h2database</groupId>")
         lines.append("            <artifactId>h2</artifactId>")
-        lines.append("            <scope>runtime</scope>")
         lines.append("        </dependency>")
         lines.append("        <dependency>")
         lines.append("            <groupId>org.postgresql</groupId>")

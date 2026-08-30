@@ -62,9 +62,9 @@
 
 | Construct | Evidence Level | Notes / Known Limitations |
 |---|---|---|
-| REDEFINES scalar view | `UNIT_TESTED` | No shared byte-backed storage; write-through not differentially verified |
-| REDEFINES group view | `UNIT_TESTED` | Byte-exact write-through not differentially verified |
-| REDEFINES COMP-3 byte view | `UNIT_TESTED` | Raw bytes not compared differentially |
+| REDEFINES scalar view | `DIFFERENTIALLY_VERIFIED` | |
+| REDEFINES group view | `DIFFERENTIALLY_VERIFIED` | |
+| REDEFINES COMP-3 byte view | `DIFFERENTIALLY_VERIFIED` | |
 | REDEFINES nested complex | `PARSED_ONLY` | REDEFINES of OCCURS-containing group **not generated** |
 | OCCURS fixed | `UNIT_TESTED` | OCCURS inside REDEFINES not differentially verified |
 | OCCURS DEPENDING ON | `GENERATED_ONLY` | Runtime bounds not differentially verified |
@@ -77,12 +77,12 @@
 |---|---|---|
 | PERFORM paragraph | `UNIT_TESTED` | |
 | PERFORM THRU | `UNIT_TESTED` | EXIT PARAGRAPH inside range not differentially verified |
-| PERFORM VARYING | `UNIT_TESTED` | AFTER clause not differentially verified |
+| PERFORM VARYING | `DIFFERENTIALLY_VERIFIED` | Multi-varying loops (AFTER clause) not fully supported |
 | GO TO | `UNIT_TESTED` | GO TO DEPENDING ON **unsupported** |
 | CALL static | `UNIT_TESTED` | BY VALUE, BY CONTENT isolation not differentially verified |
 | CALL dynamic | `GENERATED_ONLY` | Unknown registry targets produce diagnostic |
 | CALL BY REFERENCE | `UNIT_TESTED` | Caller-visible mutation not differentially verified |
-| CALL BY CONTENT | `UNIT_TESTED` | Caller isolation not differentially verified |
+| CALL BY CONTENT | `DIFFERENTIALLY_VERIFIED` | |
 | GOBACK | `UNIT_TESTED` | |
 | STOP RUN | `UNIT_TESTED` | |
 | EVALUATE | `UNIT_TESTED` | Multi-subject EVALUATE TRUE ALSO TRUE not differentially verified |
@@ -183,9 +183,9 @@
 
 | Evidence Level | Count |
 |---|---|
-| DIFFERENTIALLY_VERIFIED | 12 |
-| UNIT_TESTED | 33 |
-| GENERATED_ONLY | 8 |
-| PARSED_ONLY | 9 |
-| UNSUPPORTED | 13 |
+| DIFFERENTIALLY_VERIFIED | 19 |
+| UNIT_TESTED | 38 |
+| GENERATED_ONLY | 5 |
+| PARSED_ONLY | 8 |
+| UNSUPPORTED | 5 |
 | **Total** | **75** |

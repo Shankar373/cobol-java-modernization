@@ -225,8 +225,9 @@ public class SpringContextHelper {
             f.write(adjusted_java_source)
             
         # Compile Java class
+        helpers_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "modernize", "java_helpers", "src", "main", "java"))
         compile_res = subprocess.run(
-            ["javac", "-cp", temp_dir, src_file],
+            ["javac", "-cp", f"{temp_dir}{os.pathsep}{helpers_path}", "-d", temp_dir, src_file],
             capture_output=True,
             text=True,
             timeout=180

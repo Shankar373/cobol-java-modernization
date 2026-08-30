@@ -251,29 +251,38 @@ CAPABILITIES: Dict[str, Dict[str, Any]] = {
     # REDEFINES / OCCURS
     # =========================================================
     "REDEFINES.SCALAR": _e(
-        EvidenceLevel.UNIT_TESTED,
+        EvidenceLevel.DIFFERENTIALLY_VERIFIED,
         parser_function="CobolParser._parse_data_item",
         generator_function="NativeProgramGenerator._emit_redefines",
-        existing_tests=["tests/test_phase8_redefines.py"],
-        known_limitations=["Shared byte-backed storage not used; overlapping views via copy-on-access"],
-        recommended_next_test="Differential write-through scalar REDEFINES fixture",
+        existing_tests=[
+            "tests/test_phase8_redefines.py",
+            "tests/test_parity_fixtures.py::test_milestone_b_parity[milestone_b_redefines_scalar_view]"
+        ],
+        known_limitations=[],
+        recommended_next_test="Verify nested redefines on COMP-3 structures",
     ),
     "REDEFINES.GROUP": _e(
-        EvidenceLevel.UNIT_TESTED,
+        EvidenceLevel.DIFFERENTIALLY_VERIFIED,
         parser_function="CobolParser._parse_data_item",
         generator_function="NativeProgramGenerator._emit_redefines",
-        existing_tests=["tests/test_phase8_redefines.py"],
-        known_limitations=["Group REDEFINES byte-exact write-through not differentially verified"],
-        recommended_next_test="Differential group REDEFINES fixture (write via one view, read via other)",
+        existing_tests=[
+            "tests/test_phase8_redefines.py",
+            "tests/test_parity_fixtures.py::test_parity_redefines_group_view"
+        ],
+        known_limitations=[],
+        recommended_next_test="Verify complex deep group overlays with shifting offsets",
     ),
     "REDEFINES.COMP3_VIEW": _e(
-        EvidenceLevel.UNIT_TESTED,
+        EvidenceLevel.DIFFERENTIALLY_VERIFIED,
         parser_function="CobolParser._parse_data_item",
         generator_function="NativeProgramGenerator._emit_redefines",
         runtime_helper="CobolNumeric (COMP-3 encode)",
-        existing_tests=["tests/test_phase8_redefines.py"],
-        known_limitations=["Raw bytes not compared differentially"],
-        recommended_next_test="Differential COMP-3 byte view fixture",
+        existing_tests=[
+            "tests/test_phase8_redefines.py",
+            "tests/test_parity_fixtures.py::test_milestone_b_parity[milestone_b_redefines_comp3_byte_view]"
+        ],
+        known_limitations=[],
+        recommended_next_test="Differential COMP-3 negative sign byte view",
     ),
     "REDEFINES.NESTED_COMPLEX": _e(
         EvidenceLevel.PARSED_ONLY,
@@ -317,10 +326,14 @@ CAPABILITIES: Dict[str, Dict[str, Any]] = {
         recommended_next_test="Differential PERFORM THRU fixture with paragraph range",
     ),
     "PROC.PERFORM_VARYING": _e(
-        EvidenceLevel.UNIT_TESTED,
+        EvidenceLevel.DIFFERENTIALLY_VERIFIED,
         parser_function="CobolParser._parse_perform_stmt",
         generator_function="NativeProgramGenerator._emit_perform",
-        existing_tests=["tests/test_native_perform_varying.py"],
+        existing_tests=[
+            "tests/test_native_perform_varying.py",
+            "tests/test_parity_fixtures.py::test_parity_perform_varying"
+        ],
+        known_limitations=["Multi-varying loops (AFTER clause) not fully supported"],
         recommended_next_test="Differential PERFORM VARYING with AFTER clause",
     ),
     "PROC.GO_TO": _e(
@@ -358,12 +371,15 @@ CAPABILITIES: Dict[str, Dict[str, Any]] = {
         recommended_next_test="Differential BY REFERENCE mutation test",
     ),
     "PROC.CALL_BY_CONTENT": _e(
-        EvidenceLevel.UNIT_TESTED,
+        EvidenceLevel.DIFFERENTIALLY_VERIFIED,
         parser_function="CobolParser._parse_call_stmt",
         generator_function="NativeProgramGenerator._emit_call",
-        existing_tests=["tests/test_native_call_translation.py"],
-        known_limitations=["Caller isolation not differentially verified"],
-        recommended_next_test="Differential BY CONTENT isolation test",
+        existing_tests=[
+            "tests/test_native_call_translation.py",
+            "tests/test_parity_fixtures.py::test_parity_call_by_content"
+        ],
+        known_limitations=[],
+        recommended_next_test="Verify complex structures passed by CONTENT",
     ),
     "PROC.GOBACK": _e(
         EvidenceLevel.UNIT_TESTED,

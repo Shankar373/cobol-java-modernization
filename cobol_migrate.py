@@ -19,7 +19,7 @@ from decimal import Decimal
 # defaults
 # ---------------------------------------------------------------------------
 DEFAULT_COBJ_IMAGE = "opensourcecobol/opensourcecobol4j:2.0.0"
-DEFAULT_GNUCOBOL_IMAGE = "hurriedreformist/gnucobol:3.1-builder"
+DEFAULT_GNUCOBOL_IMAGE = "gnucobol-ocesql:latest"
 COBJ_LIB_JAR = "/usr/lib/opensourcecobol4j/libcobj.jar"
 SOURCE_EXTENSIONS = (".cob", ".cbl", ".COB", ".CBL")
 COPYBOOK_EXTENSIONS = (".cpy", ".CPY", ".copy", ".COPY")
@@ -1193,16 +1193,17 @@ def ensure_image(image, pull):
     if not pull:
         return False
     log(f"  pulling image {image} ...")
-    return sh(["docker", "pull", image]).returncode == 0
+    # Cap pull at 120 s — a missing or unreachable image must not hang indefinitely.
+    return sh(["docker", "pull", image], timeout=120).returncode == 0
 
 
-def docker_run(image, mounts, workdir, cmd, shell="bash", timeout=None):
+def docker_run(image, mounts, workdir, cmd, shell="bash", timeout=None, network="none"):
     ok, err = validate_docker_configuration()
     if not ok:
         raise RuntimeError(f"Docker configuration error: {err}")
     full = ["docker", "run", "--rm",
             "--memory=2g", "--cpus=2", "--pids-limit=512",
-            "--network", "none",
+            "--network", network,
             "--cap-drop=ALL", "--security-opt=no-new-privileges"]
     
     in_docker = os.path.exists("/.dockerenv")
@@ -3459,9 +3460,8 @@ class Pipeline:
                 self.log(f"    [ERROR] Source file not found: {s}")
                 raise
         
-        if has_sql or has_cics or has_dli:
+        if (has_sql or has_cics or has_dli) and not has_sql:
             blocked_reasons = []
-            if has_sql: blocked_reasons.append("DB2")
             if has_cics: blocked_reasons.append("CICS")
             if has_dli: blocked_reasons.append("DLI")
             msg = f"GnuCOBOL baseline compilation BLOCKED: missing proprietary {'/'.join(blocked_reasons)} precompilation environment"
@@ -3476,23 +3476,109 @@ class Pipeline:
             self.mark(STAGES.index("baseline"), "blocked", msg)
             return True, msg, []
 
+        if has_sql:
+            # Check connection — explicit 15-second timeout; a ready PostgreSQL
+            # responds in under 1 second, so 15s is generous but not a hang risk.
+            cmd_ping = [
+                "docker", "run", "--rm", "--network", "modernization-platform_default",
+                "-e", "PGPASSWORD=modernize",
+                DEFAULT_GNUCOBOL_IMAGE,
+                "psql", "-h", "db", "-U", "modernize", "-d", "modernization_db", "-c", "SELECT 1;"
+            ]
+            ping_res = sh(cmd_ping, timeout=15)
+            if ping_res.returncode != 0:
+                raise RuntimeError(
+                    f"PostgreSQL connectivity check failed on host=db port=5432. "
+                    f"Ensure db container is up and network=modernization-platform_default. Error: {ping_res.stderr}"
+                )
 
         build_cmds = ["cd /repo"]
+        ocesql_temp = os.path.abspath(os.path.join(self.out, "ocesql_temp"))
+        os.makedirs(ocesql_temp, exist_ok=True)
+
+        if has_sql:
+            for s in rm_legacy:
+                with open(os.path.join(self.repo, s), "r", encoding="utf-8", errors="replace") as fh:
+                    src_content = fh.read()
+                if "EXEC SQL" in src_content.upper():
+                    from tests.utils.parity_harness import preprocess_ocesql_source
+                    preprocessed_code = preprocess_ocesql_source(src_content)
+                    
+                    # Log transformed COBOL source
+                    os.makedirs(os.path.join(self.repo, "target"), exist_ok=True)
+                    transformed_path = os.path.join(self.repo, "target", f"{os.path.splitext(os.path.basename(s))[0]}_transformed.cob")
+                    with open(transformed_path, "wb") as f:
+                        f.write(preprocessed_code.encode("utf-8"))
+                        
+                    clean_path = os.path.join(ocesql_temp, f"{os.path.splitext(os.path.basename(s))[0]}_preprocessed.cob")
+                    with open(clean_path, "wb") as f:
+                        f.write(preprocessed_code.encode("utf-8"))
+                    
+                    p_base = os.path.splitext(os.path.basename(s))[0]
+                    precompile_cmd = [
+                        "docker", "run", "--rm",
+                        "-v", f"{posix(self.repo)}:/repo",
+                        "-v", f"{posix(ocesql_temp)}:/ocesql_temp",
+                        DEFAULT_GNUCOBOL_IMAGE,
+                        "sh", "-c",
+                        f"cp /usr/share/open-cobol-esql/copy/sqlca.cbl /ocesql_temp/ && ocesql --inc=/ocesql_temp /ocesql_temp/{p_base}_preprocessed.cob /ocesql_temp/{p_base}_precompiled.cob"
+                    ]
+                    # 60-second cap: ocesql precompile in a container is I/O-bound
+                    # and should complete in seconds; a hard limit surfaces hangs early.
+                    prc = sh(precompile_cmd, timeout=60)
+                    if prc.returncode != 0:
+                        raise RuntimeError(f"ocesql precompile failed for {s}: {prc.stderr}\n{prc.stdout}")
+
         if module_src:
             for m_src in module_src:
                 m_base = os.path.splitext(os.path.basename(m_src))[0]
-                build_cmds.append(
-                    f"cobc -m {' '.join(gflags)} {inc} "
-                    f"-o {m_base}.so "
-                    f"{posix(m_src)}"
-                )
-        build_cmds.append(
-            f"cobc -x {' '.join(gflags)} {inc} "
-            f"-o {exe_name} "
-            + ' '.join(posix(s) for s in (entry_src or rm_legacy))
-        )
+                with open(os.path.join(self.repo, m_src), "r", encoding="utf-8", errors="replace") as fh:
+                    m_content = fh.read().upper()
+                if "EXEC SQL" in m_content:
+                    m_gflags = [f for f in gflags if f != "-free"]
+                    build_cmds.append(
+                        f"cobc -m -fstatic-call {' '.join(m_gflags)} {inc} "
+                        f"-o {m_base}.so "
+                        f"/ocesql_temp/{m_base}_precompiled.cob -I/usr/share/open-cobol-esql/copy -locesql"
+                    )
+                else:
+                    build_cmds.append(
+                        f"cobc -m {' '.join(gflags)} {inc} "
+                        f"-o {m_base}.so "
+                        f"{posix(m_src)}"
+                    )
+
+        entry_list = entry_src or rm_legacy
+        entry_files = []
+        entry_sql = False
+        for s in entry_list:
+            s_base = os.path.splitext(os.path.basename(s))[0]
+            with open(os.path.join(self.repo, s), "r", encoding="utf-8", errors="replace") as fh:
+                s_content = fh.read().upper()
+            if "EXEC SQL" in s_content:
+                entry_files.append(f"/ocesql_temp/{s_base}_precompiled.cob")
+                entry_sql = True
+            else:
+                entry_files.append(posix(s))
+
+        if entry_sql:
+            entry_gflags = [f for f in gflags if f != "-free"]
+            build_cmds.append(
+                f"cobc -x -fstatic-call {' '.join(entry_gflags)} {inc} "
+                f"-o {exe_name} "
+                + ' '.join(entry_files) + " -I/usr/share/open-cobol-esql/copy -locesql"
+            )
+        else:
+            build_cmds.append(
+                f"cobc -x {' '.join(gflags)} {inc} "
+                f"-o {exe_name} "
+                + ' '.join(entry_files)
+            )
+
         build = docker_run(
-            DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
+            DEFAULT_GNUCOBOL_IMAGE,
+            [(self.repo, "/repo"), (ocesql_temp, "/ocesql_temp")],
+            "/repo",
             " && ".join(build_cmds),
             shell="sh",
         )
@@ -6500,38 +6586,59 @@ def parse_copybook_fields(text):
             jtype = "String"
             length = 0
             scale = 0
-            is_comp3 = "COMP-3" in line.upper() or "COMP-3" in pic.upper()
+            line_upper = line.upper()
+            # BUG-G006: detect COMP-3 (packed decimal), COMP/COMP-4/BINARY (integer binary)
+            is_comp3 = "COMP-3" in line_upper or "PACKED-DECIMAL" in line_upper
+            is_binary = (
+                ("COMP-4" in line_upper or "COMP-5" in line_upper or "BINARY" in line_upper)
+                and not is_comp3
+                and "COMP-3" not in line_upper
+            )
+            # Detect plain COMP (without -3/-4/-5 suffix) as integer binary
+            if not is_comp3 and not is_binary:
+                comp_match = re.search(r'\bCOMP\b', line_upper)
+                if comp_match and "COMP-" not in line_upper[comp_match.start():]:
+                    is_binary = True
             pic_upper = pic.upper()
             if "X" in pic_upper:
                 len_match = re.search(r'X\((\d+)\)', pic_upper)
                 length = int(len_match.group(1)) if len_match else pic_upper.count("X")
                 jtype = "String"
             elif "9" in pic_upper:
-                parts = pic_upper.split("V")
-                before_v = parts[0]
+                parts_v = pic_upper.split("V")
+                before_v = parts_v[0]
                 len_match_before = re.search(r'9\((\d+)\)', before_v)
                 len_before = int(len_match_before.group(1)) if len_match_before else before_v.count("9")
-                if len(parts) > 1:
-                    after_v = parts[1]
+                if len(parts_v) > 1:
+                    after_v = parts_v[1]
                     len_match_after = re.search(r'9\((\d+)\)', after_v)
                     len_after = int(len_match_after.group(1)) if len_match_after else after_v.count("9")
                     scale = len_after
                     length = len_before + len_after
+                    # BUG-G006: COMP/BINARY fields with implied decimal are still BigDecimal
                     jtype = "BigDecimal"
                 else:
                     length = len_before
-                    jtype = "BigDecimal" if is_comp3 or length > 9 else "Integer"
+                    if is_binary:
+                        # BUG-G006: COMP/BINARY fields map to Integer (<=9) or Long (<=18)
+                        jtype = "Integer" if length <= 9 else "Long"
+                    elif is_comp3 or length > 9:
+                        jtype = "BigDecimal"
+                    else:
+                        jtype = "Integer"
             parts = name.upper().split("-")
             if len(parts) > 1 and parts[0] in ("POL", "CUST", "CUS", "CLM", "ACC", "TX", "WS"):
                 parts = parts[1:]
             camel = parts[0].lower() + "".join(p.capitalize() for p in parts[1:])
+            # Store raw_name for @Column annotation generation
             fields.append({
                 "raw_name": name,
                 "camel_name": camel,
                 "type": jtype,
                 "length": length,
                 "scale": scale,
-                "is_comp3": is_comp3
+                "is_comp3": is_comp3,
+                "is_binary": is_binary,
             })
     return fields
 

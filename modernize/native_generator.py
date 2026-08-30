@@ -1,6 +1,7 @@
 import re
 import os
 from decimal import Decimal
+from modernize.semantic_ir import SemanticIRNode
 
 def to_java_var(name: str) -> str:
     # Check if name has subscript, e.g. ITEM-AMOUNT(3) or ITEM-AMOUNT ( WS-I )
@@ -120,8 +121,14 @@ class NativeTypeMapper:
 
     @classmethod
     def get_java_type(cls, pic_str: str, usage: str = None) -> str:
-        if usage and usage.upper() in ("COMP-3", "PACKED-DECIMAL"):
-            return "BigDecimal"
+        if usage:
+            usage_upper = usage.upper()
+            if usage_upper == "COMP-1":
+                return "Float"
+            if usage_upper == "COMP-2":
+                return "Double"
+            if usage_upper in ("COMP-3", "PACKED-DECIMAL"):
+                return "BigDecimal"
         
         t_name, _, _, _ = cls.parse_pic(pic_str)
         return t_name
@@ -295,6 +302,29 @@ class NativeExpressionTranslator:
 
         expr_str = self._translate_subscripts(expr_str)
         
+        # Mask get_ accessor calls to protect them from operator tokenizer splitting
+        get_placeholders = {}
+        while True:
+            match = re.search(r'\bget_[a-zA-Z0-9_]+\(', expr_str)
+            if not match:
+                break
+            start_idx = match.end() - 1  # points to '('
+            depth = 1
+            curr = start_idx + 1
+            while curr < len(expr_str) and depth > 0:
+                if expr_str[curr] == '(':
+                    depth += 1
+                elif expr_str[curr] == ')':
+                    depth -= 1
+                curr += 1
+            if depth == 0:
+                full_call = expr_str[match.start():curr]
+                key = f"\x00GET{len(get_placeholders)}\x00"
+                get_placeholders[key] = full_call
+                expr_str = expr_str[:match.start()] + key + expr_str[curr:]
+            else:
+                break
+        
         # Mask substring calls to protect them from operator tokenizer splitting
         substring_placeholders = {}
         while True:
@@ -358,6 +388,8 @@ class NativeExpressionTranslator:
                 raw_token = t_strip
                 for ph, orig in placeholders.items():
                     raw_token = raw_token.replace(f"[{ph}]", f"[{orig}]")
+                if raw_token.startswith("\x00GET"):
+                    raw_token = get_placeholders[raw_token]
                 
                 if "[" in raw_token:
                     base_java = re.split(r'\[', raw_token)[0].strip()
@@ -400,8 +432,10 @@ class NativeExpressionTranslator:
                         translated_tokens.append(f"{java_var}.getValue()")
                     else:
                         translated_tokens.append(java_var)
-
+ 
         res = self._convert_to_bigdecimal_calls(translated_tokens)
+        for ph, val in get_placeholders.items():
+            res = res.replace(ph, val)
         for ph, val in numval_placeholders.items():
             res = res.replace(ph, val)
         for ph, val in mod_placeholders.items():
@@ -500,7 +534,9 @@ class NativeStatementTranslator:
         self.expr_trans = NativeExpressionTranslator(var_types, redefines_layout=redefs, occurs_depending_on=odos, is_child=is_child, parent_global_vars=parent_global_vars)
         self.evaluate_count = 0
         self.evaluate_subject = None   # set when EVALUATE node is seen
+        self.evaluate_subjects = []
         self.call_counter = 0
+        self.loop_braces_stack = []
 
     def _is_variable(self, name: str) -> bool:
         base = re.split(r'\(', name)[0].strip()
@@ -679,7 +715,7 @@ class NativeStatementTranslator:
             return java_stmt
             
         cleaned = java_stmt.strip()
-        if cleaned.endswith("{") or cleaned == "}" or java_stmt.startswith("//"):
+        if cleaned.endswith("{") or cleaned == "}" or java_stmt.startswith("//") or (cleaned.startswith("}") and all(c in "}\n\r\t " for c in cleaned)):
             return java_stmt
             
         lines = java_stmt.splitlines()
@@ -943,13 +979,40 @@ class NativeStatementTranslator:
             
             return "\n        ".join(assignments) if assignments else ""
  
+        elif stype == "MOVE_CORRESPONDING":
+            src = props.get("source", "")
+            raw_tgt = props.get("targets") or props.get("target")
+            targets = raw_tgt if isinstance(raw_tgt, list) else ([raw_tgt] if raw_tgt else [])
+            
+            lines = []
+            for tgt in targets:
+                corr_str = self._generate_corresponding_statements("MOVE", src, tgt)
+                if corr_str:
+                    lines.append(corr_str)
+            return "\n        ".join(lines) if lines else ""
+
         elif stype == "COMPUTE":
             tgt = props.get("target", "")
             expr = props.get("expression", "")
             tgt_type = self._get_var_type(tgt, "BigDecimal")
             translated_expr = self.expr_trans.translate(expr)
             return self.wrap_math_with_size_error(tgt, translated_expr, props, tgt_type, val_is_bigdecimal=True)
- 
+
+        elif stype in ("ADD_CORRESPONDING", "SUBTRACT_CORRESPONDING"):
+            val = props.get("value", "")
+            raw_targets = props.get("targets") or props.get("target")
+            targets_list = raw_targets if isinstance(raw_targets, list) else ([raw_targets] if raw_targets else [])
+            
+            op = "ADD" if stype == "ADD_CORRESPONDING" else "SUBTRACT"
+            
+            lines = []
+            for tgt_info in targets_list:
+                tgt = tgt_info["name"] if isinstance(tgt_info, dict) else tgt_info
+                corr_str = self._generate_corresponding_statements(op, val, tgt)
+                if corr_str:
+                    lines.append(corr_str)
+            return "\n        ".join(lines) if lines else ""
+
         elif stype in ("ADD", "SUBTRACT", "MULTIPLY", "DIVIDE"):
             val = props.get("value", "")
             raw_targets = props.get("targets") or props.get("target")
@@ -1042,29 +1105,39 @@ class NativeStatementTranslator:
 
         elif stype == "PERFORM_UNTIL":
             cond = self._translate_condition(props.get("condition", ""))
-            return f"while (!({cond})) {{"
+            return f"while (!({cond}) && !programExited) {{"
 
         elif stype == "PERFORM_VARYING":
             idx = props.get("index", "")
             from_val = props.get("from_value", "1")
             by_val = props.get("by_value", "1")
-            cond = self._translate_condition(props.get("condition", ""))
-            java_idx = to_java_var(idx)
-            idx_type = self.var_types.get(idx, "Integer")
-            if idx_type == "BigDecimal":
-                # Use BigDecimal loop variable
-                by_expr = f"new BigDecimal(\"{by_val}\")" if re.match(r'^\d+(\.\d+)?$', by_val) else to_java_var(by_val)
-                from_expr = f"new BigDecimal(\"{from_val}\")" if re.match(r'^\d+(\.\d+)?$', from_val) else to_java_var(from_val)
-                return (f"for ({java_idx} = {from_expr}; !({cond}); "
-                        f"{java_idx} = {java_idx}.add({by_expr})) {{")
-            else:
-                t_prim = "int" if idx_type == "Integer" else "long"
-                return (f"for ({java_idx} = {from_val}; !({cond}); "
-                        f"{java_idx} += {by_val}) {{")
-
+            cond = props.get("condition", "")
+            
+            loops = []
+            loops.append(self._make_loop_header(idx, from_val, by_val, cond))
+            
+            after_clauses = props.get("after_clauses", [])
+            for acl in after_clauses:
+                a_idx = acl["index"]
+                a_from = acl["from_value"]
+                a_by = acl["by_value"]
+                a_cond = acl["condition"]
+                loops.append("    " * len(loops) + self._make_loop_header(a_idx, a_from, a_by, a_cond))
+                
+            self.loop_braces_stack.append(len(loops))
+            return "\n        ".join(loops)
+ 
         elif stype == "END-PERFORM":
-            return "}"
-
+            num_braces = self.loop_braces_stack.pop() if self.loop_braces_stack else 1
+            braces = []
+            for i in reversed(range(num_braces)):
+                if i == num_braces - 1:
+                    indent = "    " * i
+                else:
+                    indent = "        " + "    " * i
+                braces.append(f"{indent}}}")
+            return "\n".join(braces)
+ 
         elif stype == "PERFORM":
             tgt = props.get("target", "")
             thru = props.get("thru", None)
@@ -1074,14 +1147,46 @@ class NativeStatementTranslator:
                 return f"perform(\"{java_tgt}\", \"{java_thru}\");\n        if (nextParagraphIndex != -1 || programExited) return;"
             else:
                 return f"perform(\"{java_tgt}\", null);\n        if (nextParagraphIndex != -1 || programExited) return;"
-
+ 
         elif stype == "PERFORM_UNTIL_OUT":
             tgt = props.get("target", "")
             thru = props.get("thru", None)
             cond = self._translate_condition(props.get("condition", ""))
             java_tgt = to_java_var(tgt)
             java_thru = f"\"{to_java_var(thru)}\"" if thru else "null"
-            return f"while (!({cond})) {{\n            perform(\"{java_tgt}\", {java_thru});\n            if (nextParagraphIndex != -1 || programExited) return;\n        }}"
+            return f"while (!({cond}) && !programExited) {{\n            perform(\"{java_tgt}\", {java_thru});\n            if (nextParagraphIndex != -1 || programExited) return;\n        }}"
+ 
+        elif stype == "PERFORM_VARYING_OUT":
+            tgt = props.get("target", "")
+            thru = props.get("thru", None)
+            idx = props.get("index", "")
+            from_val = props.get("from_value", "1")
+            by_val = props.get("by_value", "1")
+            cond = props.get("condition", "")
+            java_tgt = to_java_var(tgt)
+            java_thru = f"\"{to_java_var(thru)}\"" if thru else "null"
+            
+            loops = []
+            loops.append(self._make_loop_header(idx, from_val, by_val, cond))
+            
+            after_clauses = props.get("after_clauses", [])
+            for acl in after_clauses:
+                a_idx = acl["index"]
+                a_from = acl["from_value"]
+                a_by = acl["by_value"]
+                a_cond = acl["condition"]
+                loops.append(self._make_loop_header(a_idx, a_from, a_by, a_cond))
+                
+            body = f"perform(\"{java_tgt}\", {java_thru});\n"
+            body += "if (nextParagraphIndex != -1 || programExited) return;"
+            
+            for i in reversed(range(len(loops))):
+                header = loops[i]
+                indent = "        " + "    " * i
+                body_indented = "\n".join(indent + "    " + line for line in body.splitlines())
+                body = f"{indent}{header}\n{body_indented}\n{indent}}}"
+                
+            return body.strip()
 
         elif stype == "OPEN":
             open_calls = []
@@ -1782,7 +1887,7 @@ class NativeStatementTranslator:
             
             loop_idx = f"loopIdx_{self.call_counter}"
             self.call_counter += 1
-            return f"for (int {loop_idx} = 0; {loop_idx} < {limit_expr}; {loop_idx}++) {{"
+            return f"for (int {loop_idx} = 0; {loop_idx} < {limit_expr} && !programExited; {loop_idx}++) {{"
 
         elif stype == "PERFORM_TIMES_OUT":
             target = props.get("target", "")
@@ -1806,7 +1911,7 @@ class NativeStatementTranslator:
             
             thru_expr = f"\"{java_thru}\"" if java_thru else "null"
             lines = [
-                f"for (int {loop_idx} = 0; {loop_idx} < {limit_expr}; {loop_idx}++) {{",
+                f"for (int {loop_idx} = 0; {loop_idx} < {limit_expr} && !programExited; {loop_idx}++) {{",
                 f"    if (skipToNextSentence) break;",
                 f"    perform(\"{java_tgt}\", {thru_expr});",
                 f"    if (nextParagraphIndex != -1 || programExited) return;",
@@ -2104,6 +2209,7 @@ class NativeStatementTranslator:
         elif stype == "CALL":
             target = props.get("target", "")
             arguments = props.get("arguments", [])
+            args_info = props.get("arguments_info", [])
             returning = props.get("returning")
             
             def get_flat_vars(prog_gen, arg_names):
@@ -2134,7 +2240,8 @@ class NativeStatementTranslator:
                     cond = "if" if first else "else if"
                     first = False
                     lines.append(f"{cond} (targetProg_{java_var}.equals(\"{other_prog_name.upper()}\")) {{")
-                    call_lines = self._generate_call_block(other_prog_name, other_gen, caller_vars, returning)
+                    lines.append(f"    // Call block with isolation mode")
+                    call_lines = self._generate_call_block(other_prog_name, other_gen, caller_vars, returning, args_info)
                     for cl in call_lines:
                         lines.append(f"    {cl}")
                     lines.append("}")
@@ -2143,7 +2250,7 @@ class NativeStatementTranslator:
                 target_upper = target.strip('"').strip("'").upper()
                 if target_upper in self.all_generators:
                     other_gen = self.all_generators[target_upper]
-                    call_lines = self._generate_call_block(target_upper, other_gen, caller_vars, returning)
+                    call_lines = self._generate_call_block(target_upper, other_gen, caller_vars, returning, args_info)
                     return "\n        ".join(call_lines)
                 else:
                     target_clean = target.strip('"').strip("'").upper()
@@ -2157,10 +2264,10 @@ class NativeStatementTranslator:
                             "reason": f"Mainframe IMS/MQ Call to '{target_clean}' is not supported natively."
                         })
                     return f"// Call to unknown program: {target}. Available: {list(self.all_generators.keys())}"
-
         elif stype == "EVALUATE":
             self.evaluate_count = 0
             self.evaluate_subject = props.get("subject", None)
+            self.evaluate_subjects = props.get("subjects", [self.evaluate_subject] if self.evaluate_subject else [])
             return None  # emit nothing; WHEN handlers generate the if/else chain
 
         elif stype == "WHEN":
@@ -2170,45 +2277,21 @@ class NativeStatementTranslator:
             if cond_upper == "OTHER":
                 return "} else {"
 
-            subject = self.evaluate_subject
-            if subject and subject.upper() != "TRUE":
-                # Type-aware subject == cond comparison
-                subj_java = to_java_var(subject) if subject in self.var_types else subject
-                if subject.upper() in self.redefines_layout and not self.redefines_layout[subject.upper()]["is_array"]:
-                    subj_java = f"get_{subj_java}()"
-                subj_type = self.var_types.get(subject, "String")
-                cond_stripped = cond.strip().strip("'\"")
-                if subj_type == "BigDecimal":
-                    r_val = (f"new BigDecimal(\"{cond_stripped}\")"
-                             if re.match(r'^\d+(\.\d+)?$', cond_stripped)
-                             else to_java_var(cond_stripped))
-                    if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
-                        r_val = f"get_{to_java_var(cond_stripped)}()"
-                    elif cond_stripped.upper() in self.var_types and self.var_types[cond_stripped.upper()] == "BigDecimal":
-                        r_val = f"{to_java_var(cond_stripped)}.getValue()"
-                    
-                    subj_ref = subj_java
-                    if subject.upper() not in self.redefines_layout:
-                        subj_ref = f"{subj_java}.getValue()"
-                    java_cond = f"{subj_ref}.compareTo({r_val}) == 0"
-                elif subj_type in ("Integer", "Long"):
-                    r_val = cond_stripped
-                    if cond_stripped.upper() in self.var_types:
-                        r_val = to_java_var(cond_stripped)
-                        if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
-                            r_val = f"get_{r_val}()"
-                    java_cond = f"{subj_java} == {r_val}"
-                else:
-                    r_val = cond_stripped
-                    if cond_stripped.upper() in self.var_types:
-                        r_val = to_java_var(cond_stripped)
-                        if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
-                            r_val = f"get_{r_val}()"
-                        java_cond = f"Objects.equals({subj_java}, {r_val})"
-                    else:
-                        java_cond = f"Objects.equals({subj_java}, \"{cond_stripped}\")"
-            else:
-                java_cond = self._translate_condition(cond)
+            cond_parts = re.split(r'\s+ALSO\s+', cond, flags=re.IGNORECASE)
+            subjects = getattr(self, "evaluate_subjects", [])
+            if not subjects and self.evaluate_subject:
+                subjects = [self.evaluate_subject]
+
+            sub_conds = []
+            for i, part in enumerate(cond_parts):
+                part_upper = part.upper().strip()
+                if part_upper == "ANY":
+                    continue
+                subj = subjects[i] if i < len(subjects) else "TRUE"
+                sub_cond = self._build_single_when_condition(subj, part)
+                sub_conds.append(sub_cond)
+
+            java_cond = " && ".join(sub_conds) if sub_conds else "true"
 
             if self.evaluate_count == 1:
                 return f"if ({java_cond}) {{"
@@ -2334,6 +2417,8 @@ class NativeStatementTranslator:
                                 sql_parts.append("?")
                                 params.append(t[1:])
                         else:
+                            if t and t[0].isalnum() and "-" in t:
+                                t = t.replace("-", "_")
                             sql_parts.append(t)
                         i += 1
                         
@@ -2866,6 +2951,124 @@ class NativeStatementTranslator:
             expr = re.sub(pattern, repl, expr)
         return expr
 
+    def _make_loop_header(self, idx, from_val, by_val, cond):
+        java_idx = to_java_var(idx)
+        idx_upper = idx.upper() if isinstance(idx, str) else ""
+        idx_type = self.var_types.get(idx_upper, self.var_types.get(idx, "Integer"))
+        cond_trans = self._translate_condition(cond)
+        if idx_type == "BigDecimal":
+            by_expr = f"new BigDecimal(\"{by_val}\")" if re.match(r'^\d+(\.\d+)?$', str(by_val)) else to_java_var(str(by_val))
+            from_expr = f"new BigDecimal(\"{from_val}\")" if re.match(r'^\d+(\.\d+)?$', str(from_val)) else to_java_var(str(from_val))
+            return f"for ({java_idx} = {from_expr}; !({cond_trans}) && !programExited; {java_idx} = {java_idx}.add({by_expr})) {{"
+        else:
+            return f"for ({java_idx} = {from_val}; !({cond_trans}) && !programExited; {java_idx} += {by_val}) {{"
+
+    def _build_single_when_condition(self, subject, cond) -> str:
+        cond_upper = cond.upper().strip()
+        if subject and subject.upper() != "TRUE":
+            subj_java = to_java_var(subject) if subject in self.var_types else subject
+            if subject.upper() in self.redefines_layout and not self.redefines_layout[subject.upper()]["is_array"]:
+                subj_java = f"get_{subj_java}()"
+            subj_type = self.var_types.get(subject, "String")
+            cond_stripped = cond.strip().strip("'\"")
+            if subj_type == "BigDecimal":
+                r_val = (f"new BigDecimal(\"{cond_stripped}\")"
+                         if re.match(r'^\d+(\.\d+)?$', cond_stripped)
+                         else to_java_var(cond_stripped))
+                if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
+                    r_val = f"get_{to_java_var(cond_stripped)}()"
+                elif cond_stripped.upper() in self.var_types and self.var_types[cond_stripped.upper()] == "BigDecimal":
+                    r_val = f"{to_java_var(cond_stripped)}.getValue()"
+                
+                subj_ref = subj_java
+                if subject.upper() not in self.redefines_layout:
+                    subj_ref = f"{subj_java}.getValue()"
+                return f"{subj_ref}.compareTo({r_val}) == 0"
+            elif subj_type in ("Integer", "Long"):
+                r_val = cond_stripped
+                if cond_stripped.upper() in self.var_types:
+                    r_val = to_java_var(cond_stripped)
+                    if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
+                        r_val = f"get_{r_val}()"
+                return f"{subj_java} == {r_val}"
+            else:
+                r_val = cond_stripped
+                if cond_stripped.upper() in self.var_types:
+                    r_val = to_java_var(cond_stripped)
+                    if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
+                        r_val = f"get_{r_val}()"
+                    return f"Objects.equals({subj_java}, {r_val})"
+                else:
+                    return f"Objects.equals({subj_java}, \"{cond_stripped}\")"
+        else:
+            return self._translate_condition(cond)
+
+    def _get_group_elementary_items(self, group_name):
+        var_nodes = [n for n in self.current_generator.ir_nodes if n.kind in ("VARIABLE", "DATA_ITEM")]
+        group_node = None
+        group_idx = -1
+        group_name_upper = group_name.upper().strip()
+        for idx, n in enumerate(var_nodes):
+            if n.properties.get("name", "").upper() == group_name_upper:
+                group_node = n
+                group_idx = idx
+                break
+        if not group_node:
+            return []
+        group_level = group_node.properties.get("level", 1)
+        descendants = []
+        for i in range(group_idx + 1, len(var_nodes)):
+            n = var_nodes[i]
+            lvl = n.properties.get("level", 1)
+            if lvl <= group_level:
+                break
+            descendants.append(n)
+        
+        stack = [(group_level, group_name_upper)]
+        elementary_items = []
+        for n in descendants:
+            lvl = n.properties.get("level", 1)
+            name = n.properties.get("name", "").upper()
+            is_group = n.properties.get("is_group", False)
+            while stack and stack[-1][0] >= lvl:
+                stack.pop()
+            path = [item[1] for item in stack[1:]] + [name]
+            if not is_group:
+                elementary_items.append((tuple(path), n.properties.get("name", "")))
+            if is_group:
+                stack.append((lvl, name))
+        return elementary_items
+
+    def _generate_corresponding_statements(self, op, src_group, tgt_group) -> str:
+        src_items = self._get_group_elementary_items(src_group)
+        tgt_items = self._get_group_elementary_items(tgt_group)
+        src_map = {path: name for path, name in src_items}
+        tgt_map = {path: name for path, name in tgt_items}
+        statements = []
+        for path in src_map:
+            if path in tgt_map:
+                s_var = src_map[path]
+                t_var = tgt_map[path]
+                if op == "MOVE":
+                    mock_node = SemanticIRNode(
+                        node_id="mock", kind="STATEMENT",
+                        properties={"statement_type": "MOVE", "source": s_var, "targets": [t_var]}
+                    )
+                    statements.append(self._translate_statement_inner(mock_node))
+                elif op == "ADD":
+                    mock_node = SemanticIRNode(
+                        node_id="mock", kind="STATEMENT",
+                        properties={"statement_type": "ADD", "value": s_var, "giving": False, "targets": [{"name": t_var, "rounded": False}]}
+                    )
+                    statements.append(self._translate_statement_inner(mock_node))
+                elif op == "SUBTRACT":
+                    mock_node = SemanticIRNode(
+                        node_id="mock", kind="STATEMENT",
+                        properties={"statement_type": "SUBTRACT", "value": s_var, "giving": False, "targets": [{"name": t_var, "rounded": False}]}
+                    )
+                    statements.append(self._translate_statement_inner(mock_node))
+        return "\n        ".join(statements)
+
     def _translate_condition(self, cond: str) -> str:
         """Translate a COBOL condition string to Java boolean expression."""
         cond = self._translate_subscripts(cond)
@@ -2956,7 +3159,12 @@ class NativeStatementTranslator:
                 cond = re.sub(pattern, f"get_{to_java_var(v)}()", cond)
         return cond
 
-    def _generate_call_block(self, target_name: str, target_gen, caller_vars: list, returning: str = None) -> list:
+    def _generate_call_block(self, target_name: str, target_gen, caller_vars: list,
+                              returning: str = None, args_info: list = None) -> list:
+        """Generate CALL linkage code.
+        BY REFERENCE (default): value is written in AND written back after call.
+        BY CONTENT: value is snapshot-copied in; no writeback after call.
+        """
         self.call_counter += 1
         suffix = f"_{self.call_counter}"
         target_vars = []
@@ -2967,10 +3175,27 @@ class NativeStatementTranslator:
                     target_vars.append(child)
             else:
                 target_vars.append(arg)
-                
+
+        # Build a flat mode list aligned with caller_vars (after group expansion).
+        # args_info items use original (non-expanded) argument names.
+        flat_modes = []
+        if args_info:
+            for info in args_info:
+                mode = info.get("mode", "REFERENCE")
+                orig_name = info.get("value", "").upper()
+                # If the arg is a group, expand mode for each child
+                if orig_name in (self.current_generator.group_fields if self.current_generator else {}):
+                    count = len(self.current_generator.group_fields[orig_name])
+                    flat_modes.extend([mode] * count)
+                else:
+                    flat_modes.append(mode)
+        # Pad with REFERENCE if args_info was shorter
+        while len(flat_modes) < len(caller_vars):
+            flat_modes.append("REFERENCE")
+
         java_class = to_java_class(target_name)
         var_name = to_java_var(target_name) + suffix
-        
+
         lines = []
         is_child = getattr(target_gen, "is_child", False)
         if is_child:
@@ -2979,27 +3204,72 @@ class NativeStatementTranslator:
             lines.append(f"{java_class} {var_name} = new {java_class}({parent_arg});")
         else:
             lines.append(f"{java_class} {var_name} = new {java_class}();")
-        
+
         for i, c_var in enumerate(caller_vars):
             if i < len(target_vars):
                 t_var = target_vars[i]
                 c_jvar = to_java_var(c_var)
                 t_jvar = to_java_var(t_var)
-                lines.append(f"{var_name}.{t_jvar} = {c_jvar};")
-                
+                mode = flat_modes[i] if i < len(flat_modes) else "REFERENCE"
+                if mode == "CONTENT":
+                    # Snapshot the caller value into a local before the call
+                    snap_var = f"_snap_{c_jvar}_{suffix}"
+                    c_type = "String"
+                    c_var_upper = c_var.upper()
+                    for k, t in self.var_types.items():
+                        if k.upper() == c_var_upper:
+                            c_type = t
+                            break
+                    if c_type in ("Integer", "int"):
+                        lines.append(f"int {snap_var} = {c_jvar};")
+                    elif c_type in ("Long", "long"):
+                        lines.append(f"long {snap_var} = {c_jvar};")
+                    elif c_type == "BigDecimal":
+                        lines.append(f"java.math.BigDecimal {snap_var} = {c_jvar}.getValue();")
+                    else:
+                        lines.append(f"String {snap_var} = {c_jvar};")
+                    
+                    if c_type == "BigDecimal":
+                        lines.append(f"{var_name}.{t_jvar}.assign({snap_var}, com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);")
+                    else:
+                        lines.append(f"{var_name}.{t_jvar} = {snap_var};")
+                else:
+                    c_type = "String"
+                    c_var_upper = c_var.upper()
+                    for k, t in self.var_types.items():
+                        if k.upper() == c_var_upper:
+                            c_type = t
+                            break
+                    if c_type == "BigDecimal":
+                        lines.append(f"{var_name}.{t_jvar}.assign({c_jvar}.getValue(), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);")
+                    else:
+                        lines.append(f"{var_name}.{t_jvar} = {c_jvar};")
+
         lines.append(f"{var_name}.execute();")
         lines.append(f"return_code = {var_name}.return_code;")
         if returning:
             ret_jvar = to_java_var(returning)
             lines.append(f"{ret_jvar} = {var_name}.return_code;")
-        
+
+        # Writeback: only for BY REFERENCE args
         for i, c_var in enumerate(caller_vars):
             if i < len(target_vars):
                 t_var = target_vars[i]
                 c_jvar = to_java_var(c_var)
                 t_jvar = to_java_var(t_var)
-                lines.append(f"{c_jvar} = {var_name}.{t_jvar};")
-                
+                mode = flat_modes[i] if i < len(flat_modes) else "REFERENCE"
+                if mode != "CONTENT":
+                    c_type = "String"
+                    c_var_upper = c_var.upper()
+                    for k, t in self.var_types.items():
+                        if k.upper() == c_var_upper:
+                            c_type = t
+                            break
+                    if c_type == "BigDecimal":
+                        lines.append(f"{c_jvar}.assign({var_name}.{t_jvar}.getValue(), com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);")
+                    else:
+                        lines.append(f"{c_jvar} = {var_name}.{t_jvar};")
+
         return lines
 
 class NativeFileIOGenerator:
@@ -4566,7 +4836,47 @@ class NativeProgramGenerator:
                             
         if current_record:
             records.append((current_record, has_redefines_or_odo))
-            
+
+        # 1. Map each variable to its root record name
+        var_to_root = {}
+        current_root = None
+        for n in sorted_nodes:
+            if n.kind in ("VARIABLE", "DATA_ITEM"):
+                lvl = n.properties.get("level", 1)
+                if lvl == 88:
+                    continue
+                if lvl == 1:
+                    current_root = n.properties.get("name")
+                if current_root:
+                    var_to_root[n.properties.get("name")] = current_root
+
+        # 2. Trace REDEFINES parent mapping between roots, and identify participating roots
+        redefs_parent = {}
+        participating_roots = set()
+        
+        for n in sorted_nodes:
+            if n.kind in ("VARIABLE", "DATA_ITEM"):
+                redef_target = n.properties.get("redefines")
+                if redef_target:
+                    my_root = var_to_root.get(n.properties.get("name"))
+                    tgt_root = var_to_root.get(redef_target)
+                    if my_root:
+                        participating_roots.add(my_root)
+                    if tgt_root:
+                        participating_roots.add(tgt_root)
+                    if my_root and tgt_root and my_root != tgt_root:
+                        redefs_parent[my_root] = tgt_root
+
+        # Helper to find ultimate root of a root-level chain
+        def get_ultimate_root(r):
+            visited = set()
+            while r in redefs_parent:
+                if r in visited:
+                    break
+                visited.add(r)
+                r = redefs_parent[r]
+            return r
+
         for rec_nodes, is_special in records:
             if not rec_nodes:
                 continue
@@ -4580,11 +4890,17 @@ class NativeProgramGenerator:
             self._inherit_occurs(root_layout)
             total_len = self._compute_layout_offsets(root_layout)
             
-            record_has_redef = any(node.properties.get("redefines") is not None for node in rec_nodes)
+            # Check if this record participates in a redefines chain
+            is_participating = root_name in participating_roots
             
-            if record_has_redef:
-                self.redefined_records_backing[root_name] = total_len
-                
+            if is_participating:
+                ult_root = get_ultimate_root(root_name)
+                # Keep the maximum length among all records in the chain
+                self.redefined_records_backing[ult_root] = max(
+                    self.redefined_records_backing.get(ult_root, 0),
+                    total_len
+                )
+            
             for name, layout_node in nodes_map.items():
                 if layout_node.depending_on:
                     self.occurs_depending_on[name] = (
@@ -4593,7 +4909,8 @@ class NativeProgramGenerator:
                         layout_node.occurs_max if layout_node.occurs_max is not None else layout_node.occurs
                     )
                 
-                if record_has_redef:
+                if is_participating:
+                    ult_root = get_ultimate_root(root_name)
                     java_type = "String"
                     pic = layout_node.pic
                     scale = 0
@@ -4617,14 +4934,16 @@ class NativeProgramGenerator:
                         p = p.parent
                         
                     is_array = len(layout_node.occurs_list) >= 1
+                    elem_len = layout_node.length // layout_node.occurs if (layout_node.occurs and layout_node.occurs > 1) else layout_node.length
                     
                     self.redefines_layout[name] = {
                         "offset": layout_node.offset,
                         "length": layout_node.length,
+                        "element_length": elem_len,
                         "type": java_type,
                         "scale": scale,
                         "signed": signed,
-                        "record_name": root_name,
+                        "record_name": ult_root,   # SHARED BACKING BUFFER!
                         "is_array": is_array,
                         "occurs_step": occurs_step,
                         "occurs_max": layout_node.occurs_max or layout_node.occurs or 1,
@@ -4741,6 +5060,7 @@ class NativeProgramGenerator:
             java_var = to_java_var(v)
             offset = layout["offset"]
             length = layout["length"]
+            elem_len = layout.get("element_length", length)
             java_type = layout["type"]
             backing_var = to_java_var(layout["record_name"]) + "_backing"
             is_array = layout["is_array"]
@@ -4756,13 +5076,13 @@ class NativeProgramGenerator:
                 lines.append(f"        int off = {offset};")
                 
             if java_type == "String":
-                lines.append(f"        return new String({backing_var}, off, {length}, java.nio.charset.StandardCharsets.ISO_8859_1);")
+                lines.append(f"        return new String({backing_var}, off, {elem_len}, java.nio.charset.StandardCharsets.ISO_8859_1);")
             elif java_type == "BigDecimal":
-                lines.append(f"        return new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {length}, {spec_init}).getValue();")
+                lines.append(f"        return new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {elem_len}, {spec_init}).getValue();")
             else:
                 cast = "int" if java_type == "Integer" else "long"
                 val_getter = "intValue" if java_type == "Integer" else "longValue"
-                lines.append(f"        return ({cast}) new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {length}, {spec_init}).getValue().{val_getter}();")
+                lines.append(f"        return ({cast}) new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {elem_len}, {spec_init}).getValue().{val_getter}();")
             lines.append("    }")
             lines.append("")
             
@@ -4776,13 +5096,13 @@ class NativeProgramGenerator:
                 
             if java_type == "String":
                 lines.append(f"        if (val == null) val = \"\";")
-                lines.append(f"        String padded = padString(val, {length});")
+                lines.append(f"        String padded = padString(val, {elem_len});")
                 lines.append(f"        byte[] src = padded.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);")
-                lines.append(f"        System.arraycopy(src, 0, {backing_var}, off, {length});")
+                lines.append(f"        System.arraycopy(src, 0, {backing_var}, off, {elem_len});")
             elif java_type == "BigDecimal":
-                lines.append(f"        new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {length}, {spec_init}).assign(val);")
+                lines.append(f"        new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {elem_len}, {spec_init}).assign(val);")
             else:
-                lines.append(f"        new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {length}, {spec_init}).assign(java.math.BigDecimal.valueOf(val));")
+                lines.append(f"        new com.systema.modernized.runtime.CobolNumeric({backing_var}, off, {elem_len}, {spec_init}).assign(java.math.BigDecimal.valueOf(val));")
             lines.append("    }")
             lines.append("")
             
@@ -4870,13 +5190,16 @@ class NativeProgramGenerator:
             lines.append("")
         
         has_sql = False
+        sql_cursors = set()
         for n in self.ir_nodes:
             if n.kind == "STATEMENT" and n.properties.get("statement_type") == "EXEC_SQL":
                 has_sql = True
                 sql_props = n.properties.get("sql_props", {})
-                if sql_props.get("sql_type") == "DECLARE_CURSOR":
-                    cname = sql_props.get("cursor_name", "").lower()
-                    lines.append(f"    private org.springframework.jdbc.support.rowset.SqlRowSet cursor_{cname} = null;")
+                cname = sql_props.get("cursor_name")
+                if cname:
+                    sql_cursors.add(cname.lower())
+        for cname in sorted(sql_cursors):
+            lines.append(f"    private org.springframework.jdbc.support.rowset.SqlRowSet cursor_{cname} = null;")
         if has_sql:
             lines.append("    private org.springframework.transaction.TransactionStatus txStatus = null;")
         
@@ -5015,6 +5338,21 @@ class NativeProgramGenerator:
                 lines.append(f"    {{  // initialise array elements")
                 lines.append(f"        java.util.Arrays.fill({java_arr}, \"\");")
                 lines.append(f"    }}")
+
+        if has_sql and not self.is_child:
+            lines.append("    {")
+            lines.append("        // Wire H2 DataSource for JDBC / SQL emulation")
+            lines.append("        if (com.systema.modernized.SpringContextHelper.jdbcTemplate == null) {")
+            lines.append("            org.springframework.jdbc.datasource.SimpleDriverDataSource ds = new org.springframework.jdbc.datasource.SimpleDriverDataSource();")
+            lines.append("            ds.setDriverClass(org.h2.Driver.class);")
+            lines.append("            ds.setUrl(\"jdbc:h2:mem:db2mem;DB_CLOSE_DELAY=-1\");")
+            lines.append("            ds.setUsername(\"sa\");")
+            lines.append("            ds.setPassword(\"\");")
+            lines.append("            com.systema.modernized.SpringContextHelper.jdbcTemplate = new org.springframework.jdbc.core.JdbcTemplate(ds);")
+            lines.append("            com.systema.modernized.SpringContextHelper.transactionManager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(ds);")
+            lines.append("        }")
+            lines.append("    }")
+            lines.append("")
 
         # Emit REDEFINES Storage & Accessors
         redefs_lines = self._generate_redefines_storage()
@@ -5174,6 +5512,17 @@ class NativeProgramGenerator:
                 backing_var = to_java_var(g) + "_backing"
                 lines.append(f"    public byte[] get_{g_var}_bytes() {{")
                 lines.append(f"        return {backing_var};")
+                lines.append("    }")
+                continue
+            elif g in self.redefines_layout:
+                layout = self.redefines_layout[g]
+                backing_var = to_java_var(layout["record_name"]) + "_backing"
+                off = layout["offset"]
+                length = layout["length"]
+                lines.append(f"    public byte[] get_{g_var}_bytes() {{")
+                lines.append(f"        byte[] res = new byte[{length}];")
+                lines.append(f"        System.arraycopy({backing_var}, {off}, res, 0, {length});")
+                lines.append(f"        return res;")
                 lines.append("    }")
                 continue
                 
@@ -5671,8 +6020,20 @@ class NativeProgramGenerator:
 
             lines.append("        if (com.systema.modernized.SpringContextHelper.jdbcTemplate == null) {")
             lines.append("            org.springframework.jdbc.datasource.DriverManagerDataSource dataSource = new org.springframework.jdbc.datasource.DriverManagerDataSource();")
+            lines.append("            String pgHost = System.getenv(\"PGHOST\");")
             lines.append("            String dbMode = System.getenv(\"REAL_DB2_MODE\");")
-            lines.append("            if (\"1\".equals(dbMode)) {")
+            lines.append("            if (pgHost != null) {")
+            lines.append("                String pgPort = System.getenv(\"PGPORT\") != null ? System.getenv(\"PGPORT\") : \"5432\";")
+            lines.append("                String pgUser = System.getenv(\"PGUSER\") != null ? System.getenv(\"PGUSER\") : \"modernize\";")
+            lines.append("                String pgPass = System.getenv(\"PGPASSWORD\") != null ? System.getenv(\"PGPASSWORD\") : \"modernize\";")
+            lines.append("                String pgDb = System.getenv(\"PGDATABASE\") != null ? System.getenv(\"PGDATABASE\") : \"modernization_db\";")
+            lines.append("                dataSource.setDriverClassName(\"org.postgresql.Driver\");")
+            lines.append("                dataSource.setUrl(\"jdbc:postgresql://\" + pgHost + \":\" + pgPort + \"/\" + pgDb);")
+            lines.append("                dataSource.setUsername(pgUser);")
+            lines.append("                dataSource.setPassword(pgPass);")
+            lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate = new org.springframework.jdbc.core.JdbcTemplate(dataSource);")
+            lines.append("                com.systema.modernized.SpringContextHelper.transactionManager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);")
+            lines.append("            } else if (\"1\".equals(dbMode)) {")
             lines.append("                String dbUrl = System.getenv(\"DB2_URL\");")
             lines.append("                String dbUser = System.getenv(\"DB2_USERNAME\");")
             lines.append("                String dbPass = System.getenv(\"DB2_PASSWORD\");")
@@ -5763,7 +6124,8 @@ class NativeProgramGenerator:
                     continue
                 
                 if stype == "END-PERFORM":
-                    lines.append("        }")
+                    java_stmt = stmt_trans.translate_statement(s)
+                    lines.append(f"        {java_stmt}")
                     continue
                     
                 java_stmt = stmt_trans.translate_statement(s)
@@ -5789,6 +6151,8 @@ class NativeProgramGenerator:
             lines.append("        if (args.length > 0) {")
             lines.append("            com.systema.modernized.CicsTransactionContext.setSessionInput(\"INPUTMAP\", \"MSET\", args[0]);")
             lines.append("        }")
+        if has_sql:
+            lines.append("        com.systema.modernized.MockSqlService.initialize();")
         lines.append("        try {")
         lines.append(f"            new {class_name}().execute();")
         lines.append("        } catch (StopRunException e) {")

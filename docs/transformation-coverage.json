@@ -13,7 +13,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Verify PIC 9(18) boundary near long overflow",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "PIC.DISPLAY_ALPHA": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -28,7 +29,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Add PIC A differential fixture",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "PIC.EDITED_NUMERIC": {
     "evidence_level": "UNIT_TESTED",
@@ -45,7 +47,8 @@
       "PIC +(5)9 float-style editing"
     ],
     "recommended_next_test": "Differential fixture for PIC ZZ,ZZZ.99CR",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PIC.EDITED_ALPHA": {
     "evidence_level": "UNIT_TESTED",
@@ -58,7 +61,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential fixture for PIC X(5)/X(5)",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "USAGE.DISPLAY": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -71,7 +75,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "USAGE.COMP": {
     "evidence_level": "UNIT_TESTED",
@@ -89,7 +94,8 @@
       "USAGE COMP-2"
     ],
     "recommended_next_test": "Differential COMP arithmetic fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "USAGE.COMP_3": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -105,7 +111,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential file write+read with COMP-3 field",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "USAGE.COMP_5": {
     "evidence_level": "GENERATED_ONLY",
@@ -118,7 +125,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential COMP-5 boundary value fixture",
-    "notes": ""
+    "notes": "",
+    "status": "GENERATED_ONLY"
   },
   "USAGE.INDEX": {
     "evidence_level": "UNSUPPORTED",
@@ -133,7 +141,8 @@
       "USAGE IS INDEX"
     ],
     "recommended_next_test": "Add INDEX support diagnostic",
-    "notes": ""
+    "notes": "",
+    "status": "UNSUPPORTED"
   },
   "ARITH.ADD": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -150,7 +159,8 @@
       "ADD CORRESPONDING"
     ],
     "recommended_next_test": "ADD multi-receiver differential",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "ARITH.SUBTRACT": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -167,7 +177,8 @@
       "SUBTRACT CORRESPONDING"
     ],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "ARITH.MULTIPLY": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -184,7 +195,8 @@
       "MULTIPLY CORRESPONDING"
     ],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "ARITH.DIVIDE": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -200,7 +212,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential 1/3 with PIC V99 vs V9(9)",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "ARITH.COMPUTE": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -217,7 +230,8 @@
       "Non-integer COMPUTE ** exponent"
     ],
     "recommended_next_test": "Verify runtime exception on non-integer exponent",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "ARITH.ROUNDED": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -235,7 +249,8 @@
       "ROUNDED MODE IS TOWARD-GREATER"
     ],
     "recommended_next_test": "Differential negative halfway rounding",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "ARITH.ON_SIZE_ERROR": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -250,7 +265,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential NOT ON SIZE ERROR path",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "MOVE.ALPHA_TO_ALPHA": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -265,7 +281,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "MOVE.NUMERIC_TO_NUMERIC": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -282,7 +299,8 @@
       "MOVE CORRESPONDING"
     ],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "MOVE.GROUP_TO_GROUP": {
     "evidence_level": "UNIT_TESTED",
@@ -297,52 +315,53 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential group MOVE byte-comparison fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "REDEFINES.SCALAR": {
-    "evidence_level": "UNIT_TESTED",
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
     "parser_function": "CobolParser._parse_data_item",
     "generator_function": "NativeProgramGenerator._emit_redefines",
     "runtime_helper": null,
     "existing_tests": [
-      "tests/test_phase8_redefines.py"
+      "tests/test_phase8_redefines.py",
+      "tests/test_parity_fixtures.py::test_milestone_b_parity[milestone_b_redefines_scalar_view]"
     ],
-    "known_limitations": [
-      "Shared byte-backed storage not used; overlapping views via copy-on-access"
-    ],
+    "known_limitations": [],
     "unsupported_patterns": [],
-    "recommended_next_test": "Differential write-through scalar REDEFINES fixture",
-    "notes": ""
+    "recommended_next_test": "Verify nested redefines on COMP-3 structures",
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "REDEFINES.GROUP": {
-    "evidence_level": "UNIT_TESTED",
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
     "parser_function": "CobolParser._parse_data_item",
     "generator_function": "NativeProgramGenerator._emit_redefines",
     "runtime_helper": null,
     "existing_tests": [
-      "tests/test_phase8_redefines.py"
+      "tests/test_phase8_redefines.py",
+      "tests/test_parity_fixtures.py::test_parity_redefines_group_view"
     ],
-    "known_limitations": [
-      "Group REDEFINES byte-exact write-through not differentially verified"
-    ],
+    "known_limitations": [],
     "unsupported_patterns": [],
-    "recommended_next_test": "Differential group REDEFINES fixture (write via one view, read via other)",
-    "notes": ""
+    "recommended_next_test": "Verify complex deep group overlays with shifting offsets",
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "REDEFINES.COMP3_VIEW": {
-    "evidence_level": "UNIT_TESTED",
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
     "parser_function": "CobolParser._parse_data_item",
     "generator_function": "NativeProgramGenerator._emit_redefines",
     "runtime_helper": "CobolNumeric (COMP-3 encode)",
     "existing_tests": [
-      "tests/test_phase8_redefines.py"
+      "tests/test_phase8_redefines.py",
+      "tests/test_parity_fixtures.py::test_milestone_b_parity[milestone_b_redefines_comp3_byte_view]"
     ],
-    "known_limitations": [
-      "Raw bytes not compared differentially"
-    ],
+    "known_limitations": [],
     "unsupported_patterns": [],
-    "recommended_next_test": "Differential COMP-3 byte view fixture",
-    "notes": ""
+    "recommended_next_test": "Differential COMP-3 negative sign byte view",
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "REDEFINES.NESTED_COMPLEX": {
     "evidence_level": "PARSED_ONLY",
@@ -358,7 +377,8 @@
       "3+ level nested REDEFINES"
     ],
     "recommended_next_test": "Add diagnostic for unsupported nested REDEFINES",
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "OCCURS.FIXED": {
     "evidence_level": "UNIT_TESTED",
@@ -373,7 +393,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential OCCURS table read/write fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "OCCURS.DEPENDING_ON": {
     "evidence_level": "GENERATED_ONLY",
@@ -386,7 +407,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential ODO fixture with varying bound",
-    "notes": ""
+    "notes": "",
+    "status": "GENERATED_ONLY"
   },
   "PROC.PERFORM": {
     "evidence_level": "UNIT_TESTED",
@@ -400,7 +422,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential PERFORM VARYING fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.PERFORM_THRU": {
     "evidence_level": "UNIT_TESTED",
@@ -415,20 +438,25 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential PERFORM THRU fixture with paragraph range",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.PERFORM_VARYING": {
-    "evidence_level": "UNIT_TESTED",
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
     "parser_function": "CobolParser._parse_perform_stmt",
     "generator_function": "NativeProgramGenerator._emit_perform",
     "runtime_helper": null,
     "existing_tests": [
-      "tests/test_native_perform_varying.py"
+      "tests/test_native_perform_varying.py",
+      "tests/test_parity_fixtures.py::test_parity_perform_varying"
     ],
-    "known_limitations": [],
+    "known_limitations": [
+      "Multi-varying loops (AFTER clause) not fully supported"
+    ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential PERFORM VARYING with AFTER clause",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "PROC.GO_TO": {
     "evidence_level": "UNIT_TESTED",
@@ -445,7 +473,8 @@
       "GO TO DEPENDING ON"
     ],
     "recommended_next_test": "Differential GO TO within performed paragraph range",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.CALL_STATIC": {
     "evidence_level": "UNIT_TESTED",
@@ -461,7 +490,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential CALL BY REFERENCE mutation fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.CALL_DYNAMIC": {
     "evidence_level": "GENERATED_ONLY",
@@ -478,7 +508,8 @@
       "CALL USING identifier resolved at runtime with no registry entry"
     ],
     "recommended_next_test": "Differential dynamic CALL fixture",
-    "notes": ""
+    "notes": "",
+    "status": "GENERATED_ONLY"
   },
   "PROC.CALL_BY_REFERENCE": {
     "evidence_level": "UNIT_TESTED",
@@ -493,22 +524,23 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential BY REFERENCE mutation test",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.CALL_BY_CONTENT": {
-    "evidence_level": "UNIT_TESTED",
+    "evidence_level": "DIFFERENTIALLY_VERIFIED",
     "parser_function": "CobolParser._parse_call_stmt",
     "generator_function": "NativeProgramGenerator._emit_call",
     "runtime_helper": null,
     "existing_tests": [
-      "tests/test_native_call_translation.py"
+      "tests/test_native_call_translation.py",
+      "tests/test_parity_fixtures.py::test_parity_call_by_content"
     ],
-    "known_limitations": [
-      "Caller isolation not differentially verified"
-    ],
+    "known_limitations": [],
     "unsupported_patterns": [],
-    "recommended_next_test": "Differential BY CONTENT isolation test",
-    "notes": ""
+    "recommended_next_test": "Verify complex structures passed by CONTENT",
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "PROC.GOBACK": {
     "evidence_level": "UNIT_TESTED",
@@ -521,7 +553,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.STOP_RUN": {
     "evidence_level": "UNIT_TESTED",
@@ -534,7 +567,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.EVALUATE": {
     "evidence_level": "UNIT_TESTED",
@@ -549,7 +583,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential EVALUATE with WHEN OTHER",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.IF": {
     "evidence_level": "UNIT_TESTED",
@@ -562,7 +597,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "PROC.SECTIONS": {
     "evidence_level": "GENERATED_ONLY",
@@ -575,7 +611,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential SECTION fall-through fixture",
-    "notes": ""
+    "notes": "",
+    "status": "GENERATED_ONLY"
   },
   "STRING.STRING_STMT": {
     "evidence_level": "UNIT_TESTED",
@@ -588,7 +625,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential STRING INTO with POINTER",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "STRING.UNSTRING_STMT": {
     "evidence_level": "UNIT_TESTED",
@@ -601,7 +639,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "STRING.INSPECT": {
     "evidence_level": "UNIT_TESTED",
@@ -614,7 +653,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "FILE.LINE_SEQUENTIAL": {
     "evidence_level": "DIFFERENTIALLY_VERIFIED",
@@ -630,7 +670,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential trailing-space preservation fixture",
-    "notes": ""
+    "notes": "",
+    "status": "DIFFERENTIALLY_VERIFIED"
   },
   "FILE.SEQUENTIAL_FIXED": {
     "evidence_level": "UNIT_TESTED",
@@ -646,7 +687,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential fixed-length record boundary verification",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "FILE.SEQUENTIAL_EBCDIC": {
     "evidence_level": "UNSUPPORTED",
@@ -662,7 +704,8 @@
       "IBM-1047 encoding"
     ],
     "recommended_next_test": "Add EBCDIC file codec and differential fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNSUPPORTED"
   },
   "FILE.RELATIVE": {
     "evidence_level": "UNIT_TESTED",
@@ -677,7 +720,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential relative-file random access fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "FILE.INDEXED_KSDS": {
     "evidence_level": "UNIT_TESTED",
@@ -693,7 +737,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential indexed file START + READ NEXT fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "FILE.FILE_STATUS": {
     "evidence_level": "UNIT_TESTED",
@@ -709,7 +754,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Add FILE STATUS capture to parity harness; differential fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "FILE.VARIABLE_LENGTH": {
     "evidence_level": "UNSUPPORTED",
@@ -725,7 +771,8 @@
       "RECORDING MODE U"
     ],
     "recommended_next_test": "Add diagnostic COBOL_UNSUPPORTED_RECORD_FORMAT",
-    "notes": ""
+    "notes": "",
+    "status": "UNSUPPORTED"
   },
   "SQL.SELECT_INTO": {
     "evidence_level": "UNIT_TESTED",
@@ -741,7 +788,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential SQL fixture using H2 vs GnuCOBOL baseline bypass",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.INSERT": {
     "evidence_level": "UNIT_TESTED",
@@ -756,7 +804,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.UPDATE": {
     "evidence_level": "UNIT_TESTED",
@@ -769,7 +818,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.DELETE": {
     "evidence_level": "UNIT_TESTED",
@@ -782,7 +832,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.CURSOR": {
     "evidence_level": "UNIT_TESTED",
@@ -797,7 +848,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.NULL_INDICATORS": {
     "evidence_level": "UNIT_TESTED",
@@ -810,7 +862,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.COMMIT_ROLLBACK": {
     "evidence_level": "UNIT_TESTED",
@@ -825,7 +878,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential commit/rollback visibility test",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.SQLCODE_SQLSTATE": {
     "evidence_level": "UNIT_TESTED",
@@ -840,7 +894,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "SQL.HOST_VARIABLES": {
     "evidence_level": "UNIT_TESTED",
@@ -853,7 +908,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "CICS.SEND_MAP": {
     "evidence_level": "PARSED_ONLY",
@@ -870,7 +926,8 @@
       "EXEC CICS SEND MAP MAPONLY ERASEAUP"
     ],
     "recommended_next_test": "Add CICS command support matrix test",
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "CICS.RECEIVE_MAP": {
     "evidence_level": "PARSED_ONLY",
@@ -885,7 +942,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "CICS.LINK": {
     "evidence_level": "PARSED_ONLY",
@@ -898,7 +956,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "CICS.RETURN": {
     "evidence_level": "PARSED_ONLY",
@@ -911,7 +970,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "CICS.RESP_RESP2": {
     "evidence_level": "PARSED_ONLY",
@@ -926,7 +986,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "CICS command support matrix with RESP routing",
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "CICS.UNSUPPORTED_COMMANDS": {
     "evidence_level": "PARSED_ONLY",
@@ -952,7 +1013,8 @@
       "EXEC CICS SYNCPOINT"
     ],
     "recommended_next_test": "Add COBOL_UNSUPPORTED_CICS_COMMAND diagnostic test",
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "JCL.JOB_CARD": {
     "evidence_level": "UNIT_TESTED",
@@ -967,7 +1029,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "JCL.EXEC_PGM": {
     "evidence_level": "UNIT_TESTED",
@@ -982,7 +1045,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "JCL.DD_STATEMENT": {
     "evidence_level": "UNIT_TESTED",
@@ -1001,7 +1065,8 @@
       "SPACE=(CYL,(n,m))"
     ],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "JCL.COND_PARAMETER": {
     "evidence_level": "UNIT_TESTED",
@@ -1019,7 +1084,8 @@
       "COND=EVEN"
     ],
     "recommended_next_test": "Differential JCL COND conditional bypass fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "JCL.IF_THEN_ELSE": {
     "evidence_level": "GENERATED_ONLY",
@@ -1032,7 +1098,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential JCL IF/THEN/ELSE step routing fixture",
-    "notes": ""
+    "notes": "",
+    "status": "GENERATED_ONLY"
   },
   "JCL.SYMBOLS": {
     "evidence_level": "UNIT_TESTED",
@@ -1045,7 +1112,8 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "IMS.DLI": {
     "evidence_level": "UNSUPPORTED",
@@ -1062,7 +1130,8 @@
       "CALL 'DFSRRC00'"
     ],
     "recommended_next_test": "Add COBOL_UNSUPPORTED_IMS_CALL diagnostic test",
-    "notes": ""
+    "notes": "",
+    "status": "UNSUPPORTED"
   },
   "MQ.SERIES": {
     "evidence_level": "UNSUPPORTED",
@@ -1080,7 +1149,8 @@
       "COPY CMQODV"
     ],
     "recommended_next_test": "Add COBOL_UNSUPPORTED_MQ_CALL diagnostic and mock MQ copybooks",
-    "notes": ""
+    "notes": "",
+    "status": "UNSUPPORTED"
   },
   "REPORT_WRITER": {
     "evidence_level": "PARSED_ONLY",
@@ -1097,7 +1167,8 @@
       "TERMINATE"
     ],
     "recommended_next_test": "Add COBOL_UNSUPPORTED_REPORT_WRITER diagnostic",
-    "notes": ""
+    "notes": "",
+    "status": "PARSED_ONLY"
   },
   "SORT_MERGE": {
     "evidence_level": "UNIT_TESTED",
@@ -1112,7 +1183,8 @@
     ],
     "unsupported_patterns": [],
     "recommended_next_test": "Differential SORT with INPUT/OUTPUT PROCEDURE fixture",
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "POINTER_FIELDS": {
     "evidence_level": "UNIT_TESTED",
@@ -1129,7 +1201,8 @@
       "SET ADDRESS OF linkage item"
     ],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   },
   "NEXT_SENTENCE": {
     "evidence_level": "UNIT_TESTED",
@@ -1142,6 +1215,7 @@
     "known_limitations": [],
     "unsupported_patterns": [],
     "recommended_next_test": null,
-    "notes": ""
+    "notes": "",
+    "status": "UNIT_TESTED"
   }
 }

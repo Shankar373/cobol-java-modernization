@@ -215,7 +215,7 @@ def shell_safe(token: str, what: str = "value") -> str:
 def _docker_cmd(image: str, mounts: list, workdir: str, inner_cmd: str) -> list:
     """Build a docker run command list with Docker-out-of-Docker translation."""
     network = "none"
-    if os.environ.get("REAL_DB2_MODE") == "1":
+    if os.environ.get("REAL_DB2_MODE") == "1" or os.environ.get("DOCKER_NETWORK"):
         network = os.environ.get("DOCKER_NETWORK", "bridge")
 
     full = ["docker", "run", "--rm",

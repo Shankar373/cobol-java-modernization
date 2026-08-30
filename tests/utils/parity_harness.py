@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 # Environment defaults
 PARITY_RUNTIME = os.environ.get("PARITY_RUNTIME", "docker")
 PARITY_JAVA_RUNTIME = os.environ.get("PARITY_JAVA_RUNTIME", "docker")
-PARITY_GNUCOBOL_IMAGE = os.environ.get("PARITY_GNUCOBOL_IMAGE", "hurriedreformist/gnucobol:3.1-builder")
+PARITY_GNUCOBOL_IMAGE = os.environ.get("PARITY_GNUCOBOL_IMAGE", "gnucobol-ocesql:latest")
 PARITY_JDK_IMAGE = os.environ.get("PARITY_JDK_IMAGE", "eclipse-temurin:17-jdk-noble")
 PARITY_ALLOW_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "false").lower() == "true"
 PARITY_KEEP_ARTIFACTS_ON_FAILURE = os.environ.get("PARITY_KEEP_ARTIFACTS_ON_FAILURE", "true").lower() == "true"
@@ -232,11 +232,97 @@ def check_docker_image_cached(image: str) -> bool:
     except Exception:
         return False
 
+def preprocess_ocesql_source(cobol_code: str) -> str:
+    lines = cobol_code.splitlines()
+    new_lines = []
+    in_sqlca_vars = False
+    in_working_storage = False
+    has_declare_section = False
+    has_sqlca_copy = False
+    
+    for line in lines:
+        upper_line = line.upper()
+        
+        # Detect working storage section
+        if "WORKING-STORAGE SECTION" in upper_line:
+            in_working_storage = True
+            new_lines.append(line)
+            # Inject DECLARE SECTION for connection parameters
+            if not has_declare_section:
+                new_lines.append("       EXEC SQL BEGIN DECLARE SECTION END-EXEC.")
+                new_lines.append("       01  DBNAME PIC X(30) VALUE \"modernization_db\".")
+                new_lines.append("       01  USERNAME PIC X(30) VALUE \"modernize\".")
+                new_lines.append("       01  PASSWD PIC X(30) VALUE \"modernize\".")
+                new_lines.append("       EXEC SQL END DECLARE SECTION END-EXEC.")
+                has_declare_section = True
+            continue
+            
+        # Strip manual SQLCODE/SQLSTATE if present, replacing with sqlca copybook
+        if "SQLCA-VARIABLES" in upper_line or "SQLCA_VARIABLES" in upper_line:
+            if not has_sqlca_copy:
+                new_lines.append('            COPY "sqlca.cbl".')
+                has_sqlca_copy = True
+            in_sqlca_vars = True
+            continue
+            
+        # Also catch standalone SQLCODE / SQLSTATE declarations
+        if in_working_storage and ("01 SQLCODE" in upper_line or "01  SQLCODE" in upper_line or "05 SQLCODE" in upper_line or "05  SQLCODE" in upper_line or "01 SQLSTATE" in upper_line or "01  SQLSTATE" in upper_line or "05 SQLSTATE" in upper_line or "05  SQLSTATE" in upper_line):
+            if not has_sqlca_copy:
+                new_lines.append('            COPY "sqlca.cbl".')
+                has_sqlca_copy = True
+            continue
+            
+        if in_sqlca_vars:
+            if "EXEC SQL" in upper_line:
+                in_sqlca_vars = False
+            # We skip SQLCODE and SQLSTATE declarations under the manual SQLCA group
+            elif "05" in line and ("SQLCODE" in upper_line or "SQLSTATE" in upper_line):
+                continue
+            elif "01" in line or "PROCEDURE DIVISION" in upper_line:
+                in_sqlca_vars = False
+            else:
+                continue
+                
+        # Remove COMP, COMP-5, BINARY usage clauses in host variables
+        # Since ocesql precompiler has a strict limitation (only supports DISPLAY/COMP-3)
+        if in_working_storage and not ("PROCEDURE DIVISION" in upper_line):
+            # Check if this line declares variables
+            # Replace USAGE COMP, USAGE COMP-5, COMP, COMP-5, BINARY
+            line = re.sub(r'\bUSAGE\s+COMP-5\b', '', line, flags=re.IGNORECASE)
+            line = re.sub(r'\bUSAGE\s+COMP\b', '', line, flags=re.IGNORECASE)
+            line = re.sub(r'\bUSAGE\s+BINARY\b', '', line, flags=re.IGNORECASE)
+            line = re.sub(r'\bCOMP-5\b', '', line, flags=re.IGNORECASE)
+            line = re.sub(r'\bCOMP\b', '', line, flags=re.IGNORECASE)
+            line = re.sub(r'\bBINARY\b', '', line, flags=re.IGNORECASE)
+            
+        new_lines.append(line)
+        
+        # Inject CONNECT statement at the start of PROCEDURE DIVISION
+        if "PROCEDURE DIVISION" in upper_line:
+            new_lines.append("            EXEC SQL")
+            new_lines.append("                CONNECT :USERNAME IDENTIFIED BY :PASSWD USING :DBNAME")
+            new_lines.append("            END-EXEC.")
+            
+    return "\n".join(new_lines)
+
 def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
-    # Write cobol source file
-    src_file = os.path.join(run_dir, f"{fixture.program_name}.cob")
-    with open(src_file, "wb") as f:
-        f.write(fixture.cobol_code.encode("utf-8"))
+    # Check if this contains EXEC SQL
+    has_sql = "EXEC SQL" in fixture.cobol_code
+    
+    # Preprocess if SQL is present
+    if has_sql:
+        preprocessed_code = preprocess_ocesql_source(fixture.cobol_code)
+        # Log to target/ocesql_transformed.cob or similar
+        os.makedirs(os.path.join(run_dir, "target"), exist_ok=True)
+        with open(os.path.join(run_dir, "target", "ocesql_transformed.cob"), "wb") as f:
+            f.write(preprocessed_code.encode("utf-8"))
+        src_file = os.path.join(run_dir, "src_preprocessed.cob")
+        with open(src_file, "wb") as f:
+            f.write(preprocessed_code.encode("utf-8"))
+    else:
+        src_file = os.path.join(run_dir, f"{fixture.program_name}.cob")
+        with open(src_file, "wb") as f:
+            f.write(fixture.cobol_code.encode("utf-8"))
 
     if PARITY_RUNTIME == "local":
         # Local fallback execution
@@ -276,9 +362,48 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
 
         # Mount run_dir to /run
         run_dir_abs = os.path.abspath(run_dir).replace("\\", "/")
+        net_name = "modernization-platform_default"
         
-        # Compile inside GnuCOBOL container
-        inner_compile = f"cobc -x -std=default -fsign=ASCII -o /run/prog.exe /run/{fixture.program_name}.cob"
+        # Connectivity Smoke Test if SQL is present
+        if has_sql:
+            cmd_ping = [
+                "docker", "run", "--rm", "--network", net_name,
+                "-e", "PGPASSWORD=modernize",
+                PARITY_GNUCOBOL_IMAGE,
+                "psql", "-h", "db", "-U", "modernize", "-d", "modernization_db", "-c", "SELECT 1;"
+            ]
+            ping_rc, ping_out, ping_err, ping_term = run_cmd_bytes(cmd_ping)
+            if ping_rc != 0:
+                raise RuntimeError(
+                    f"PostgreSQL connectivity check failed on host=db port=5432. "
+                    f"Ensure db container is up and network={net_name}. Error: {ping_err.decode('utf-8', errors='replace')}"
+                )
+
+        if has_sql:
+            # 1. Run ocesql dry-run precompile step
+            precompile_cmd = [
+                "docker", "run", "--rm",
+                "-v", f"{run_dir_abs}:/run",
+                PARITY_GNUCOBOL_IMAGE,
+                "ocesql", "/run/src_preprocessed.cob", "/run/src_precompiled.cob"
+            ]
+            prc, pout, perr, pterm = run_cmd_bytes(precompile_cmd)
+            if prc != 0:
+                err_msg = perr.decode('utf-8', errors='replace') + "\n" + pout.decode('utf-8', errors='replace')
+                return ExecutionResult(
+                    prc, pout, perr, termination_status="error",
+                    error_message=f"ocesql precompile failed: {err_msg}. Check host variable types, SQLCA, and CONNECT injection."
+                )
+
+            # 2. Compile precompiled COBOL inside GnuCOBOL-ocesql container
+            inner_compile = (
+                "cobc -x -std=default -fsign=ASCII -o /run/prog.exe /run/src_precompiled.cob "
+                "-I/usr/share/open-cobol-esql/copy -locesql"
+            )
+        else:
+            # Normal compilation
+            inner_compile = f"cobc -x -std=default -fsign=ASCII -o /run/prog.exe /run/{fixture.program_name}.cob"
+
         compile_cmd = [
             "docker", "run", "--rm",
             "-v", f"{run_dir_abs}:/run",
@@ -295,14 +420,32 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
             f.write(fixture.stdin_bytes)
 
         inner_run = f"/run/prog.exe < /run/stdin.txt"
-        run_cmd = [
+        
+        # Docker run parameters
+        run_cmd_params = [
             "docker", "run", "--rm",
             "-v", f"{run_dir_abs}:/run",
-            "-w", "/run",
+            "-w", "/run"
+        ]
+        
+        # If SQL is present, set network and environment variables
+        if has_sql:
+            run_cmd_params.extend([
+                "--network", net_name,
+                "-e", "PGHOST=db",
+                "-e", "PGPORT=5432",
+                "-e", "PGUSER=modernize",
+                "-e", "PGPASSWORD=modernize",
+                "-e", "PGDATABASE=modernization_db",
+                "-e", "COB_PRE_LOAD=/usr/lib/libocesql.so"
+            ])
+            
+        run_cmd_params.extend([
             PARITY_GNUCOBOL_IMAGE,
             "sh", "-c", inner_run
-        ]
-        rc, out, err, term = run_cmd_bytes(run_cmd)
+        ])
+        
+        rc, out, err, term = run_cmd_bytes(run_cmd_params)
 
         # Read output files
         outputs = {}
@@ -366,6 +509,27 @@ def run_java_transpiled(fixture: ParityFixture, run_dir: str) -> ExecutionResult
 
     jcl_context_dir = os.path.join(run_dir, "com", "systema", "modernized")
     os.makedirs(jcl_context_dir, exist_ok=True)
+
+    # Generate mock SQL assets if mock_db.yaml exists in the repository
+    repo_name = fixture.program_name
+    repo_paths = [
+        os.path.join("tests", "repos", repo_name),
+        os.path.join("tests", "repos", repo_name.upper())
+    ]
+    repo_path = None
+    for rp in repo_paths:
+        if os.path.exists(rp):
+            repo_path = rp
+            break
+    if repo_path:
+        mock_db_yaml = os.path.join(repo_path, "mock_db.yaml")
+        if os.path.exists(mock_db_yaml):
+            import shutil
+            from modernize.mock_sql_service import generate_mock_sql_assets
+            generate_mock_sql_assets(mock_db_yaml, run_dir, run_dir)
+            src_mss = os.path.join(run_dir, "src", "main", "java", "com", "systema", "modernized", "MockSqlService.java")
+            if os.path.exists(src_mss):
+                shutil.copy2(src_mss, os.path.join(jcl_context_dir, "MockSqlService.java"))
 
     # Write JclExecutionContext, CobolFormatHelper, CicsProgramRegistry, SpringContextHelper
     with open(os.path.join(jcl_context_dir, "JclExecutionContext.java"), "w", encoding="utf-8") as f:

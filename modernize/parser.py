@@ -960,6 +960,9 @@ class CobolParser:
         start_tok = self.peek()
         
         if self.match("KEYWORD", "MOVE"):
+            is_corr = False
+            if self.match("KEYWORD", "CORRESPONDING") or self.match("IDENTIFIER", "CORRESPONDING") or self.match("KEYWORD", "CORR") or self.match("IDENTIFIER", "CORR"):
+                is_corr = True
             src_tok = self.consume_val_or_subscript("Expected source identifier or literal in MOVE")
             self.consume("KEYWORD", "TO", "Expected TO keyword")
             # Collect all targets (MOVE X TO A B C)
@@ -977,7 +980,7 @@ class CobolParser:
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
                 properties={
-                    "statement_type": "MOVE",
+                    "statement_type": "MOVE_CORRESPONDING" if is_corr else "MOVE",
                     "source": src_tok.value,
                     "targets": targets
                 },
@@ -1053,6 +1056,10 @@ class CobolParser:
 
         elif self.match("KEYWORD", "ADD") or self.match("KEYWORD", "SUBTRACT") or self.match("KEYWORD", "MULTIPLY") or self.match("KEYWORD", "DIVIDE"):
             op = self.peek(-1).value.upper()
+            is_corr = False
+            if op in ("ADD", "SUBTRACT"):
+                if self.match("KEYWORD", "CORRESPONDING") or self.match("IDENTIFIER", "CORRESPONDING") or self.match("KEYWORD", "CORR") or self.match("IDENTIFIER", "CORR"):
+                    is_corr = True
             val_tok = self.consume_val_or_subscript("Expected value to perform calculation")
             
             mid_kw = "TO"
@@ -1133,7 +1140,7 @@ class CobolParser:
             self.match_statement_period()
             
             props = {
-                "statement_type": op,
+                "statement_type": f"{op}_CORRESPONDING" if is_corr else op,
                 "value": val_tok.value,
                 "on_size_error_nodes": on_size_error_nodes,
                 "not_on_size_error_nodes": not_on_size_error_nodes
@@ -1255,19 +1262,46 @@ class CobolParser:
                 cond_parts = []
                 while not self.is_at_end() and not self.check("PUNCTUATION", "."):
                     tok = self.peek()
-                    if is_tok_statement_start(tok):
+                    if is_tok_statement_start(tok) or self.check("KEYWORD", "AFTER") or self.check("IDENTIFIER", "AFTER"):
                         break
                     self.current += 1
                     if tok.type == "LITERAL_STRING":
                         cond_parts.append(f'"{tok.value}"')
                     else:
                         cond_parts.append(tok.value)
+                
+                after_clauses = []
+                while self.match("KEYWORD", "AFTER") or self.match("IDENTIFIER", "AFTER"):
+                    after_idx = self.consume_subscripted_identifier("Expected index variable after AFTER")
+                    self.consume("KEYWORD", "FROM", "Expected FROM in PERFORM AFTER")
+                    after_from = self.consume_val_or_subscript("Expected FROM value")
+                    self.consume("KEYWORD", "BY", "Expected BY in PERFORM AFTER")
+                    after_by = self.consume_val_or_subscript("Expected BY value")
+                    self.consume("KEYWORD", "UNTIL", "Expected UNTIL in PERFORM AFTER")
+                    after_cond_parts = []
+                    while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                        tok = self.peek()
+                        if is_tok_statement_start(tok) or self.check("KEYWORD", "AFTER") or self.check("IDENTIFIER", "AFTER"):
+                            break
+                        self.current += 1
+                        if tok.type == "LITERAL_STRING":
+                            after_cond_parts.append(f'"{tok.value}"')
+                        else:
+                            after_cond_parts.append(tok.value)
+                    after_clauses.append({
+                        "index": after_idx,
+                        "from_value": after_from.value,
+                        "by_value": after_by.value,
+                        "condition": " ".join(after_cond_parts)
+                    })
+                
                 props = {
                     "statement_type": "PERFORM_VARYING",
                     "index": idx_val,
                     "from_value": from_tok.value,
                     "by_value": by_tok.value,
-                    "condition": " ".join(cond_parts)
+                    "condition": " ".join(cond_parts),
+                    "after_clauses": after_clauses
                 }
                 self.block_stack.append("PERFORM")
             elif self.match("KEYWORD", "UNTIL"):
@@ -1289,8 +1323,58 @@ class CobolParser:
                 if self.match("KEYWORD", "THRU"):
                     thru_tok = self.consume("IDENTIFIER", None, "Expected THRU paragraph name")
                     props["thru"] = thru_tok.value
-                
-                if self.match("KEYWORD", "UNTIL"):
+ 
+                if self.match("KEYWORD", "VARYING"):
+                    # PERFORM paragraph VARYING idx FROM start BY step UNTIL cond
+                    idx_val = self.consume_subscripted_identifier("Expected index variable after VARYING")
+                    self.consume("KEYWORD", "FROM", "Expected FROM in PERFORM VARYING")
+                    from_tok = self.consume_val_or_subscript("Expected FROM value")
+                    self.consume("KEYWORD", "BY", "Expected BY in PERFORM VARYING")
+                    by_tok = self.consume_val_or_subscript("Expected BY value")
+                    self.consume("KEYWORD", "UNTIL", "Expected UNTIL in PERFORM VARYING")
+                    cond_parts = []
+                    while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                        tok = self.peek()
+                        if is_tok_statement_start(tok) or self.check("KEYWORD", "AFTER") or self.check("IDENTIFIER", "AFTER"):
+                            break
+                        self.current += 1
+                        if tok.type == "LITERAL_STRING":
+                            cond_parts.append('"' + tok.value + '"')
+                        else:
+                            cond_parts.append(tok.value)
+                    
+                    after_clauses = []
+                    while self.match("KEYWORD", "AFTER") or self.match("IDENTIFIER", "AFTER"):
+                        after_idx = self.consume_subscripted_identifier("Expected index variable after AFTER")
+                        self.consume("KEYWORD", "FROM", "Expected FROM in PERFORM AFTER")
+                        after_from = self.consume_val_or_subscript("Expected FROM value")
+                        self.consume("KEYWORD", "BY", "Expected BY in PERFORM AFTER")
+                        after_by = self.consume_val_or_subscript("Expected BY value")
+                        self.consume("KEYWORD", "UNTIL", "Expected UNTIL in PERFORM AFTER")
+                        after_cond_parts = []
+                        while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                            tok = self.peek()
+                            if is_tok_statement_start(tok) or self.check("KEYWORD", "AFTER") or self.check("IDENTIFIER", "AFTER"):
+                                break
+                            self.current += 1
+                            if tok.type == "LITERAL_STRING":
+                                after_cond_parts.append('"' + tok.value + '"')
+                            else:
+                                after_cond_parts.append(tok.value)
+                        after_clauses.append({
+                            "index": after_idx,
+                            "from_value": after_from.value,
+                            "by_value": after_by.value,
+                            "condition": " ".join(after_cond_parts)
+                        })
+                    
+                    props["statement_type"] = "PERFORM_VARYING_OUT"
+                    props["index"] = idx_val
+                    props["from_value"] = from_tok.value
+                    props["by_value"] = by_tok.value
+                    props["condition"] = " ".join(cond_parts)
+                    props["after_clauses"] = after_clauses
+                elif self.match("KEYWORD", "UNTIL"):
                     cond_parts = []
                     while not self.is_at_end() and not self.check("PUNCTUATION", "."):
                         tok = self.peek()
@@ -1298,12 +1382,12 @@ class CobolParser:
                             break
                         self.current += 1
                         if tok.type == "LITERAL_STRING":
-                            cond_parts.append(f'"{tok.value}"')
+                            cond_parts.append('"' + tok.value + '"')
                         else:
                             cond_parts.append(tok.value)
                     props["statement_type"] = "PERFORM_UNTIL_OUT"
                     props["condition"] = " ".join(cond_parts)
-            
+
             self.match_statement_period()
             
             node = SemanticIRNode(
@@ -2137,7 +2221,10 @@ class CobolParser:
             self.ir.add_node(node)
 
         elif self.match("KEYWORD", "EVALUATE"):
-            subject_tok = self.consume_val("Expected subject after EVALUATE")
+            subjects = []
+            subjects.append(self.consume_val("Expected subject after EVALUATE").value)
+            while self.match("KEYWORD", "ALSO") or self.match("IDENTIFIER", "ALSO"):
+                subjects.append(self.consume_val("Expected subject after ALSO").value)
             self.match_statement_period()
             self.block_stack.append("EVALUATE")
             
@@ -2146,7 +2233,8 @@ class CobolParser:
                 kind="STATEMENT",
                 properties={
                     "statement_type": "EVALUATE",
-                    "subject": subject_tok.value
+                    "subject": subjects[0],
+                    "subjects": subjects
                 },
                 source_file=self.file_path,
                 source_line=start_tok.line,

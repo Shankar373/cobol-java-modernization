@@ -20,13 +20,25 @@
            END-EXEC.
            EXEC SQL OPEN C1 END-EXEC.
            DISPLAY "OPEN SQLCODE: " SQLCODE
-           PERFORM UNTIL SQLCODE = 100
+           IF SQLCODE < 0
+               DISPLAY "CURSOR OPEN FAILED SQLCODE: " SQLCODE
+               DISPLAY "CURSOR OPEN FAILED SQLSTATE: " SQLSTATE
+               GOBACK
+           END-IF.
+           PERFORM UNTIL SQLCODE NOT EQUAL 0
                EXEC SQL
                    FETCH C1 INTO :WS-DEPT-ID, :WS-COUNT
                END-EXEC
-               IF SQLCODE = 0
-                   DISPLAY "DEPT: " WS-DEPT-ID " COUNT: " WS-COUNT
-               END-IF
+               EVALUATE TRUE
+                   WHEN SQLCODE EQUAL 0
+                       DISPLAY "DEPT: " WS-DEPT-ID " COUNT: " WS-COUNT
+                   WHEN SQLCODE EQUAL 100
+                       CONTINUE
+                   WHEN OTHER
+                       DISPLAY "FETCH ERROR SQLCODE: " SQLCODE
+                       DISPLAY "FETCH ERROR SQLSTATE: " SQLSTATE
+               END-EVALUATE
            END-PERFORM.
            EXEC SQL CLOSE C1 END-EXEC.
            GOBACK.
+

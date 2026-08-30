@@ -1,0 +1,76 @@
+import os
+import shutil
+import tempfile
+import subprocess
+import pytest
+import json
+from modernize.native_pipeline import NativePipeline
+
+# ---------------------------------------------------------------------------
+# CI-portable container name:  docker-compose uses "modernization-platform-db-1"
+# but CI starts the container as "db" (see ci.yml). Allow override via env.
+# ---------------------------------------------------------------------------
+_PG_CONTAINER = os.environ.get("PG_CONTAINER_NAME", "db")
+
+
+def test_sql_baseline_differential():
+    """Phase 1: Real ocesql + GnuCOBOL + PostgreSQL baseline vs modernized Spring Boot + PostgreSQL.
+    Verifies execution parity of SELECT, INSERT, UPDATE, DELETE, and Cursors."""
+
+    # Skip if there is no running PostgreSQL container to target.
+    probe = subprocess.run(
+        ["docker", "inspect", "--format", "{{.State.Running}}", _PG_CONTAINER],
+        capture_output=True, text=True, timeout=10
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        pytest.skip(
+            f"PostgreSQL container '{_PG_CONTAINER}' is not running — "
+            "start it with docker-compose or the CI setup steps before running this test. "
+            f"Set PG_CONTAINER_NAME env var to override (current={_PG_CONTAINER!r})."
+        )
+
+    # Seed the test schema and data into the running container.
+    seed_cmd = [
+        "docker", "exec", "-i", _PG_CONTAINER,
+        "psql", "-U", "modernize", "-d", "modernization_db",
+        "-c",
+        ("DROP TABLE IF EXISTS CUSTOMER; "
+         "CREATE TABLE CUSTOMER (CUST_ID INTEGER PRIMARY KEY, CUST_NAME VARCHAR(20)); "
+         "INSERT INTO CUSTOMER VALUES (101, 'INITIAL CUSTOMER    ');"),
+    ]
+    subprocess.run(seed_cmd, check=True, timeout=30)
+
+    # Use a repository-relative path so this test is portable across OS.
+    repo_dir = os.path.join("tests", "repos", "sql_baseline_01")
+    tmp_out = tempfile.mkdtemp(prefix="sql_baseline_")
+
+    try:
+        # Set PG connection parameters in environment for the host Java run.
+        os.environ["PGHOST"] = "localhost"
+        os.environ["PGPORT"] = "5432"
+        os.environ["PGUSER"] = "modernize"
+        os.environ["PGPASSWORD"] = "modernize"
+        os.environ["PGDATABASE"] = "modernization_db"
+
+        pipe = NativePipeline(repo_dir, tmp_out)
+        verdict = pipe.run()
+
+        if verdict != "NATIVE_JAVA_VERIFIED":
+            print("Verdict:", verdict)
+            obs_path = os.path.join(tmp_out, "generated", "native_execution_observation.json")
+            if os.path.exists(obs_path):
+                with open(obs_path, "r", encoding="utf-8") as f:
+                    print("Observation:", f.read())
+            legacy_path = os.path.join(tmp_out, "baseline", "legacy", "stdout.txt")
+            if os.path.exists(legacy_path):
+                with open(legacy_path, "r", encoding="utf-8") as f:
+                    print("Legacy Stdout:\n", f.read())
+            modern_path = os.path.join(tmp_out, "results", "native", "stdout.txt")
+            if os.path.exists(modern_path):
+                with open(modern_path, "r", encoding="utf-8") as f:
+                    print("Modernized Stdout:\n", f.read())
+
+        assert verdict == "NATIVE_JAVA_VERIFIED"
+    finally:
+        shutil.rmtree(tmp_out, ignore_errors=True)
+

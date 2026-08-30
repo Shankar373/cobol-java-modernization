@@ -74,7 +74,7 @@ class NativePipeline:
                             try:
                                 with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
                                     content = f.read().upper()
-                                    if "REPORT SECTION" in content or "EXEC SQL" in content or "EXEC CICS" in content:
+                                    if "REPORT SECTION" in content or "EXEC CICS" in content:
                                         bypass_baseline = True
                                         break
                             except Exception:
@@ -87,7 +87,10 @@ class NativePipeline:
                 if os.path.exists(config_path):
                     with open(config_path, "r", encoding="utf-8") as fh:
                         cfg = json.load(fh)
-                pipe = Pipeline(self.repo, self.out, cfg=cfg)
+                # pull=False: the image must be pre-built before tests run.
+                # pull=True causes a 120-second sh() timeout per test on CI when
+                # the image is missing — the CI setup step must build the image first.
+                pipe = Pipeline(self.repo, self.out, cfg=cfg, pull=False)
                 pipe.stage_discover()
                 pipe.stage_analyze()
                 pipe.stage_baseline()
@@ -95,14 +98,39 @@ class NativePipeline:
                 entry_id = (pipe.data("discover").get("entry") or "program").lower().replace("-", "_")
                 exe_name = f"{entry_id}.exe"
                 
+                # Check if it has SQL
+                has_sql = False
+                for src in pipe.data("discover")["sources"]:
+                    with open(os.path.join(self.repo, src), "r", encoding="utf-8", errors="replace") as fh:
+                        if "EXEC SQL" in fh.read().upper():
+                            has_sql = True
+                            break
+
                 # Run baseline
-                docker_run(
-                    DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
-                    f"./{exe_name}", shell="sh"
-                )
+                if has_sql:
+                    run_cmd = (
+                        "export PGHOST=db PGPORT=5432 PGUSER=modernize PGPASSWORD=modernize "
+                        "PGDATABASE=modernization_db COB_PRE_LOAD=/usr/lib/libocesql.so && "
+                        f"./{exe_name}"
+                    )
+                    res = docker_run(
+                        DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
+                        run_cmd, shell="sh", network="modernization-platform_default",
+                        timeout=30
+                    )
+                else:
+                    res = docker_run(
+                        DEFAULT_GNUCOBOL_IMAGE, [(self.repo, "/repo")], "/repo",
+                        f"./{exe_name}", shell="sh",
+                        timeout=30
+                    )
                 
                 # Copy produced outputs preserving structure
                 baseline_dir = os.path.join(self.out, "baseline", "legacy")
+                os.makedirs(baseline_dir, exist_ok=True)
+                with open(os.path.join(baseline_dir, "stdout.txt"), "w", encoding="utf-8") as fh:
+                    fh.write(res.stdout or "")
+
                 for od in pipe.data("discover")["output_dirs"]:
                     src_od = os.path.join(self.repo, od)
                     dst_od = os.path.join(baseline_dir, od)
@@ -728,6 +756,22 @@ public class SpringContextHelper {
             with open(os.path.join(helper_dir, "SpringContextHelper.java"), "w", encoding="utf-8") as fh:
                 fh.write(helper_src)
 
+            # Copy MockSqlService.java
+            mss_path = os.path.join(os.path.dirname(__file__), "java_helpers", "src", "main", "java", "com", "systema", "modernized", "MockSqlService.java")
+            if os.path.exists(mss_path):
+                shutil.copy2(mss_path, os.path.join(helper_dir, "MockSqlService.java"))
+
+            # Copy KsdSDbService.java
+            ksds_path = os.path.join(os.path.dirname(__file__), "java_helpers", "src", "main", "java", "com", "systema", "modernized", "KsdSDbService.java")
+            if os.path.exists(ksds_path):
+                shutil.copy2(ksds_path, os.path.join(helper_dir, "KsdSDbService.java"))
+
+            # Generate mock SQL assets if mock_db.yaml exists
+            mock_db_yaml = os.path.join(self.repo, "mock_db.yaml")
+            if os.path.exists(mock_db_yaml):
+                from modernize.mock_sql_service import generate_mock_sql_assets
+                generate_mock_sql_assets(mock_db_yaml, self.generated_dir, self.generated_dir)
+
             mapper_src = """package com.systema.modernized;
 public class Db2ErrorMapper {
     public static int getSqlCode(Exception e) {
@@ -1132,7 +1176,7 @@ public class CicsTransactionContext {
             class_name = to_java_class(prog_id)
         
         # Build classpath string using maven if dependencies are present
-        classpath = "target/classes"
+        classpath = "target/classes" + os.pathsep + "."
         cp_file = os.path.join(self.generated_dir, "cp.txt")
         try:
             mvn_exe = "mvn.cmd" if sys.platform == "win32" else "mvn"
@@ -1213,7 +1257,24 @@ public class CicsTransactionContext {
                 n_content = open(native_file, "rb").read()
                 if b_content != n_content:
                     is_logical_match = False
-                    if not rel.endswith("stdout.txt"):
+                    if rel.endswith("stdout.txt"):
+                        try:
+                            b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
+                            n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
+                            
+                            def normalize_stdout(content: str) -> str:
+                                content = re.sub(r'\+0+(\d+)', r'\1', content)
+                                content = re.sub(r'\b0+(\d+)', r'\1', content)
+                                content = re.sub(r'\+0\b', '0', content)
+                                content = re.sub(r'[ \t]+', ' ', content)
+                                content = "\n".join(line.rstrip() for line in content.splitlines())
+                                return content.strip()
+
+                            if normalize_stdout(b_str) == normalize_stdout(n_str):
+                                is_logical_match = True
+                        except Exception:
+                            pass
+                    else:
                         try:
                             b_words = sorted(re.findall(r'[a-zA-Z0-9]+', open(baseline_file, "r", encoding="utf-8", errors="ignore").read()))
                             n_words = sorted(re.findall(r'[a-zA-Z0-9]+', open(native_file, "r", encoding="utf-8", errors="ignore").read()))

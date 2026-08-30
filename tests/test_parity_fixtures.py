@@ -399,7 +399,6 @@ def test_parity_comp3_file_roundtrip():
 
 # --- Fixture 14: REDEFINES group view (write via one, read via other) --------
 
-@pytest.mark.skip(reason="Group view redefines require shared byte-backed storage; planned for Phase 3")
 def test_parity_redefines_group_view():
     """Fixture 15: REDEFINES group view — write through group, read back as scalar."""
     cobol_code = """\
@@ -427,6 +426,44 @@ def test_parity_redefines_group_view():
         cobol_code=cobol_code,
     )
     verify_comparison(run_parity(fixture))
+
+
+def test_parity_redefines_occurs_group():
+    """Fixture 15b: REDEFINES of OCCURS group - write via elements, read back via redefined scalar, and vice-versa."""
+    cobol_code = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REFOC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-ROOT.
+          05 WS-TABLE OCCURS 3 TIMES.
+             10 WS-SUB-1 PIC X(2).
+             10 WS-SUB-2 PIC X(3).
+          05 WS-REDEF REDEFINES WS-TABLE PIC X(15).
+       PROCEDURE DIVISION.
+           MOVE "AB" TO WS-SUB-1(1).
+           MOVE "CDE" TO WS-SUB-2(1).
+           MOVE "FG" TO WS-SUB-1(2).
+           MOVE "HIJ" TO WS-SUB-2(2).
+           MOVE "KL" TO WS-SUB-1(3).
+           MOVE "MNO" TO WS-SUB-2(3).
+           DISPLAY WS-REDEF.
+           MOVE "1234567890ABCDE" TO WS-REDEF.
+           DISPLAY WS-SUB-1(1).
+           DISPLAY WS-SUB-2(1).
+           DISPLAY WS-SUB-1(2).
+           DISPLAY WS-SUB-2(2).
+           DISPLAY WS-SUB-1(3).
+           DISPLAY WS-SUB-2(3).
+           GOBACK.
+"""
+    fixture = ParityFixture(
+        name="parity_redefines_occurs_group",
+        program_name="REFOC",
+        cobol_code=cobol_code,
+    )
+    verify_comparison(run_parity(fixture))
+
 
 
 # --- Fixture 15: OCCURS DEPENDING ON ----------------------------------------
@@ -579,7 +616,6 @@ def test_parity_call_by_reference():
 
 # --- Fixture 19: CALL BY CONTENT isolation ----------------------------------
 
-@pytest.mark.skip(reason="CALL BY CONTENT parameter isolation requires layout copy; planned for Phase 3")
 def test_parity_call_by_content():
     """Fixture 22: CALL BY CONTENT — verify caller value unchanged after callee mutation."""
     combined_code = """\
@@ -611,9 +647,40 @@ def test_parity_call_by_content():
     verify_comparison(run_parity(fixture))
 
 
+def test_parity_call_by_content_bigdecimal():
+    """Fixture 22b: CALL BY CONTENT with BigDecimal — verify caller BigDecimal value unchanged after callee mutation."""
+    combined_code = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLCONTB.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-ORIGINAL PIC S9(5)V99 VALUE 123.45.
+       PROCEDURE DIVISION.
+           CALL "MUTATORB" USING BY CONTENT WS-ORIGINAL.
+           DISPLAY WS-ORIGINAL.
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MUTATORB.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LS-PARAM PIC S9(5)V99.
+       PROCEDURE DIVISION USING LS-PARAM.
+           ADD 1.00 TO LS-PARAM.
+           GOBACK.
+       END PROGRAM MUTATORB.
+       END PROGRAM CALLCONTB.
+"""
+    fixture = ParityFixture(
+        name="parity_call_by_content_bigdecimal",
+        program_name="CALLCONTB",
+        cobol_code=combined_code,
+    )
+    verify_comparison(run_parity(fixture))
+
+
+
 # --- Fixture 20: PERFORM VARYING ---------------------------------------------
 
-@pytest.mark.skip(reason="PERFORM VARYING paragraph loop requires procedure pointer mapping; planned for Phase 3")
 def test_parity_perform_varying():
     """Fixture 16: PERFORM VARYING with FROM/BY/UNTIL — verify loop count and accumulator."""
     cobol_code = """\
@@ -637,6 +704,160 @@ def test_parity_perform_varying():
         cobol_code=cobol_code,
     )
     verify_comparison(run_parity(fixture))
+
+
+def test_parity_perform_varying_after():
+    """Fixture 20b: PERFORM VARYING AFTER loops (both inline and out-of-line) — verify nested loops match GnuCOBOL output."""
+    cobol_code = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PVARYA.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-I PIC 9(2).
+       01 WS-J PIC 9(2).
+       PROCEDURE DIVISION.
+           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 3
+             AFTER WS-J FROM 1 BY 1 UNTIL WS-J > 2
+               DISPLAY "INLINE I=" WS-I " J=" WS-J
+           END-PERFORM.
+           
+           PERFORM MY-PARA
+             VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 2
+             AFTER WS-J FROM 1 BY 1 UNTIL WS-J > 3.
+           GOBACK.
+           
+       MY-PARA.
+           DISPLAY "OUT-OF-LINE I=" WS-I " J=" WS-J.
+"""
+    fixture = ParityFixture(
+        name="parity_perform_varying_after",
+        program_name="PVARYA",
+        cobol_code=cobol_code,
+    )
+    verify_comparison(run_parity(fixture))
+
+
+def test_parity_stop_run_propagation():
+    """Fixture 20c: STOP RUN / GOBACK propagation in loops — verify no extra iterations occur."""
+    cobol_code = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PSTOP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-I PIC 9(2).
+       01 WS-J PIC 9(2).
+       PROCEDURE DIVISION.
+           PERFORM OUTER-PARA VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 3.
+           DISPLAY "AFTER LOOP WS-I=" WS-I.
+           GOBACK.
+           
+       OUTER-PARA.
+           DISPLAY "OUTER WS-I=" WS-I.
+           PERFORM INNER-PARA VARYING WS-J FROM 1 BY 1 UNTIL WS-J > 3.
+           
+       INNER-PARA.
+           DISPLAY "INNER WS-I=" WS-I " WS-J=" WS-J.
+           IF WS-I = 2 AND WS-J = 2
+               GOBACK
+           END-IF.
+"""
+    fixture = ParityFixture(
+        name="parity_stop_run_propagation",
+        program_name="PSTOP",
+        cobol_code=cobol_code,
+    )
+    verify_comparison(run_parity(fixture))
+
+
+def test_parity_evaluate_multi_subject():
+    """Fixture 20d: Multi-subject EVALUATE ALSO statement — verify conditional branch matches GnuCOBOL output."""
+    cobol_code = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PEVAL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC 9(2) VALUE 1.
+       01 WS-B PIC 9(2) VALUE 2.
+       PROCEDURE DIVISION.
+           EVALUATE WS-A ALSO WS-B
+               WHEN 1 ALSO 2
+                   DISPLAY "MATCH 1 ALSO 2"
+               WHEN 3 ALSO 4
+                   DISPLAY "MATCH 3 ALSO 4"
+               WHEN ANY ALSO ANY
+                   DISPLAY "MATCH ANY"
+               WHEN OTHER
+                   DISPLAY "MATCH OTHER"
+           END-EVALUATE.
+           
+           MOVE 3 TO WS-A.
+           MOVE 4 TO WS-B.
+           EVALUATE WS-A ALSO WS-B
+               WHEN 1 ALSO 2
+                   DISPLAY "MATCH 1 ALSO 2"
+               WHEN 3 ALSO 4
+                   DISPLAY "MATCH 3 ALSO 4"
+               WHEN ANY ALSO ANY
+                   DISPLAY "MATCH ANY"
+               WHEN OTHER
+                   DISPLAY "MATCH OTHER"
+           END-EVALUATE.
+           
+           MOVE 5 TO WS-A.
+           MOVE 6 TO WS-B.
+           EVALUATE WS-A ALSO WS-B
+               WHEN 1 ALSO 2
+                   DISPLAY "MATCH 1 ALSO 2"
+               WHEN 3 ALSO 4
+                   DISPLAY "MATCH 3 ALSO 4"
+               WHEN ANY ALSO ANY
+                   DISPLAY "MATCH ANY"
+               WHEN OTHER
+                   DISPLAY "MATCH OTHER"
+           END-EVALUATE.
+           GOBACK.
+"""
+    fixture = ParityFixture(
+        name="parity_evaluate_multi_subject",
+        program_name="PEVAL",
+        cobol_code=cobol_code,
+    )
+    verify_comparison(run_parity(fixture))
+
+
+def test_parity_corresponding():
+    """Fixture 20e: MOVE/ADD CORRESPONDING statements — verify matched fields copy/calculate correctly."""
+    cobol_code = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PCORR.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A.
+           05 WS-X PIC 9(2) VALUE 10.
+           05 WS-Y PIC 9(2) VALUE 20.
+           05 WS-Z PIC X(5) VALUE "HELLO".
+       01 WS-B.
+           05 WS-X PIC 9(2) VALUE 1.
+           05 WS-Y PIC 9(2) VALUE 2.
+           05 WS-W PIC X(5) VALUE "WORLD".
+       PROCEDURE DIVISION.
+           MOVE CORRESPONDING WS-A TO WS-B.
+           DISPLAY WS-B.
+           
+           ADD CORRESPONDING WS-A TO WS-B.
+           DISPLAY WS-B.
+           GOBACK.
+"""
+    fixture = ParityFixture(
+        name="parity_corresponding",
+        program_name="PCORR",
+        cobol_code=cobol_code,
+    )
+    verify_comparison(run_parity(fixture))
+
+
+
+
 
 
 # --- Fixture 21: String operations ------------------------------------------
