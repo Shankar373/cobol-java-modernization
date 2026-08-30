@@ -106,6 +106,15 @@ class NativePipeline:
                             has_sql = True
                             break
 
+                # Ensure all baseline output directories exist inside the repo and are writable by the container
+                for od in pipe.data("discover").get("output_dirs", []):
+                    od_path = os.path.join(self.repo, od)
+                    os.makedirs(od_path, exist_ok=True)
+                    try:
+                        os.chmod(od_path, 0o777)
+                    except Exception:
+                        pass
+
                 # Run baseline
                 if has_sql:
                     run_cmd = (
@@ -1291,7 +1300,18 @@ public class CicsTransactionContext {
                         except Exception:
                             pass
                     if not is_logical_match:
-                        mismatches.append(f"Content difference in {rel}. Baseline len: {len(b_content)}, Native len: {len(n_content)}")
+                        msg = f"Content difference in {rel}. Baseline len: {len(b_content)}, Native len: {len(n_content)}"
+                        if rel.endswith("stdout.txt"):
+                            try:
+                                b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
+                                n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
+                                b_str_norm = normalize_stdout(b_str)
+                                n_str_norm = normalize_stdout(n_str)
+                                msg += f"\n--- NORMALIZED BASELINE STDOUT ---\n{b_str_norm}\n--- NORMALIZED NATIVE STDOUT ---\n{n_str_norm}"
+                            except Exception:
+                                pass
+                        self.log(msg)
+                        mismatches.append(msg)
                     else:
                         matched.append(rel)
                 else:

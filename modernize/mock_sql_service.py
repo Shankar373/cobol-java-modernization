@@ -91,6 +91,10 @@ public class MockSqlService {
 
     public static synchronized void initialize() {
         if (initialized) return;
+        if (System.getenv("PGHOST") != null || "1".equals(System.getenv("REAL_DB2_MODE"))) {
+            initialized = true;
+            return;
+        }
         
         try {
             // Instantiate H2 memory DB connection if jdbcTemplate is null
