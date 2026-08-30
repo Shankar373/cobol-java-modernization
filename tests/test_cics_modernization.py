@@ -34,7 +34,7 @@ def test_cics_parser_valid():
     assert cics_nodes[0].properties["cics_props"]["cics_type"] == "SEND"
 
 def test_cics_pipeline_e2e():
-    repo = r"c:\Users\bandi\Desktop\SystemaOps\Cobol-to-java-test\tests\repos\CICSREST01"
+    repo = os.path.join("tests", "repos", "CICSREST01")
     out_dir = tempfile.mkdtemp()
     try:
         pipeline = NativePipeline(repo, out_dir)

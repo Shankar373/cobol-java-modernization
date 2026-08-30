@@ -6037,7 +6037,7 @@ class NativeProgramGenerator:
             lines.append("                com.systema.modernized.SpringContextHelper.jdbcTemplate = new org.springframework.jdbc.core.JdbcTemplate(dataSource);")
             lines.append("                com.systema.modernized.SpringContextHelper.transactionManager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource);")
             # Apply per-repo seed data to PG for test isolation (same as H2 path)
-            if tables or seed_queries:
+            if seed_queries:
                 lines.append("                try {")
                 for table_name in tables:
                     lines.append(f"                    try {{ com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE\"); }} catch (Exception _e) {{ try {{ com.systema.modernized.SpringContextHelper.jdbcTemplate.execute(\"DELETE FROM {table_name}\"); }} catch (Exception _e2) {{}} }}")

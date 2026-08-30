@@ -67,6 +67,9 @@ class NativePipeline:
                 except Exception:
                     pass
             
+            if os.path.exists(os.path.join(self.out, "baseline", "legacy", "stdout.txt")):
+                bypass_baseline = True
+            
             if not bypass_baseline:
                 for root, dirs, files in os.walk(self.repo):
                     for file in files:
@@ -117,6 +120,34 @@ class NativePipeline:
 
                 # Run baseline
                 if has_sql:
+                    # Seed per-repo data into PostgreSQL before running the baseline
+                    if os.environ.get("PGHOST"):
+                        data_dir = os.path.join(self.repo, "data")
+                        if os.path.isdir(data_dir):
+                            for sql_file in os.listdir(data_dir):
+                                if sql_file.lower().endswith(".sql"):
+                                    table_name = os.path.splitext(sql_file)[0]
+                                    # Truncate table first to clear previous state
+                                    truncate_query = f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;"
+                                    try:
+                                        subprocess.run(
+                                            ["docker", "exec", "db", "psql", "-U", "modernize", "-d", "modernization_db", "-c", truncate_query],
+                                            capture_output=True, text=True, check=False
+                                        )
+                                    except Exception:
+                                        pass
+                                    # Execute seed sql
+                                    sql_path = os.path.join(data_dir, sql_file)
+                                    try:
+                                        with open(sql_path, "r", encoding="utf-8") as fh:
+                                            sql_content = fh.read()
+                                        if sql_content.strip():
+                                            subprocess.run(
+                                                ["docker", "exec", "-i", "db", "psql", "-U", "modernize", "-d", "modernization_db"],
+                                                input=sql_content, capture_output=True, text=True, check=False
+                                            )
+                                    except Exception:
+                                        pass
                     run_cmd = (
                         "export PGHOST=db PGPORT=5432 PGUSER=modernize PGPASSWORD=modernize "
                         "PGDATABASE=modernization_db COB_PRE_LOAD=/usr/lib/libocesql.so && "
