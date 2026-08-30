@@ -73,6 +73,7 @@ def _run_with_watchdog(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=env,
+                start_new_session=(sys.platform != "win32"),
             )
         except Exception as exc:
             return -1, "", str(exc), 0.0, "error"

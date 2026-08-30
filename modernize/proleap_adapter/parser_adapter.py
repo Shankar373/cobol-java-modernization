@@ -38,6 +38,7 @@ def resolve_copybooks_recursively(file_path, search_dirs, visited=None):
     for cb in copybooks:
         found_path = None
         for sdir in search_dirs:
+            # 1. Exact case check
             for ext in copybook_exts:
                 p = os.path.join(sdir, cb + ext)
                 if os.path.exists(p) and os.path.isfile(p):
@@ -45,6 +46,26 @@ def resolve_copybooks_recursively(file_path, search_dirs, visited=None):
                     break
             if found_path:
                 break
+
+            # 2. Case-insensitive lookup check
+            if os.path.exists(sdir) and os.path.isdir(sdir):
+                try:
+                    files_in_dir = os.listdir(sdir)
+                except OSError:
+                    continue
+                for ext in copybook_exts:
+                    target_lower = (cb + ext).lower()
+                    for filename in files_in_dir:
+                        if filename.lower() == target_lower:
+                            full_p = os.path.join(sdir, filename)
+                            if os.path.isfile(full_p):
+                                found_path = full_p
+                                break
+                    if found_path:
+                        break
+            if found_path:
+                break
+
         if not found_path:
             missing.append(cb)
         else:
