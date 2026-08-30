@@ -112,3 +112,12 @@ def test_translate_condition_function_mod():
     assert cond == "com.systema.modernized.CobolFormatHelper.mod(ws_year, 4) == 0"
 
 
+def test_translate_relational_keywords_condition():
+    var_types = {"SQLCODE": "Integer"}
+    trans = NativeStatementTranslator(var_types)
+    assert trans._translate_condition("SQLCODE NOT EQUAL 0") == "sqlcode != 0"
+    assert trans._translate_condition("SQLCODE EQUAL TO 100") == "sqlcode == 100"
+    assert trans._translate_condition("SQLCODE GREATER THAN 10") == "sqlcode > 10"
+
+
+

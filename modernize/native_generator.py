@@ -3073,6 +3073,20 @@ class NativeStatementTranslator:
         """Translate a COBOL condition string to Java boolean expression."""
         cond = self._translate_subscripts(cond)
         
+        # Normalize COBOL relation keywords to symbols
+        cond = re.sub(r'\bNOT\s+EQUAL\s+TO\b', '<>', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bNOT\s+EQUAL\b', '<>', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bEQUAL\s+TO\b', '=', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bEQUAL\b', '=', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bGREATER\s+THAN\s+OR\s+EQUAL\s+TO\b', '>=', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bGREATER\s+THAN\s+OR\s+EQUAL\b', '>=', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bGREATER\s+THAN\b', '>', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bGREATER\b', '>', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bLESS\s+THAN\s+OR\s+EQUAL\s+TO\b', '<=', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bLESS\s+THAN\s+OR\s+EQUAL\b', '<=', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bLESS\s+THAN\b', '<', cond, flags=re.IGNORECASE)
+        cond = re.sub(r'\bLESS\b', '<', cond, flags=re.IGNORECASE)
+        
         # Translate FUNCTION MOD(A, B) to com.systema.modernized.CobolFormatHelper.mod(A, B)
         cond = re.sub(
             r'\bFUNCTION\s+MOD\s*\(\s*([^,()]+)\s*,\s*([^()]+)\s*\)',

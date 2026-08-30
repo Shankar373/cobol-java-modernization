@@ -3437,6 +3437,14 @@ class Pipeline:
         entry_id = (d.get("entry") or "program").lower().replace("-", "_")
         exe_name = f"{entry_id}.exe"
 
+        # Delete pre-existing executable to avoid Docker permission denied errors on Linux
+        exe_path = os.path.join(self.repo, exe_name)
+        if os.path.exists(exe_path):
+            try:
+                os.remove(exe_path)
+            except Exception as e:
+                self.log(f"Warning: could not remove pre-existing executable {exe_name}: {e}")
+
         # Two-pass build: subprograms (CALL targets that have PROCEDURE USING) need
         # `cobc -m` (shared module); the entry-point executable uses `cobc -x`.
         # Build the module pass first so the linker can resolve CALL references.
@@ -3532,6 +3540,13 @@ class Pipeline:
         if module_src:
             for m_src in module_src:
                 m_base = os.path.splitext(os.path.basename(m_src))[0]
+                # Delete pre-existing shared library to avoid Docker permission denied errors on Linux
+                so_path = os.path.join(self.repo, f"{m_base}.so")
+                if os.path.exists(so_path):
+                    try:
+                        os.remove(so_path)
+                    except Exception:
+                        pass
                 with open(os.path.join(self.repo, m_src), "r", encoding="utf-8", errors="replace") as fh:
                     m_content = fh.read().upper()
                 if "EXEC SQL" in m_content:
