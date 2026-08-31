@@ -22,7 +22,8 @@ from modernize.native_generator import NativeProgramGenerator
 from tests.test_phase8_file_semantics import run_cobol_code
 
 
-INVMGR_COB = os.path.join(os.path.dirname(__file__), 'repos', 'INVMGR', 'src', 'INVMGR.cob')
+INVMGR_COB = os.path.join(os.path.dirname(__file__), '..', '..', 'repos', 'INVMGR', 'src', 'INVMGR.cob')
+INVMGR_COB = os.path.abspath(INVMGR_COB)
 INVMGR_CODE = open(INVMGR_COB, encoding='utf-8').read()
 
 
