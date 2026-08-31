@@ -21,7 +21,7 @@ REDEFINES01_CODE = """\
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
-           SELECT OUT-FILE ASSIGN TO "redefines-output.txt"
+           SELECT OUT-FILE ASSIGN TO "WS-FILE-OUT"
                FILE STATUS IS WS-FS.
        DATA DIVISION.
        FILE SECTION.
@@ -34,12 +34,12 @@ REDEFINES01_CODE = """\
        01  WS-DISPLAY PIC X(20).
        PROCEDURE DIVISION.
        MAIN-PARA.
-           MOVE '1234567890' TO WS-BUF-X
-           DISPLAY 'WS-BUF-9: ' WS-BUF-9
+           MOVE 'HELLO1234' TO WS-BUF-X
+           DISPLAY 'WS-BUF-9 as numeric: ' WS-BUF-9
            MOVE WS-BUF-9 TO WS-DISPLAY
-           DISPLAY 'WS-DISPLAY: ' WS-DISPLAY
+           DISPLAY 'WS-DISPLAY (buf redefines view): ' WS-DISPLAY
            MOVE '9999999999' TO WS-BUF-9
-           DISPLAY 'After MOVE:'
+           DISPLAY 'After MOVE 9999999999 to WS-BUF-9:'
            DISPLAY 'WS-BUF-X: ' WS-BUF-X
            DISPLAY 'WS-BUF-9: ' WS-BUF-9
            MOVE WS-BUF-X TO OUT-REC
@@ -60,7 +60,7 @@ def test_redefines01_parity():
         name="REDEFINES01",
         program_name="REDEFINES01",
         cobol_code=REDEFINES01_CODE,
-        declared_outputs=["redefines-output.txt"],
+        declared_outputs=["WS-FILE-OUT"],
         input_files={},
         env={},
     )

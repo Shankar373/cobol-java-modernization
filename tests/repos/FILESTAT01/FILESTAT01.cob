@@ -40,11 +40,11 @@
                END-READ
            END-PERFORM
       * Attempt one more read past EOF (expected status 10)
-            READ SEQ-FILE
-            AT END
-                DISPLAY 'Past EOF read: FILE_STATUS = ' WS-FILE-STATUS
-            NOT AT END
-                DISPLAY 'Should not reach here'
-            END-READ
+           READ SEQ-FILE
+           AT END
+               DISPLAY 'Past EOF read: FILE_STATUS = ' WS-FILE-STATUS ' (expected 10)'
+           NOT AT END
+               DISPLAY 'Should not reach here'
+           END-READ
            CLOSE SEQ-FILE
            STOP RUN.

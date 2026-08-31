@@ -21,7 +21,7 @@ FILESTAT01_CODE = """\
        ENVIRONMENT DIVISION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
-           SELECT SEQ-FILE ASSIGN TO "outfile.txt"
+           SELECT SEQ-FILE ASSIGN TO "ws-output-file.txt"
                FILE STATUS IS WS-FILE-STATUS.
        DATA DIVISION.
        FILE SECTION.
@@ -31,40 +31,36 @@ FILESTAT01_CODE = """\
        01  WS-FILE-STATUS PIC XX.
        01  WS-EOF-FLAG PIC X VALUE 'N'.
        01  WS-COUNT PIC 9(3) VALUE 0.
-       01  WS-R1 PIC X(30) VALUE 'RECORD_01                     '.
-       01  WS-R2 PIC X(30) VALUE 'RECORD_02                     '.
-       01  WS-R3 PIC X(30) VALUE 'RECORD_03                     '.
        PROCEDURE DIVISION.
        MAIN-PARA.
            OPEN OUTPUT SEQ-FILE
            PERFORM VARYING WS-COUNT FROM 1 BY 1 UNTIL WS-COUNT > 3
-               IF WS-COUNT = 1
-                   MOVE WS-R1 TO FILE-REC
-               END-IF
-               IF WS-COUNT = 2
-                   MOVE WS-R2 TO FILE-REC
-               END-IF
-               IF WS-COUNT = 3
-                   MOVE WS-R3 TO FILE-REC
-               END-IF
+               MOVE 'RECORD_' TO FILE-REC
+               MOVE WS-COUNT TO FILE-REC(11:2)
                WRITE FILE-REC
-               DISPLAY 'Write: ' WS-FILE-STATUS
+               DISPLAY 'Write ' WS-COUNT ': FILE_STATUS = ' WS-FILE-STATUS
            END-PERFORM
            CLOSE SEQ-FILE
-           DISPLAY 'Close: ' WS-FILE-STATUS
+           DISPLAY 'After close: FILE_STATUS = ' WS-FILE-STATUS
            OPEN INPUT SEQ-FILE
-           DISPLAY 'Reopen: ' WS-FILE-STATUS
+           DISPLAY 'After reopen INPUT: FILE_STATUS = ' WS-FILE-STATUS
            MOVE 'N' TO WS-EOF-FLAG
            PERFORM UNTIL WS-EOF-FLAG = 'Y'
                READ SEQ-FILE
                AT END
-                   DISPLAY 'EOF: ' WS-FILE-STATUS
+                   DISPLAY 'EOF reached, FILE_STATUS = ' WS-FILE-STATUS
                    MOVE 'Y' TO WS-EOF-FLAG
                NOT AT END
-                   DISPLAY 'Rec: ' FILE-REC
-                   DISPLAY 'FS: ' WS-FILE-STATUS
+                   DISPLAY 'Read record: ' FILE-REC
+                   DISPLAY 'FILE_STATUS after read = ' WS-FILE-STATUS
                END-READ
            END-PERFORM
+           READ SEQ-FILE
+           AT END
+               DISPLAY 'Past EOF read: FILE_STATUS = ' WS-FILE-STATUS ' (expected 10)'
+           NOT AT END
+               DISPLAY 'Should not reach here'
+           END-READ
            CLOSE SEQ-FILE
            STOP RUN.
 """
@@ -80,7 +76,7 @@ def test_filestat01_parity():
         name="FILESTAT01",
         program_name="FILESTAT01",
         cobol_code=FILESTAT01_CODE,
-        declared_outputs=["outfile.txt"],
+        declared_outputs=["ws-output-file.txt"],
         input_files={},
         env={},
     )
