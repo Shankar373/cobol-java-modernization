@@ -168,7 +168,7 @@ are important but do **not** prove business equivalence on their own.
 
 | Area | Representative files |
 |---|---|
-| Validation gates / fail-closed | `test_no_false_production_ready.py`, `test_phase10_gates.py`, `test_validation_nobypass.py`, `test_no_hardcoding.py`, `tests/gates/*` (root equivalents) |
+| Validation gates / fail-closed | `test_no_false_production_ready.py`, `test_phase10_gates.py`, `test_validation_nobypass.py`, `test_no_hardcoding.py` (all at `tests/` root) |
 | Security | `test_phase11b_security.py`, `test_phase8_security_audit.py`, `test_proleap_security.py`, `test_security_hardening.py` |
 | Concurrency / workspace isolation | `test_concurrency_isolation.py`, `test_phase11b_workspace_isolation.py`, `test_docker_isolation.py`, `test_pipeline_remediation.py` |
 | Failure recovery / negative paths | `test_phase8_failure_recovery.py`, `test_phase9_failure_matrix.py`, `test_negative_*`, `test_native_negative_equivalence.py` |
@@ -176,25 +176,33 @@ are important but do **not** prove business equivalence on their own.
 | API / contract | `test_phase9_api_contract.py`, `test_phase9_manifest.py`, `test_phase9_repeatability.py` |
 | E2E pipeline | `test_postgres_e2e.py`, `test_sql_baseline.py`, `test_sql_db_ksds_modernization.py` (integration) |
 
-### 6.3 Finding: "categorization" subdirectories are empty stubs
+### 6.3 Finding: "categorization" subdirectories removed (flat layout retained)
 
 After removing the placeholder shims (which only contained comment text and broke
-pytest collection), the following subdirectories now contain **no real tests**:
-
-```
-tests/negative/     (0 tests)
-tests/security/     (0 tests)
-tests/hardening/    (0 tests)
-tests/contracts/    (0 tests)
-tests/gates/        (0 tests)
-```
+pytest collection), the previously-empty categorization subdirectories
+(`tests/negative/`, `tests/security/`, `tests/hardening/`, `tests/contracts/`,
+`tests/gates/`) were **deleted** in favour of keeping all such tests flat at the
+`tests/` root.
 
 The real tests for those domains remain **at `tests/` root** (e.g.
 `test_security_hardening.py`, `test_negative_equivalence_contract.py`,
-`test_phase10_gates.py`). The subdirectories are empty scaffolding. This is a
-hygiene debt, not a functional defect, but it means the reorganization is
-incomplete: the suite is split between root and a handful of genuinely-moved
-subdirectories, with no single coherent home for each domain.
+`test_phase10_gates.py`). These directories were only empty scaffolding — they
+contained no tracked source files and no real tests, so removing them changes no
+test logic and the suite collects cleanly.
+
+**Why flat rather than moving tests into subdirectories:** the affected tests all
+rely on root-relative `sys.path` boilerplate
+(`os.path.dirname(os.path.dirname(os.path.abspath(__file__)))`) that resolves to
+the repository root only at the `tests/` depth. Moving them one level deeper
+(e.g. into `tests/security/`) would break `from modernize.*` and `from tests.*`
+package imports (e.g. `test_phase8_failure_recovery.py` imports
+`from tests.test_phase8_file_semantics import run_cobol_code`), and would require
+path fixes in several files that reference fixtures (`ui.py`, `ui.html`,
+`repos/ACCTPROG`). The decision rule in the task therefore selects **Option B**
+(remove stubs, keep flat). The test suite is intentionally split across a small
+number of genuinely-moved subdirectories (`tests/unit`, `tests/component`,
+`tests/e2e/differential`, `tests/robustness`) plus a flat root for the remaining
+domain suites.
 
 ---
 

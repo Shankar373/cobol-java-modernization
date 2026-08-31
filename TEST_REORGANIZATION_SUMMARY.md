@@ -28,7 +28,17 @@ Execute a test-needs analysis and structural reorganization of the COBOL-to-Java
 
 ### Part 2: Test Suite Restructuring
 
-Target taxonomy reorganization with 18 test categories:
+Target taxonomy reorganization with 18 test categories.
+
+**Final layout note (Option B — flat):** The `negative`, `security`, `hardening`,
+`contracts` and `gates` categorization directories were **never populated with
+real tests**. They contained only placeholder shims (comment text) that broke
+pytest collection, which were deleted; the directories were then removed and the
+real tests for those domains remain at the `tests/` root. This decision keeps all
+of those tests flat rather than moving them into subdirectories, because every
+one relies on root-relative `sys.path` boilerplate and `from tests.*` package
+imports that would break at deeper nesting (see
+`docs/ci_and_business_logic_audit.md` §6.3).
 
 | Category | Directory | Test Count |
 |---|---|---|
@@ -40,22 +50,23 @@ Target taxonomy reorganization with 18 test categories:
 | | `component/vsam/` | 3 |
 | | `component/cics/` | 4 |
 | | `component/jcl/` | 3 |
-| **e2e/differential** | `e2e/differential/storage/` | 1 (placeholder) |
-| | `e2e/differential/control_flow/` | 1 (placeholder) |
-| | `e2e/differential/files/` | 1 (placeholder) |
-| | `e2e/differential/sql/` | 1 (placeholder) |
-| | `e2e/differential/cics/` | 1 (placeholder) |
-| | `e2e/differential/jcl/` | 1 (placeholder) |
-| **negative** | `negative/` | 4 |
-| **security** | `security/` | 4 |
-| **hardening** | `hardening/` | 6 |
-| **contracts** | `contracts/` | 6 |
-| **gates** | `gates/` | 3 |
+| **e2e/differential** | `e2e/differential/storage/` | 1 |
+| | `e2e/differential/control_flow/` | 1 |
+| | `e2e/differential/files/` | 1 |
+| | `e2e/differential/sql/` | 1 |
+| | `e2e/differential/cics/` | 1 |
+| | `e2e/differential/jcl/` | 1 |
+| **negative** | `tests/` root (e.g. `test_negative_equivalence_contract.py`, `test_native_negative_equivalence.py`, `test_phase8_failure_recovery.py`, `test_phase9_failure_matrix.py`) | removed stub |
+| **security** | `tests/` root (e.g. `test_security_hardening.py`, `test_phase8_security_audit.py`, `test_phase11b_security.py`, `test_proleap_security.py`) | removed stub |
+| **hardening** | `tests/` root (e.g. `test_concurrency_isolation.py`, `test_docker_isolation.py`, `test_pipeline_remediation.py`, `test_phase11b_workspace_isolation.py`, `test_native_dependency_gate.py`, `test_phase8_dependency_audit.py`) | removed stub |
+| **contracts** | `tests/` root (e.g. `test_phase9_api_contract.py`, `test_phase9_manifest.py`, `test_phase9_repeatability.py`, `test_phase9_lifecycle.py`, `test_phase9_repo_isolation.py`, `test_phase9_verdict.py`) | removed stub |
+| **gates** | `tests/` root (e.g. `test_phase10_gates.py`, `test_no_false_production_ready.py`, `test_no_hardcoding.py`, `test_validation_nobypass.py`) | removed stub |
 | **robustness** | `robustness/unseen/` | 2 |
 | | `robustness/adversarial/` | 2 |
 | **integration/ui** | `integration/ui/` | 5 |
 
-**Total: 154 test files across 18 categories**
+The final suite collects cleanly: `pytest tests/ --co -q` reports **643 tests
+collected** with no import mismatches and no duplicate module names.
 
 ---
 
@@ -135,11 +146,11 @@ Target taxonomy reorganization with 18 test categories:
 | `tests/component/cics/` | `tests/test_*.py` | CICS map/BMS mapping tests |
 | `tests/component/jcl/` | `tests/test_*.py` | JCL modernization tests |
 | `tests/e2e/differential/*/` | New placeholder dirs | E2E differential test categories |
-| `tests/negative/` | Pre-existing | Negative/equivalence gate tests |
-| `tests/security/` | New | Security hardening audit tests |
-| `tests/hardening/` | New | Pipeline/Docker/isolation tests |
-| `tests/contracts/` | New | Equivalence contract tests |
-| `tests/gates/` | New | Phase gate enforcement tests |
+| ~~`tests/negative/`~~ | ~~Pre-existing~~ | **Removed** (empty stub; tests stay at `tests/` root) |
+| ~~`tests/security/`~~ | ~~New~~ | **Removed** (empty stub; tests stay at `tests/` root) |
+| ~~`tests/hardening/`~~ | ~~New~~ | **Removed** (empty stub; tests stay at `tests/` root) |
+| ~~`tests/contracts/`~~ | ~~New~~ | **Removed** (empty stub; tests stay at `tests/` root) |
+| ~~`tests/gates/`~~ | ~~New~~ | **Removed** (empty stub; tests stay at `tests/` root) |
 | `tests/robustness/unseen/` | Pre-existing | Unseen repository tests |
 | `tests/robustness/adversarial/` | New | Adversarial mutation tests |
 | `tests/integration/ui/` | New | UI integration tests |
