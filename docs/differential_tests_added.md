@@ -149,3 +149,27 @@ PARITY_ALLOW_SKIP=true python -m pytest tests/e2e/differential/storage/test_rede
 
 ---
 *Document generated as part of the test reorganization and differential test addition effort. See TEST_REORGANIZATION_SUMMARY.md for the full project-level summary.*
+---
+
+## GnuCOBOL Compatibility Fix (differential-smoke)
+
+The three fixtures below failed to compile under GnuCOBOL (`cobc -x -std=default -fsign=ASCII`)
+in the `differential-smoke` CI job. Each was rewritten to minimal, standard, GnuCOBOL-valid
+COBOL while preserving the exact behavior under test. The embedded COBOL source in each
+corresponding differential test (`tests/e2e/differential/*/test_*.py`) was updated in lock-step,
+because the parity harness compiles `fixture.cobol_code`, not the on-disk `.cob` file.
+
+- **REDEFINES01** (`tests/repos/REDEFINES01/REDEFINES01.cob`): added an `INPUT-OUTPUT SECTION` /
+  `FILE-CONTROL` entry and a `FILE SECTION` `FD` record for the output file, so `OPEN`/`WRITE`/
+  `CLOSE` target a real file record. Preserves the two overlapping views (`WS-BUF-X PIC X(10)` /
+  `WS-BUF-9 REDEFINES WS-BUF-X PIC 9(10)`). Output file: `WS-FILE-OUT`.
+- **SIZEERR01** (`tests/repos/SIZEERR01/SIZEERR01.cob`): replaced the invalid
+  `01 WS-OVERFLOW FLAG PIC TRUE FALSE.` with `01 WS-OVERFLOW PIC X VALUE ''N''.` and removed the
+  non-standard `ELSE` clauses after `ON SIZE ERROR` (GnuCOBOL has no `ELSE` companion there).
+  ADD 1000 / SUBTRACT 100 still overflow a `PIC 9(2)` field and trigger `ON SIZE ERROR`.
+- **FILESTAT01** (`tests/repos/FILESTAT01/FILESTAT01.cob`): put `FILE-CONTROL` under an
+  `INPUT-OUTPUT SECTION`, added an `FD` record, replaced the invalid bare `PERFORM ... READ` with
+  a `PERFORM UNTIL` loop, and replaced the invalid `PIC TRUE FALSE` flag with `PIC X`.
+  Output file: `ws-output-file.txt`.
+
+No test logic, assertions, or harness code was changed - only the COBOL source text.

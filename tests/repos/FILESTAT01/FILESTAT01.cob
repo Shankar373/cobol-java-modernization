@@ -1,57 +1,50 @@
-IDENTIFICATION DIVISION.
+       IDENTIFICATION DIVISION.
        PROGRAM-ID. FILESTAT01.
-       
        ENVIRONMENT DIVISION.
-       FILE CONTROL.
-           SELECT WS-ASSIGN ASSIGN TO "ws-output-file.txt"
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SEQ-FILE ASSIGN TO "ws-output-file.txt"
                FILE STATUS IS WS-FILE-STATUS.
-       
        DATA DIVISION.
+       FILE SECTION.
+       FD  SEQ-FILE.
+       01  FILE-REC PIC X(30).
        WORKING-STORAGE SECTION.
-       01 WS-FILE-STATUS PIC 9(2).
-       01 WS-RECORD PIC X(30) VALUE SPACES.
-       01 WS-COUNT PIC 9(3) VALUE 0.
-       01 WS-EOF-FLAG PIC TRUE FALSE VALUE FALSE.
-       
+       01  WS-FILE-STATUS PIC XX.
+       01  WS-EOF-FLAG PIC X VALUE 'N'.
+       01  WS-COUNT PIC 9(3) VALUE 0.
        PROCEDURE DIVISION.
-       MAIN-SECTION.
-           * Open the file for OUTPUT
-           OPEN OUTPUT WS-ASSIGN
-           
-           * Write 3 records
+       MAIN-PARA.
+      * Open for OUTPUT and write 3 records
+           OPEN OUTPUT SEQ-FILE
            PERFORM VARYING WS-COUNT FROM 1 BY 1 UNTIL WS-COUNT > 3
-               MOVE 'RECORD_' TO WS-RECORD
-               MOVE WS-COUNT TO WS-RECORD(11:2)
-               WRITE WS-RECORD RECORD
+               MOVE 'RECORD_' TO FILE-REC
+               MOVE WS-COUNT TO FILE-REC(11:2)
+               WRITE FILE-REC
                DISPLAY 'Write ' WS-COUNT ': FILE_STATUS = ' WS-FILE-STATUS
            END-PERFORM
-           
-           * Close and reopen for INPUT
-           CLOSE WS-ASSIGN
+           CLOSE SEQ-FILE
            DISPLAY 'After close: FILE_STATUS = ' WS-FILE-STATUS
-           
-           * Reopen for INPUT
-           OPEN INPUT WS-ASSIGN
+      * Reopen for INPUT and read the records back
+           OPEN INPUT SEQ-FILE
            DISPLAY 'After reopen INPUT: FILE_STATUS = ' WS-FILE-STATUS
-           
-           * Read records back
-           PERFORM
-               READ WS-ASSIGN
+           MOVE 'N' TO WS-EOF-FLAG
+           PERFORM UNTIL WS-EOF-FLAG = 'Y'
+               READ SEQ-FILE
                AT END
                    DISPLAY 'EOF reached, FILE_STATUS = ' WS-FILE-STATUS
-                   MOVE TRUE TO WS-EOF-FLAG
+                   MOVE 'Y' TO WS-EOF-FLAG
                NOT AT END
-                   DISPLAY 'Read record: ' WS-RECORD
+                   DISPLAY 'Read record: ' FILE-REC
                    DISPLAY 'FILE_STATUS after read = ' WS-FILE-STATUS
+               END-READ
            END-PERFORM
-           
-           * Attempt one more read past EOF
-           READ WS-ASSIGN
+      * Attempt one more read past EOF (expected status 10)
+           READ SEQ-FILE
            AT END
                DISPLAY 'Past EOF read: FILE_STATUS = ' WS-FILE-STATUS ' (expected 10)'
            NOT AT END
                DISPLAY 'Should not reach here'
            END-READ
-           
-           CLOSE WS-ASSIGN
+           CLOSE SEQ-FILE
            STOP RUN.
