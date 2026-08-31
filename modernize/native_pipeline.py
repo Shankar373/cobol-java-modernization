@@ -52,6 +52,9 @@ class NativePipeline:
         self.log(f"  Repo: {self.repo}")
         self.log(f"  Out: {self.out}")
 
+        # Seed target tables unconditionally before baseline and Java run
+        self._seed_db()
+
         # 0. Compile and run baseline
         from cobol_migrate import docker_available
         bypass_baseline = not docker_available()
@@ -120,34 +123,8 @@ class NativePipeline:
 
                 # Run baseline
                 if has_sql:
-                    # Seed per-repo data into PostgreSQL before running the baseline
-                    if os.environ.get("PGHOST"):
-                        data_dir = os.path.join(self.repo, "data")
-                        if os.path.isdir(data_dir):
-                            for sql_file in os.listdir(data_dir):
-                                if sql_file.lower().endswith(".sql"):
-                                    table_name = os.path.splitext(sql_file)[0]
-                                    # Truncate table first to clear previous state
-                                    truncate_query = f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;"
-                                    try:
-                                        subprocess.run(
-                                            ["docker", "exec", "db", "psql", "-U", "modernize", "-d", "modernization_db", "-c", truncate_query],
-                                            capture_output=True, text=True, check=False
-                                        )
-                                    except Exception:
-                                        pass
-                                    # Execute seed sql
-                                    sql_path = os.path.join(data_dir, sql_file)
-                                    try:
-                                        with open(sql_path, "r", encoding="utf-8") as fh:
-                                            sql_content = fh.read()
-                                        if sql_content.strip():
-                                            subprocess.run(
-                                                ["docker", "exec", "-i", "db", "psql", "-U", "modernize", "-d", "modernization_db"],
-                                                input=sql_content, capture_output=True, text=True, check=False
-                                            )
-                                    except Exception:
-                                        pass
+                    self._seed_db()
+
                     run_cmd = (
                         "export PGHOST=db PGPORT=5432 PGUSER=modernize PGPASSWORD=modernize "
                         "PGDATABASE=modernization_db COB_PRE_LOAD=/usr/lib/libocesql.so && "
@@ -1173,6 +1150,52 @@ public class CicsTransactionContext {
         os.makedirs(self.reports_dir, exist_ok=True)
         return os.path.join(self.reports_dir, name)
 
+    def _seed_db(self):
+        # Seed per-repo data into PostgreSQL
+        if os.environ.get("PGHOST"):
+            has_sql = False
+            for root, _, files in os.walk(self.repo):
+                for file in files:
+                    if file.lower().endswith((".cob", ".cbl", ".ccp")):
+                        try:
+                            with open(os.path.join(root, file), "r", encoding="utf-8", errors="replace") as fh:
+                                if "EXEC SQL" in fh.read().upper():
+                                    has_sql = True
+                                    break
+                        except Exception:
+                            pass
+                if has_sql:
+                    break
+            
+            if has_sql:
+                pg_container = os.environ.get("PG_CONTAINER_NAME", "db")
+                data_dir = os.path.join(self.repo, "data")
+                if os.path.isdir(data_dir):
+                    self.log(f"Seeding database for repo {os.path.basename(self.repo)} using container {pg_container}...")
+                    for sql_file in os.listdir(data_dir):
+                        if sql_file.lower().endswith(".sql"):
+                            table_name = os.path.splitext(sql_file)[0]
+                            truncate_query = f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;"
+                            try:
+                                subprocess.run(
+                                    ["docker", "exec", pg_container, "psql", "-U", "modernize", "-d", "modernization_db", "-c", truncate_query],
+                                    capture_output=True, text=True, check=False, timeout=15
+                                )
+                            except Exception:
+                                pass
+                            sql_path = os.path.join(data_dir, sql_file)
+                            try:
+                                with open(sql_path, "r", encoding="utf-8") as fh:
+                                    sql_content = fh.read()
+                                if sql_content.strip():
+                                    subprocess.run(
+                                        ["docker", "exec", pg_container, "psql", "-U", "modernize", "-d", "modernization_db", "-c", sql_content],
+                                        capture_output=True, text=True, check=False, timeout=15
+                                    )
+                            except Exception:
+                                pass
+
+
     def stage_build_gate(self) -> bool:
         self.log("Building native Java project via Maven...")
         # Check if pom.xml exists
@@ -1200,6 +1223,7 @@ public class CicsTransactionContext {
 
     def stage_execute_gate(self, src: str) -> bool:
         self.log("Executing native Java program...")
+        self._seed_db()
         
         # Prepare input data. If input dataset files exist in repo under config pathways, copy them to execution input
         for assign in self.file_assigns:

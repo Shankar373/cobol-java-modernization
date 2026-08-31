@@ -9,6 +9,19 @@ def test_ksds_baseline_differential():
     """Phase 1: Real GnuCOBOL KSDS baseline vs modernized Spring Boot + PostgreSQL.
     Verifies execution parity of WRITE, READ, START, READ NEXT, REWRITE, and DELETE."""
     pg_container = os.environ.get("PG_CONTAINER_NAME", "db")
+
+    # Skip if there is no running PostgreSQL container to target.
+    probe = subprocess.run(
+        ["docker", "inspect", "--format", "{{.State.Running}}", pg_container],
+        capture_output=True, text=True, timeout=10
+    )
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        pytest.skip(
+            f"PostgreSQL container '{pg_container}' is not running — "
+            "start it with docker-compose or the CI setup steps before running this test. "
+            f"Set PG_CONTAINER_NAME env var to override (current={pg_container!r})."
+        )
+
     # Seed/Cleanup Postgres DB table for VSAM KSDS emulation
     cleanup_cmd = [
         "docker", "exec", "-i", pg_container,
@@ -18,6 +31,7 @@ def test_ksds_baseline_differential():
     subprocess.run(cleanup_cmd, check=True)
 
     repo_dir = os.path.join("tests", "repos", "ksds_baseline_01")
+
     tmp_out = tempfile.mkdtemp(prefix="ksds_baseline_")
 
     try:

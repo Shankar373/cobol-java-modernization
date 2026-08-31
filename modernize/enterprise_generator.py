@@ -81,6 +81,15 @@ class EnterpriseApplicationGenerator:
                 if f.endswith(".java"):
                     shutil.copy2(os.path.join(runtime_src, f), os.path.join(runtime_dest, f))
 
+        # Copy MockSqlService.java: generated SQL programs call
+        # MockSqlService.initialize() in their main(). The class already has a
+        # safe no-op path when PGHOST is set (real PostgreSQL) or REAL_DB2_MODE=1.
+        # It must be present for Maven compilation regardless of whether a
+        # mock_db.yaml is present in the repository.
+        mss_src = os.path.join(os.path.dirname(__file__), "java_helpers", "src", "main", "java", "com", "systema", "modernized", "MockSqlService.java")
+        if os.path.exists(mss_src):
+            shutil.copy2(mss_src, os.path.join(java_base, "MockSqlService.java"))
+
         self._write_dockerfile(dest_dir)
 
     def _check_batch_evidence(self) -> bool:

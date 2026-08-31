@@ -47,6 +47,20 @@ def test_sql_baseline_differential():
     ]
     subprocess.run(seed_cmd, check=True, timeout=30)
 
+    # Remove any stale rows that the COBOL/Java program writes during its run.
+    # The COBOL program inserts CUST_ID=102 and then deletes it at the end.
+    # If a prior run aborted mid-way, row 102 can be left behind; the next
+    # Java INSERT then fails with 23505 (duplicate key), which aborts the
+    # PostgreSQL transaction block and causes 25P02 on the subsequent UPDATE
+    # and DELETE. This cleanup is test-isolation only — COBOL and Java
+    # transaction semantics are not changed.
+    cleanup_cmd = [
+        "docker", "exec", "-i", _PG_CONTAINER,
+        "psql", "-U", "modernize", "-d", "modernization_db",
+        "-c", "DELETE FROM CUSTOMER WHERE CUST_ID = 102;",
+    ]
+    subprocess.run(cleanup_cmd, check=True, timeout=30)
+
     # Use a repository-relative path so this test is portable across OS.
     repo_dir = os.path.join("tests", "repos", "sql_baseline_01")
     tmp_out = tempfile.mkdtemp(prefix="sql_baseline_")
