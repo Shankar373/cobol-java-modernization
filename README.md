@@ -6,27 +6,38 @@ Repository-agnostic, automated COBOL to Java modernization pipeline and validati
 
 ## Production Architecture & Stages
 
-The pipeline (`cobol_migrate.py`) automates the full modernization lifecycle through **11 distinct execution stages**:
+The pipeline (`cobol_migrate.py`) automates the full modernization lifecycle through **13 distinct execution stages (0 to 12)**:
 
-1. **Ingest**: Fingerprint source repositories, calculating a SHA-256 baseline for source immutability verification.
-2. **Discover**: Walk directories to discover arbitrary COBOL programs (`.cob`/`.cbl`) and copybooks (`.cpy`). Build call graphs and physical-logical file assignment maps.
-3. **Transpile**: Invoke opensource COBOL 4J (`cobj`) inside Docker to convert COBOL to Java classes.
-4. **Collect**: Gather generated Java sources and class files, performing stub detection checks.
-5. **Preserve**: Vendor runtime jar dependencies (`libcobj.jar`).
-6. **Generate**: Assemble the complete target project, complete with a provenance manifest.
-7. **Baseline**: Run the original legacy COBOL code under GnuCOBOL to capture golden execution fixtures.
-8. **Execute**: Run the transpiled Java batch programs.
-9. **Compare**: Perform physical, logical (SQLite table parsing for indexed files), and semantic comparisons between legacy GnuCOBOL and transpiled Java outputs.
-10. **Report**: Emit a comprehensive markdown audit report.
-11. **Refactor**: Scaffold a decoupled native Spring Boot enterprise application from copybook definitions, incorporating a JPA database layer, Spring Batch chunk loader, REST APIs, and verify compilation using Maven.
+- **Stage 0 - Ingest**: Extract repositories, calculate SHA-256 signatures, and establish source immutability boundaries.
+- **Stage 1 - Discover**: Parse directory trees to discover COBOL source files (`.cob`/`.cbl`) and copybooks (`.cpy`). Map file linkages and compile the initial dependency call-graph.
+- **Stage 2 - Analyze**: Discover embeddable CICS/SQL commands, calculate scopes, and perform legacy feature categorization.
+- **Stage 3 - Baseline**: Compile and execute source COBOL code against a pinned GnuCOBOL compiler in a Docker container to record golden baselines.
+- **Stage 4 - Transpile**: Transpile raw COBOL to Java classes via opensourcecobol4j Docker (Track A).
+- **Stage 5 - Collect**: Collect Track-A Java source components and identify legacy stub imports.
+- **Stage 6 - Preserve**: Vendor runtime libraries (`libcobj.jar`) into compile directories.
+- **Stage 7 - Generate**: Assemble target native Spring Boot Project directories and provenance manifests (Track B).
+- **Stage 8 - Execute**: Run the compiled Java classes against equivalent input scopes.
+- **Stage 9 - Compare**: Run the Equivalence Engine to compare stdout/stderr and file streams byte-for-byte.
+- **Stage 10 - Refactor**: Generate clean, native Spring Boot REST APIs, Spring Batch tasklets, and JPA relational schemas (Track B).
+- **Stage 11 - Validate**: Boot up the modernized Spring Batch application against H2 and compile using Maven.
+- **Stage 12 - Package**: Build a distributable ZIP package containing the generated Spring Boot projects, baselines, and execution logs.
+
+---
+
+## Key Documentation & Architecture Matrix
+
+- **[Project Architecture & File Matrix](file:///C:/Users/bandi/.gemini/antigravity-ide/brain/4eb9e566-6b96-4279-b4ee-377cce30fdad/project_architecture_matrix.md)**: File-by-file mapping documenting role descriptions, achievements, and technical gaps.
+- **[Transformation Coverage Matrix](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/docs/transformation-coverage.md)**: Feature-by-feature mapping listing parser locations, code generator classes, and verification levels.
+- **[Test Charter & Needs Analysis](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/docs/test_charter_and_needs_analysis.md)**: Testing strategy outlining business equivalence definitions and existing test suite structure.
+- **[Platform Limitations and Gaps](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/docs/limitations_and_gaps.md)**: Thorough stage-by-stage and construct-level limitations index.
 
 ---
 
 ## Toolchain & Requirements
 
 - **Python 3.8+** (Standard Library only)
-- **Docker** (Required on the host for transpilation and container execution)
-- **Maven** (Optional on host, used for compilation verification checks)
+- **Docker** (Required on the host for GnuCOBOL/JDK isolation and parity testing)
+- **Maven** (Used for final target application compilation checks)
 
 ---
 
@@ -40,7 +51,7 @@ python ui.py
 Open `http://localhost:8787` in your browser.
 
 ### 2. Run the Pipeline from the CLI
-Run the entire 11-stage automated modernization pipeline against the local repository:
+Run the entire 13-stage automated modernization pipeline against the local repository:
 ```bash
 python cobol_migrate.py --repo legacy --out target --restart-from 0
 ```
@@ -49,6 +60,16 @@ python cobol_migrate.py --repo legacy --out target --restart-from 0
 Validate all 7 synthetic verification shape repositories (`A-PAYONLY` through `G-PAYMISSCP`) to prove correctness:
 ```bash
 python audit_engine.py --run-synthetic
+```
+
+### 4. Run the Pytest Verification Suite
+Run the full test suite comprising 36 verified tests (differential parity tests, unit tests, assignment logic):
+```bash
+python -m pytest tests/ -v
+```
+To run only differential container-parity tests:
+```bash
+python -m pytest tests/test_parity_fixtures.py -v
 ```
 
 ---
