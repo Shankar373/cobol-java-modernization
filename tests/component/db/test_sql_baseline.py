@@ -30,13 +30,20 @@ def test_sql_baseline_differential():
         )
 
     # Seed the test schema and data into the running container.
+    # NOTE: this is NON-DESTRUCTIVE. The shared `modernization_db` CUSTOMER table is
+    # created by docker/ci-seed.sql with the full column set used across the DB2 E2E
+    # repos (cust_id, cust_name, dept_id, status). We must NOT `DROP TABLE` it here:
+    # doing so would wipe dept_id/status and break every later DB2 E2E test that
+    # queries those columns (DB2LEFTJOIN01, DB2AGGREGATE01, DB2GROUPBY01).
+    # `CREATE TABLE IF NOT EXISTS` matches void when the superset already exists.
     seed_cmd = [
         "docker", "exec", "-i", _PG_CONTAINER,
         "psql", "-U", "modernize", "-d", "modernization_db",
         "-c",
-        ("DROP TABLE IF EXISTS CUSTOMER; "
-         "CREATE TABLE CUSTOMER (CUST_ID INTEGER PRIMARY KEY, CUST_NAME VARCHAR(20)); "
-         "INSERT INTO CUSTOMER VALUES (101, 'INITIAL CUSTOMER    ');"),
+        ("CREATE TABLE IF NOT EXISTS CUSTOMER "
+         "(CUST_ID INT PRIMARY KEY, CUST_NAME VARCHAR(100), DEPT_ID INT, STATUS VARCHAR(10)); "
+         "INSERT INTO CUSTOMER (CUST_ID, CUST_NAME) VALUES (101, 'INITIAL CUSTOMER    ') "
+         "ON CONFLICT (CUST_ID) DO NOTHING;"),
     ]
     subprocess.run(seed_cmd, check=True, timeout=30)
 

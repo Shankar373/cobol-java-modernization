@@ -291,18 +291,23 @@ jobs:
       # indicates a real problem and is treated as a hard failure.
       - name: Run differential smoke tests (reject any skip)
         run: |
-          OUTPUT="$(
+          # NB: `set -e` is active (GitHub adds it). A failed command substitution
+          # would normally abort the whole script and DISCARD the captured output,
+          # leaving an opaque "exit code 1" with no evidence. So we capture with
+          # `|| true` and inspect $RC ourselves, so a pytest failure still surfaces
+          # its full output before we exit non-zero.
+          OUTPUT="$( \
             python -m pytest -v --tb=short \
               tests/e2e/differential/storage/test_redefines01.py \
               tests/e2e/differential/numeric/test_sizeerr01.py \
               tests/e2e/differential/files/test_filestat01.py \
-              2>&1
-          )"
-          RC=$?
+              2>&1 \
+          )" || RC=$?
+          RC="${RC:-0}"
           echo "$OUTPUT"
 
           if [ "$RC" -ne 0 ]; then
-            echo "::error::differential-smoke: one or more core equivalence tests FAILED"
+            echo "::error::differential-smoke: one or more core equivalence tests FAILED (rc=$RC)"
             exit 1
           fi
 
