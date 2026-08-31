@@ -370,7 +370,9 @@ class NativeExpressionTranslator:
                               .replace('\n', '\\n')
                               .replace('\r', '\\r')
                               .replace('\t', '\\t'))
-            return f'"{escaped}"'
+            result = f'"{escaped}"'
+            assert result.startswith('"'), f"to_java_string_literal must return double-quoted string, got: {result}"
+            return result
 
         translated_tokens = []
         for t in tokens:

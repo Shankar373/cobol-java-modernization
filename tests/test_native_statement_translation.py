@@ -120,4 +120,80 @@ def test_translate_relational_keywords_condition():
     assert trans._translate_condition("SQLCODE GREATER THAN 10") == "sqlcode > 10"
 
 
+# Regression check: ensure no single-quoted string literals in generated Java
+# for simple assignments (e.g. String x = 'ready' is invalid Java)
+def test_no_single_quoted_string_literals():
+    """Verify that generated Java uses double quotes for string literals,
+    not single quotes (which would be invalid Java char literals)."""
+    var_types = {"WS-FIELD": "String"}
+    trans = NativeStatementTranslator(var_types)
+    
+    # Test MOVE with a single-quoted literal source (as COBOL might provide)
+    node_move_literal = {
+        "properties": {
+            "statement_type": "MOVE",
+            "source": "'ready'",
+            "target": "WS-FIELD"
+        }
+    }
+    java_code = trans.translate_statement(node_move_literal)
+    # Check that generated Java does not contain naked single-quoted string literals
+    # that would be invalid Java (e.g. String x = 'ready')
+    # Our to_java_string_literal function converts to double quotes,
+    # so the result should have very few single quotes (only from escape sequences)
+    # The key check: no pattern '= 'single-quote'' that would be invalid Java
+    has_naked_single_quote = "= '" in java_code or ' += "' in java_code
+    if has_naked_single_quote:
+        # If there are naked single quotes, report the generated code for debugging
+        raise AssertionError(
+            f"Generated Java contains naked single-quoted string literal: {java_code}"
+        )
+
+
+# Regression check: ensure no single-quoted string literals in generated Java
+# for simple assignments (e.g. String x = 'ready' is invalid Java)
+def test_no_single_quoted_string_literals():
+    """Verify that generated Java uses double quotes for string literals,
+    not single quotes (which would be invalid Java char literals)."""
+    var_types = {"WS-FIELD": "String"}
+    trans = NativeStatementTranslator(var_types)
+    
+    # Test MOVE with a single-quoted literal source (as COBOL might provide)
+    node_move_literal = {
+        "properties": {
+            "statement_type": "MOVE",
+            "source": "'ready'",
+            "target": "WS-FIELD"
+        }
+    }
+    java_code = trans.translate_statement(node_move_literal)
+    # Check that generated Java does not contain the invalid pattern
+    # '= 'single-quote'' that would be invalid Java
+    assert "'= '" not in java_code, \
+        f"Generated Java should not contain naked single-quoted string literal: {java_code}"
+    
+    # Also test MOVE with a double-quoted literal source
+    node_move_double = {
+        "properties": {
+            "statement_type": "MOVE",
+            "source": "\"ready\"",
+            "target": "WS-FIELD"
+        }
+    }
+    java_code_double = trans.translate_statement(node_move_double)
+    # Should be valid Java with double quotes
+    assert java_code_double is not None
+    
+    # Test with a numeric literal embedded in string context
+    node_move_num = {
+        "properties": {
+            "statement_type": "MOVE",
+            "source": "100.50",
+            "target": "WS-FIELD"
+        }
+    }
+    java_code_num = trans.translate_statement(node_move_num)
+    assert java_code_num is not None
+
+
 

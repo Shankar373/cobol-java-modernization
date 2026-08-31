@@ -43,3 +43,9 @@ generated/
 
 # Preprocessed shadow tree — regenerated deterministically by preprocess_cobol_for_cobj()
 legacy/_preprocessed/
+
+# Local test artifacts and logs
+artifacts/
+run_*.log
+someout/
+temp_testdisp*
