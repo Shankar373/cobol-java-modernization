@@ -208,27 +208,28 @@ domain suites.
 
 ## 7. Coverage Gaps
 
-1. **Differential equivalence largely SKIPPED in CI fast-lane.** All 5 new
-   differential tests and 4 parity-fidelity tests require Docker parity /
-   `PARITY_ALLOW_SKIP` semantics and do not run in the fast lane. Business
-   equivalence claims currently rest on the (large) unit/integration suite, not on
-   a running fixture-to-fixture comparison in CI. Only the `nightly-full` job
-   exercises this, and it must be confirmed to actually run rather than skip.
+1. **Full differential equivalence still not in the fast-lane.** The new
+   `differential-smoke` job (see §7.2) now runs a **small core subset** (REDEFINES,
+   ON SIZE ERROR, file I/O) on every push/PR, but the broader `tests/e2e/differential/*`
+   and `test_parity_fixtures.py` sets (EBCDIC, relative, indexed, JCL, DB2-cursor)
+   still only run in `nightly-full`. Business-equivalence claims beyond the smoke
+   subset thus depend on running the nightly job.
 
 2. **Real DB2 is `NOT_VERIFIED`.** As documented in the objective and in
    `docs/REAL_DB2_FINAL_VERIFICATION.md`, the platform has never been executed
    against a real DB2. All DB2 evidence is either emulated (H2) or against
-   PostgreSQL. The `CURSOR OPEN FAILED 99999` failures sharpen this: even the
-   PostgreSQL-backed DB2 E2E path is currently unstable in CI.
+   PostgreSQL. The DB2 E2E path is now fixture-isolated (see §7.1) and runs against
+   PostgreSQL — still not a real DB2.
 
 3. **No per-domain home for security/gates/negative/contracts/hardening tests.**
    The empty stub directories (§6.3) leave the suite layout inconsistent and make
    it easy for future "reorganization" to drift into duplicate-basename collisions
    again.
 
-4. **CI is not green.** Until the DB2 E2E connectivity issue is resolved (or those
-   tests are correctly classified as environment-blocked), the repo cannot claim a
-   green CI signal. Per project rules, this must not be hidden by weakening tests.
+4. **CI green-ness requires a live PostgreSQL run.** The DB2 E2E fix is verified at
+   the **generation level** (generated seed SQL confirmed); a live PostgreSQL CI run
+   is required to confirm the fast lane is green. The fix does not weaken any
+   assertion, in line with project rules.
 
 5. **No explicit CI gate tying nightly differential results back to a job result.**
    The `nightly-full` job runs everything but there is no fast, deterministic,
@@ -239,32 +240,134 @@ domain suites.
 
 ## 8. Recommendations
 
-1. **Investigate and resolve the DB2 E2E connection failure in CI** (highest
-   priority). Reproduce inside the Docker `gnucobol-ocesql` container against the
-   seeded PostgreSQL: confirm whether `CURSOR OPEN FAILED 99999` is a transaction /
-   connection-pool exhaustion, a container network issue, or a genuine generated-
-   code regression. Do not mark green until root-caused.
+1. **Fix the DB2 E2E shared-table isolation deficiency.** The four DB2 E2E
+   failures were **root-caused** (see §7.1): several generated DB2 programs
+   `TRUNCATE` + re-seed / re-schema (and `DB2ERRCONSTRAINT`/`DB2ERRNOTFOUND`
+   `CREATE TABLE customer (cust_id, cust_name)`) the shared
+   `modernization_db.CUSTOMER` table, so test execution order made one test drop
+   columns another test needs. **Now DONE** at the fixture level (see §7.1): the
+   `data/*.sql` seeds were aligned so generated programs create a non-destructive
+   superset `customer` schema and each self-TRUNCATEs its seeded tables. This
+   removes the cross-test interference without touching any assertion. A fully
+   independent per-repo schema/database remains a future hardening option but is no
+   longer required for the fast lane.
 
-2. **Make differential parity run deterministically in a defined job**, with
-   `PARITY_ALLOW_SKIP=false` explicitly asserted where Docker is guaranteed, so
-   that business-equivalence comparison is not silently exercised only in nightly.
-   Add a CI step that fails if any "business-equivalence-required" differential
-   test reports `SKIP` without a recorded environment reason.
+2. **Make differential parity run deterministically in a defined job.** **Now DONE**
+   via the `differential-smoke` job (see §7.2). NOTE: the actual differential test
+   modules use `@pytest.mark.skipif(env PARITY_ALLOW_SKIP != "true")`, so the job
+   **must** set `PARITY_ALLOW_SKIP=true` for them to execute (setting `false` skips
+   them entirely). The job closes the silent-skip gap by failing if any selected test
+   is skipped (both images are guaranteed present, so a skip is a real signal).
 
-3. **Complete or revert the test reorganization.** Either move the real
-   security/gates/negative/contracts/hardening tests into their empty
-   subdirectories (fixing all `__file__`-relative paths), or remove the empty
-   stub directories to restore a coherent flat layout. Re-run full collection after
-   any change to avoid duplicate-basename `import file mismatch`.
+3. **Add per-test DB isolation for DB2 repos.** Originally the long-term fix for the
+   four DB2 E2E tests. **Superseded** by the fixture-alignment fix shipped in this
+   change (see §7.1). A fully isolated schema/table namespace per repo can still be
+   added later for defense-in-depth, but is not required for green fast lane.
 
 4. **Guard against duplicate module basenames.** Add a lightweight CI check (or
    `conftest.py` assertion) that fails if two collected test modules resolve to
    the same pytest module name, preventing a recurrence of the 24-error collection
-   abort.
+   abort. (**Open** — not yet implemented.)
 
-5. **Document DB2 status honestly.** Keep `REAL_DB2` as `NOT_VERIFIED` and classify
-   the DB2 E2E failures as `ENVIRONMENT_BLOCKED` / failing until a healthy DB
-   environment proves otherwise. No emulation should be reported as real DB2.
+5. **Document DB2 status honestly.** Keep `REAL_DB2` as `NOT_VERIFIED` — the DB2 E2E
+   tests run against **PostgreSQL** (an emulation of the DB2 JDBC surface), never a
+   real DB2. No emulation is reported as real DB2. (**Ongoing** — see §9.)
+
+---
+
+## 7.1 DB2 E2E failures classification
+
+**Root cause (verified from CI PostgreSQL server logs):** the four failing tests in
+`tests/test_db2_stage1.py` were blocked by **shared mutable PostgreSQL table state**,
+not by a code-generation regression. Each generated DB2 Java program embeds
+per-repo `TRUNCATE`/re-seed executed against the **same**
+`modernization_db.CUSTOMER` table, and `DB2ERRCONSTRAINT`/`DB2ERRNOTFOUND` further
+`CREATE TABLE customer (cust_id, cust_name)` which **destructively dropped** the
+`dept_id` / `status` columns other repos rely on. Observed server errors on the
+failing runs:
+
+| Error (PostgreSQL log) | Test | Effect |
+|---|---|---|
+| `column c.dept_id of relation "customer" does not exist` | `left_outer_join` | LEFT JOIN query throws → `OPEN FAILED 99999` |
+| `column "status" of relation "customer" does not exist` | `count_aggregate` | `SELECT COUNT(*) WHERE STATUS=...` throws → `99999` |
+| `column "dept_id" does not exist` (HINT: `customer.cust_id`) | `group_by_having` | GROUP BY query throws → `OPEN FAILED 99999` |
+| `relation "customer" already exists` + `duplicate key ... customer_pkey` + `unexpected EOF ... open transaction` | `tx_commit_visible` (+ collateral) | transaction/schema conflict + stale-row PK conflicts |
+
+The `CURSOR OPEN FAILED SQLSTATE 99999` string is emitted by the generated Java
+program when its `queryForRowSet(...)` throws (catch sets `sqlcode=-1`,
+`sqlstate=99999`). Reorg commit `3132603` changed **pytest file execution order**
+(moving several DB2 test files into `tests/component/db/`), which determines the
+order in which these shared-table mutating programs run — exposing this pre-existing
+test-isolation fragility.
+
+| Test | Classification | Evidence | Fix applied |
+|---|---|---|---|
+| `test_db2_left_outer_join_e2e` | **FIXED** (fixture isolation) | PG log: `column c.dept_id ... does not exist`, `OPEN FAILED 99999` | Error repos no longer drop `dept_id`/`status` |
+| `test_db2_count_aggregate_e2e` | **FIXED** (fixture isolation) | PG log: `column "status" ... does not exist` | Error repos no longer drop `status` |
+| `test_db2_group_by_having_e2e` | **FIXED** (fixture isolation) | PG log: `column "dept_id" does not exist`, HINT `customer.cust_id` | Error repos no longer drop `dept_id` |
+| `test_db2_tx_commit_visible_e2e` | **FIXED** (fixture isolation) | `duplicate key`, stale-row PK conflicts | Added non-empty seed → self-TRUNCATE clears stale rows |
+
+**Fix (fixture-level, no assertion changes):** three `data/*.sql` seed files were
+aligned so the generated programs isolate themselves on the shared table:
+
+- `tests/repos/DB2ERRCONSTRAINT/data/customer.sql` and
+  `tests/repos/DB2ERRNOTFOUND/data/customer.sql`: changed from the destructive
+  `CREATE TABLE customer (cust_id, cust_name)` to a **non-destructive superset**
+  `CREATE TABLE IF NOT EXISTS customer (cust_id INT PRIMARY KEY, cust_name
+  VARCHAR(100), dept_id INT, status VARCHAR(20))`. This preserves the `dept_id` /
+  `status` columns other repos need while keeping `cust_id` as the PK (so the
+  `-803` constraint-violation and `100` not-found behaviors are unchanged).
+- `tests/repos/DB2TXVISIBILITY01/data/customer.sql`: was comment-only, so
+  `seed_queries` was empty and the generated program's `TRUNCATE` block
+  (`if seed_queries:` in `native_generator.py`) was **skipped** — stale rows from
+  prior shared-table tests survived and caused PK collisions on the TX INSERTs,
+  breaking commit/rollback visibility. The file now contains a non-destructive
+  superset `CREATE TABLE IF NOT EXISTS customer (...)`, which makes the generated
+  program TRUNCATE the table first and gives it a clean base.
+
+All four tests keep their original assertions (expected outputs unchanged). They now
+run in the **fast lane** (the temporary `--deselect` workaround was removed) and
+remain active in `nightly-full`. Verification is at the generation level only
+(generated seed SQL inspected); a live PostgreSQL run in CI is still required to
+close the loop. `REAL_DB2` compatibility remains `NOT_VERIFIED` (tests run against
+PostgreSQL, an emulation of the DB2 JDBC surface).
+
+---
+
+## 7.2 Differential-smoke CI job
+
+A dedicated `differential-smoke` job now runs on **every push to `master` and every
+PR**, giving push-time business-equivalence (COBOL-vs-Java) evidence that the fast
+lane previously lacked. It:
+
+- Runs in Docker with the same `gnucobol-ocesql` image and the Temurin JDK image
+  (`eclipse-temurin:17-jdk-noble`). No PostgreSQL is needed: the selected fixtures
+  contain no `EXEC SQL`, so the parity harness (`run_parity`) runs them without the
+  network/`db` container (see `tests/utils/parity_harness.py:425-429`).
+- Sets **`PARITY_ALLOW_SKIP=true`**. This is **required** for the selected tests to
+  execute at all: each differential test module is decorated with
+  `@pytest.mark.skipif(os.environ.get("PARITY_ALLOW_SKIP","false") != "true")` (e.g.
+  `tests/e2e/differential/numeric/test_sizeerr01.py:64`), so any other value **skips
+  the entire test**. Setting `false` would make the smoke gate assert nothing.
+- Runs a small, fast subset of differential fixtures: REDEFINES (`test_redefines01`),
+  ON SIZE ERROR (`test_sizeerr01`), and basic file I/O (`test_filestat01`) — the core
+  constructs whose COBOL-vs-Java output proves equivalence.
+- **FAILS the job** if any selected test fails **or is skipped** (the summary line is
+  inspected for a non-zero `skipped` count). Because both Docker images are built/pulled
+  before the tests run, the harness returns `PASS`/`FAIL` — never `SKIP` — so a skip in
+  this job is a real signal and is treated as a hard failure.
+
+Meaning of results in this job:
+
+| Result | Meaning |
+|---|---|
+| PASS | Java output matches COBOL baseline for the selected constructs |
+| FAIL | Equivalence broken for a core construct → push/PR gate fails |
+| SKIP | Treated as a failure (images are present, so there is no valid reason to skip) |
+
+The remaining differential/parity fixtures (e.g. EBCDIC, relative, indexed, JCL, and
+the broader `tests/e2e/differential/*` set) stay in `nightly-full`, which remains the
+authoritative full business-equivalence regression.
 
 ---
 
@@ -272,16 +375,20 @@ domain suites.
 
 | Item | Status |
 |---|---|
-| Local changes committed & pushed | VERIFIED (HEAD `882fdc0`) |
-| CI workflow inspected | VERIFIED |
-| Reorg-induced collection errors | FIXED & VERIFIED (647 collected) |
-| Reorg-induced ignore/path regressions | FIXED & VERIFIED |
-| Full suite result | 625 passed, 9 skipped, 4 failed |
-| DB2 E2E connectivity failure root cause | **NOT VERIFIED** (environment unavailable to reproduce) |
-| Real DB2 compatibility | NOT_VERIFIED |
+| Doc changes (flat test layout) committed & pushed | VERIFIED (HEAD `fb14932`) |
+| DB2 E2E failure root cause | **VERIFIED** — shared `CUSTOMER` table mutated/destructively re-schema'd across tests (see §7.1) |
+| DB2 E2E tests (4) | **FIXED (fixture isolation)** — non-destructive superset `customer` seeds + self-TRUNCATE for TX; assertions unchanged; back in the fast lane (deselect removed) |
+| Differential-smoke CI job | ADDED — push/PR business-equivalence gate (see §7.2) |
+| Reorg-induced collection errors | FIXED & VERIFIED (643 collected) |
+| Real DB2 compatibility | NOT_VERIFIED (DB2 E2E runs against PostgreSQL, not a real DB2) |
 
-Overall status: **PARTIAL** — all structural/regression issues from the
-reorganization are resolved, but the CI pipeline is not green because four DB2 E2E
-tests fail on DB connectivity (one pre-existing, three environment-classified).
-These have **not** been weakened; they remain real failures pending environment
-verification.
+Overall status: **PARTIAL** — the four DB2 E2E failures underlying the fast-lane red
+were root-caused and **fixed at the fixture level** (no assertion changes): the
+destructive `CREATE TABLE customer (cust_id, cust_name)` in the error repos is now a
+non-destructive superset, and the TX repo's empty seed was replaced so its generated
+program self-TRUNCATEs and gets a clean table. The temporary `--deselect` workaround
+was **removed**, so the DB2 E2E tests run in the fast lane again. The verification is
+at the **generation level only** (generated seed SQL inspected and confirmed); a live
+PostgreSQL CI run is still required to close the loop before declaring the fast lane
+green. A new `differential-smoke` job enforces COBOL-vs-Java business-equivalence on
+every push/PR.

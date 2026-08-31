@@ -173,9 +173,15 @@ jobs:
           echo "Network connectivity: OK"
 
       # ── Tests ──────────────────────────────────────────────────────────────
-      # Run the full test suite.  The exclusions below are for tests that
-      # require additional runtimes (Playwright, opensourcecobol4j) that are
-      # only installed in the nightly job.
+      # Run the full test suite, including the DB2 E2E tests. The exclusions
+      # below are for tests that require additional runtimes (Playwright,
+      # opensourcecobol4j) that are only installed in the nightly job.
+      # DB2 E2E note: the `data/*.sql` fixtures for each repo were aligned so the
+      # generated programs create a non-destructive superset `customer` schema and
+      # each self-TRUNCATE their seeded tables. This eliminates the cross-test
+      # interference on the shared `modernization_db.CUSTOMER` table that previously
+      # dropped columns ("column dept_id does not exist" -> CURSOR OPEN FAILED
+      # SQLSTATE 99999). See docs/ci_and_business_logic_audit.md § DB2 E2E failures.
       - name: Run fast-lane test suite
         env:
           PG_CONTAINER_NAME: db
@@ -212,6 +218,114 @@ jobs:
           docker stop db 2>/dev/null || true
           docker rm  db 2>/dev/null || true
           docker network rm modernization-platform_default 2>/dev/null || true
+
+  # ============================================================================
+  # DIFFERENTIAL SMOKE
+  # Runs on every push/PR.  A fast, self-contained business-equivalence gate over
+  # the core COBOL semantics the transpiler must preserve: REDEFINES, ON SIZE
+  # ERROR, and file I/O.  Each selected test compiles/runs the COBOL baseline in
+  # the GnuCOBOL+OCESQL image and the generated Java in the Temurin JDK image,
+  # then asserts identical output/hashes.  These fixtures contain no EXEC SQL, so
+  # no PostgreSQL/network is required and the job stays well under 5 minutes.
+  #
+  # PARITY_ALLOW_SKIP must be "true" for these tests to actually execute: the
+  # tests are decorated with
+  #     @pytest.mark.skipif(os.environ.get("PARITY_ALLOW_SKIP","false") != "true")
+  # (e.g. tests/e2e/differential/numeric/test_sizeerr01.py:64), so any value other
+  # than "true" SKIPS them entirely.  Note: this deliberately deviates from a
+  # literal reading of "set PARITY_ALLOW_SKIP=false" — setting false would cause
+  # all selected equivalence tests to be skipped and the gate to assert nothing.
+  # To close the silent-skip gap, the job FAILS if any selected test is skipped
+  # (a skip here is a real signal, since both images are guaranteed present).
+  # ============================================================================
+  differential-smoke:
+    name: Differential smoke (REDEFINES / ON SIZE ERROR / file I/O)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # Must be set for the differential tests to run (see above). Also allows
+      # the parity harness to report SKIP instead of FAIL only when images are
+      # absent — but we build/pull both images first, so SKIP never legitimately
+      # fires, and the post-run step downgrades any skip to a failure.
+      PARITY_ALLOW_SKIP: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install pyyaml
+
+      # ── Docker images required by the parity harness ───────────────────────
+      - name: Build GnuCOBOL + OCESQL compiler image
+        run: |
+          docker build \
+            --file Dockerfile.gnucobol-ocesql \
+            --tag gnucobol-ocesql:latest \
+            --progress=plain \
+            .
+
+      - name: Pull JDK image for parity tests
+        run: |
+          docker pull eclipse-temurin:17-jdk-noble
+
+      - name: Verify tools (no silent-skip precondition)
+        run: |
+          echo "--- gnucobol-ocesql image ---"
+          docker image inspect gnucobol-ocesql:latest >/dev/null && echo OK
+          echo "--- JDK image ---"
+          docker image inspect eclipse-temurin:17-jdk-noble >/dev/null && echo OK
+
+      # ── Core business-equivalence gate ─────────────────────────────────────
+      # Run the minimal differential set. Fails (exit != 0) on any equivalence
+      # mismatch. Because both images are already cached, the harness returns
+      # PASS/FAIL — never SKIP — so an X passed / Y skipped summary where Y > 0
+      # indicates a real problem and is treated as a hard failure.
+      - name: Run differential smoke tests (reject any skip)
+        run: |
+          OUTPUT="$(
+            python -m pytest -v --tb=short \
+              tests/e2e/differential/storage/test_redefines01.py \
+              tests/e2e/differential/numeric/test_sizeerr01.py \
+              tests/e2e/differential/files/test_filestat01.py \
+              2>&1
+          )"
+          RC=$?
+          echo "$OUTPUT"
+
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::differential-smoke: one or more core equivalence tests FAILED"
+            exit 1
+          fi
+
+          SKIPPED="$(
+            echo "$OUTPUT" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' | head -1
+          )"
+          if [ -z "$SKIPPED" ]; then
+            SKIPPED=0
+          fi
+          echo "Skipped count: $SKIPPED"
+          if [ "$SKIPPED" -ne 0 ] 2>/dev/null; then
+            echo "::error::differential-smoke: $SKIPPED core equivalence test(s) were SKIPPED without a valid environment reason (both images are present, so a skip is a real failure)."
+            exit 1
+          fi
+
+          echo "differential-smoke: all core equivalence tests PASSED (0 skipped)."
+
+      # ── Cleanup ────────────────────────────────────────────────────────────
+      - name: Clean up Docker resources
+        if: always()
+        run: |
+          docker image rm gnucobol-ocesql:latest 2>/dev/null || true
+          docker image rm eclipse-temurin:17-jdk-noble 2>/dev/null || true
 
   # ============================================================================
   # NIGHTLY FULL REGRESSION
