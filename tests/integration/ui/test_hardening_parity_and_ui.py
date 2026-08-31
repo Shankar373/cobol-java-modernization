@@ -66,8 +66,8 @@ def test_resolvers_agree_on_extension_handling(tmp_path, fname):
 # UI XSS regression (static contract on ui.html)
 # ---------------------------------------------------------------------------
 
-UI_HTML = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui.html")
+UI_HTML = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "ui.html"))
 
 
 def _ui_src():
