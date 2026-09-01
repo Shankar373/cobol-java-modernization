@@ -1,7 +1,7 @@
 {
   "scorecard_version": "2.0.0",
-  "workload": "SIMPLEBASELINE01",
-  "evaluation_timestamp_utc": "2026-09-01T16:00:34.577039+00:00",
+  "workload": "CICSREST01",
+  "evaluation_timestamp_utc": "2026-09-01T15:52:55.015187+00:00",
   "certification_verdict": "UNPROVEN",
   "certification_grade": "UNPROVEN",
   "total_score": 20,
@@ -38,47 +38,41 @@
       "verdict": "UNPROVEN",
       "score": 5,
       "details": {
-        "workload": "SIMPLEBASELINE01",
-        "program": "SIMPLEBASELINE01",
-        "source": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\tests\\repos\\SIMPLEBASELINE01\\src\\SIMPLEBASELINE01.cob",
-        "generated_java": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\verification\\SIMPLEBASELINE01\\native",
-        "timestamp_utc": "2026-09-01T16:00:32.271335+00:00",
-        "overall_verdict": "PASS",
-        "business_equivalence": "PASS",
-        "total_duration_ms": 35228.966,
+        "workload": "CICSREST01",
+        "program": "CICSREST01",
+        "source": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\tests\\repos\\CICSREST01\\src\\CICSREST01.cob",
+        "generated_java": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\verification\\CICSREST01\\native",
+        "timestamp_utc": "2026-09-01T15:52:52.835422+00:00",
+        "overall_verdict": "FAIL",
+        "business_equivalence": "FAIL",
+        "total_duration_ms": 35631.342,
         "jdk": "javac 25.0.3",
         "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
         "conversion": "PASS",
         "compilation": "PASS",
-        "cobol_runtime": "PASS",
-        "java_runtime": "PASS",
-        "cobol_exit_code": 0,
+        "cobol_runtime": "UNPROVEN",
+        "java_runtime": "FAIL",
+        "cobol_exit_code": -1,
         "java_exit_code": 0,
-        "cobol_stdout": "SIMPLEBASELINE01 START\nADD RESULT: 00075\nCOMPUTE RESULT: 01260\nSIMPLEBASELINE01 END\n",
-        "java_stdout": "SIMPLEBASELINE01 START\nADD RESULT: 00075\nCOMPUTE RESULT: 01260\nSIMPLEBASELINE01 END\n",
-        "stdout_comparison": "MATCH",
+        "cobol_stdout": "",
+        "java_stdout": "CICS RECEIVE MAP: INPUTMAP MAPSET: MSET OPTIONS: {}\nRECEIVED INPUT:           \nCICS SEND MAP: OUTMAP MAPSET: MSET DATA: INITIALVAL OPTIONS: {}\n",
+        "stdout_comparison": "MISMATCH",
         "stderr_comparison": "MATCH",
-        "file_comparison": [
-          {
-            "file": "out.dat",
-            "legacy_sha256": "8bee67331dce5433a2e3a62f82981c90993bd819f29e4e078f7af055565dc17a",
-            "java_sha256": "de5f7f3f99df1f4fe1cc1576cd674aedb2d229cb5ab3a3443b19d498eeaa5958",
-            "match": true,
-            "size_bytes": 22
-          }
-        ],
+        "file_comparison": [],
         "database_comparison": {
           "status": "NOT_APPLICABLE",
           "details": "No SQL embedded in workload."
         },
         "unsupported_constructs": [],
-        "warnings": [],
+        "warnings": [
+          "CICS transaction executed under compatibility runtime (Real IBM CICS unproven)."
+        ],
         "errors": [],
         "step_results": {
           "step1_conversion": {
             "status": "PASS",
-            "duration_ms": 180.898,
-            "selected_src": "SIMPLEBASELINE01.cob",
+            "duration_ms": 54.586999999999996,
+            "selected_src": "CICSREST01.cob",
             "generated_files": [
               "CicsProgramRegistry.java",
               "CicsTransactionContext.java",
@@ -86,9 +80,10 @@
               "CobolRef.java",
               "Db2Verify.java",
               "JclExecutionContext.java",
+              "Cicsrest01.java",
               "Idcams.java",
               "Iebgener.java",
-              "Simplebaseline01.java",
+              "Linkprog.java",
               "Sort.java",
               "AssignResult.java",
               "CobolArithmetic.java",
@@ -101,40 +96,40 @@
               "SizeErrorPolicy.java",
               "UnsupportedPrecisionException.java"
             ],
-            "file_count": 20
+            "file_count": 21
           },
           "step2_compilation": {
             "status": "PASS",
-            "duration_ms": 14646.743,
-            "compiled_classes": 23,
+            "duration_ms": 16421.399,
+            "compiled_classes": 25,
             "jdk": "javac 25.0.3",
             "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)"
           },
           "step3_cobol_execution": {
-            "status": "PASS",
-            "mode": "REAL_GNUCOBOL_DOCKER",
-            "duration_ms": 3242.419,
-            "exit_code": 0,
-            "image": "gnucobol-ocesql:latest"
+            "status": "UNPROVEN",
+            "duration_ms": 2711.734,
+            "warning": "No GnuCOBOL baseline available"
           },
           "step4_comparison": {
-            "status": "PASS",
-            "gate_result": "PASS",
+            "status": "FAIL",
+            "gate_result": "UNVERIFIED",
             "diff_details": {
-              "stdout_match": true,
+              "stdout_match": false,
               "stderr_match": true,
-              "exit_code_match": true,
+              "exit_code_match": false,
               "file_records_match": true,
               "database_state_match": true,
-              "baseline_bytes": 84,
-              "java_bytes": 84
+              "baseline_bytes": 0,
+              "java_bytes": 143
             },
-            "duration_ms": 13658.525
+            "duration_ms": 13815.493
           }
         },
-        "manifest_sha256": "5b18ee90d8000b2b615a3c8bf69334caa09cedfae9cabd4b3c5912f0543fd31f"
+        "manifest_sha256": "66eb10d8211bb41e859fe53df4300534aa2126dac55608c5bc9942e81c334179"
       },
-      "warnings": [],
+      "warnings": [
+        "CICS transaction executed under compatibility runtime (Real IBM CICS unproven)."
+      ],
       "errors": []
     },
     "tier_5": {

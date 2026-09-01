@@ -1,7 +1,7 @@
-# Certification Scorecard: SIMPLEBASELINE01
+# Certification Scorecard: DB2SELECT01
 
 **Verdict:** `UNPROVEN` | **Grade:** `UNPROVEN` | **Score:** `20/100`  
-**Evaluation UTC:** `2026-09-01T16:00:34.577039+00:00`  
+**Evaluation UTC:** `2026-09-01T16:02:26.644334+00:00`  
 
 ---
 

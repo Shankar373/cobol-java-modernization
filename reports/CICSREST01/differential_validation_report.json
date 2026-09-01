@@ -1,0 +1,90 @@
+{
+  "workload": "CICSREST01",
+  "program": "CICSREST01",
+  "source": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\tests\\repos\\CICSREST01\\src\\CICSREST01.cob",
+  "generated_java": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\verification\\CICSREST01\\native",
+  "timestamp_utc": "2026-09-01T15:52:52.835422+00:00",
+  "overall_verdict": "FAIL",
+  "business_equivalence": "FAIL",
+  "total_duration_ms": 35631.342,
+  "jdk": "javac 25.0.3",
+  "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
+  "conversion": "PASS",
+  "compilation": "PASS",
+  "cobol_runtime": "UNPROVEN",
+  "java_runtime": "FAIL",
+  "cobol_exit_code": -1,
+  "java_exit_code": 0,
+  "cobol_stdout": "",
+  "java_stdout": "CICS RECEIVE MAP: INPUTMAP MAPSET: MSET OPTIONS: {}\nRECEIVED INPUT:           \nCICS SEND MAP: OUTMAP MAPSET: MSET DATA: INITIALVAL OPTIONS: {}\n",
+  "stdout_comparison": "MISMATCH",
+  "stderr_comparison": "MATCH",
+  "file_comparison": [],
+  "database_comparison": {
+    "status": "NOT_APPLICABLE",
+    "details": "No SQL embedded in workload."
+  },
+  "unsupported_constructs": [],
+  "warnings": [
+    "CICS transaction executed under compatibility runtime (Real IBM CICS unproven)."
+  ],
+  "errors": [],
+  "step_results": {
+    "step1_conversion": {
+      "status": "PASS",
+      "duration_ms": 54.586999999999996,
+      "selected_src": "CICSREST01.cob",
+      "generated_files": [
+        "CicsProgramRegistry.java",
+        "CicsTransactionContext.java",
+        "CobolFormatHelper.java",
+        "CobolRef.java",
+        "Db2Verify.java",
+        "JclExecutionContext.java",
+        "Cicsrest01.java",
+        "Idcams.java",
+        "Iebgener.java",
+        "Linkprog.java",
+        "Sort.java",
+        "AssignResult.java",
+        "CobolArithmetic.java",
+        "CobolNumeric.java",
+        "CobolNumericSpec.java",
+        "CobolRoundingMode.java",
+        "CobolSignPosition.java",
+        "CobolUsage.java",
+        "ProhibitedRoundingException.java",
+        "SizeErrorPolicy.java",
+        "UnsupportedPrecisionException.java"
+      ],
+      "file_count": 21
+    },
+    "step2_compilation": {
+      "status": "PASS",
+      "duration_ms": 16421.399,
+      "compiled_classes": 25,
+      "jdk": "javac 25.0.3",
+      "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)"
+    },
+    "step3_cobol_execution": {
+      "status": "UNPROVEN",
+      "duration_ms": 2711.734,
+      "warning": "No GnuCOBOL baseline available"
+    },
+    "step4_comparison": {
+      "status": "FAIL",
+      "gate_result": "UNVERIFIED",
+      "diff_details": {
+        "stdout_match": false,
+        "stderr_match": true,
+        "exit_code_match": false,
+        "file_records_match": true,
+        "database_state_match": true,
+        "baseline_bytes": 0,
+        "java_bytes": 143
+      },
+      "duration_ms": 13815.493
+    }
+  },
+  "manifest_sha256": "66eb10d8211bb41e859fe53df4300534aa2126dac55608c5bc9942e81c334179"
+}

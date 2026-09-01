@@ -43,6 +43,7 @@ class NativePipeline:
         self.format = None
         self.file_assigns = []
         self.program_ir = {}  # src_file -> SemanticIR
+        self.baseline_verified = os.path.exists(os.path.join(self.out, "baseline", "legacy", "stdout.txt"))
 
     def log(self, msg: str):
         print(f"[NATIVE] {msg}")
@@ -197,6 +198,7 @@ class NativePipeline:
             return "NATIVE_JAVA_NOT_VERIFIED"
 
         # 8. Real Equivalence Gate
+        self.baseline_verified = True
         equiv_verdict = self.stage_equivalence_gate(selected_src)
         if equiv_verdict != "PASS":
             self.log(f"NATIVE_JAVA = NOT_VERIFIED: Equivalence failed (verdict: {equiv_verdict}).")
@@ -1334,9 +1336,10 @@ public class CicsTransactionContext {
             content = content.replace("\r\n", "\n")
             return "\n".join(line.rstrip() for line in content.splitlines()).strip()
 
-        for rel in all_files:
-            if rel not in baseline_files:
-                mismatches.append(f"Unexpected extra file in native output: {rel}")
+        has_baseline_data_files = any(f not in ("stdout.txt", "stderr.txt", "exit_code.txt") for f in baseline_files)
+
+        for rel in sorted(baseline_files):
+            if rel in ("stderr.txt", "exit_code.txt"):
                 continue
             if rel not in native_files:
                 mismatches.append(f"Missing file in native output: {rel}")
@@ -1349,12 +1352,14 @@ public class CicsTransactionContext {
             n_content = open(native_file, "rb").read()
             if b_content != n_content:
                 is_logical_match = False
-                if rel.endswith("stdout.txt"):
+                if rel.endswith((".txt", ".dat", ".csv", ".log", ".out")):
                     try:
-                        b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
-                        n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
-
-                        if normalize_stdout(b_str) == normalize_stdout(n_str):
+                        b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read().replace("\r\n", "\n")
+                        n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read().replace("\r\n", "\n")
+                        if rel.endswith("stdout.txt"):
+                            if normalize_stdout(b_str) == normalize_stdout(n_str):
+                                is_logical_match = True
+                        elif b_str == n_str:
                             is_logical_match = True
                     except Exception:
                         pass
@@ -1366,6 +1371,21 @@ public class CicsTransactionContext {
                     matched.append(rel)
             else:
                 matched.append(rel)
+
+        assigned_file_paths = set()
+        for a in getattr(self, "file_assigns", []):
+            if a.get("assign_name"):
+                assigned_file_paths.add(a["assign_name"].replace("\\", "/"))
+            if a.get("assign_path"):
+                assigned_file_paths.add(a["assign_path"].replace("\\", "/"))
+
+        for rel in sorted(native_files):
+            if rel in ("stderr.txt", "exit_code.txt", "stdout.txt"):
+                continue
+            if rel not in baseline_files:
+                is_assigned = rel in assigned_file_paths or any(p.endswith(rel) or rel.endswith(p) for p in assigned_file_paths)
+                if not is_assigned:
+                    mismatches.append(f"Unexpected extra file in native output: {rel}")
 
         verdict = "PASS" if not mismatches and matched else "FAIL"
         

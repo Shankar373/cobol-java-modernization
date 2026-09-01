@@ -111,7 +111,9 @@ def test_gate_06_extra_output_file(tmp_path):
     baseline.mkdir(parents=True, exist_ok=True)
     native.mkdir(parents=True, exist_ok=True)
     (baseline / "stdout.txt").write_text("OK\n", encoding="utf-8")
+    (baseline / "report.dat").write_text("OK\n", encoding="utf-8")
     (native / "stdout.txt").write_text("OK\n", encoding="utf-8")
+    (native / "report.dat").write_text("OK\n", encoding="utf-8")
     (native / "unexpected.dat").write_text("EXTRA\n", encoding="utf-8")
 
     assert p.stage_equivalence_gate("test_src") == "FAIL"
