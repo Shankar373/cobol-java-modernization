@@ -1303,9 +1303,10 @@ public class CicsTransactionContext {
     def stage_equivalence_gate(self, src: str) -> str:
         self.log("Running equivalence engine comparing Native vs COBOL baseline...")
         
-        # Baseline output folder
-        # For simplicity, we can reuse the baseline folder generated during legacy validation (since we ran INVOICE01, the baseline is already there!)
-        # Let's locate baseline files folder
+        if not getattr(self, "baseline_verified", False):
+            self.log("Equivalence: UNVERIFIED (Baseline execution not verified for current run)")
+            return "UNVERIFIED"
+
         baseline_dir = os.path.join(self.out, "baseline", "legacy")
         native_dir = os.path.join(self.out, "results", "native")
 
@@ -1313,64 +1314,58 @@ public class CicsTransactionContext {
             self.log("Equivalence: UNVERIFIED (No legacy baseline files found)")
             return "UNVERIFIED"
 
-        mismatches = []
-        matched = []
+        baseline_files = set()
         for root, _, files in os.walk(baseline_dir):
             for f in files:
                 rel = os.path.relpath(os.path.join(root, f), baseline_dir).replace("\\", "/")
-                native_file = os.path.join(native_dir, rel)
-                baseline_file = os.path.join(root, f)
-                
-                if not os.path.exists(native_file):
-                    mismatches.append(f"Missing file in native output: {rel}")
-                    continue
-                
-                b_content = open(baseline_file, "rb").read()
-                n_content = open(native_file, "rb").read()
-                if b_content != n_content:
-                    is_logical_match = False
-                    if rel.endswith("stdout.txt"):
-                        try:
-                            b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
-                            n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
-                            
-                            def normalize_stdout(content: str) -> str:
-                                content = re.sub(r'\+0+(\d+)', r'\1', content)
-                                content = re.sub(r'\b0+(\d+)', r'\1', content)
-                                content = re.sub(r'\+0\b', '0', content)
-                                content = re.sub(r'[ \t]+', ' ', content)
-                                content = "\n".join(line.rstrip() for line in content.splitlines())
-                                return content.strip()
+                baseline_files.add(rel)
 
-                            if normalize_stdout(b_str) == normalize_stdout(n_str):
-                                is_logical_match = True
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            b_words = sorted(re.findall(r'[a-zA-Z0-9]+', open(baseline_file, "r", encoding="utf-8", errors="ignore").read()))
-                            n_words = sorted(re.findall(r'[a-zA-Z0-9]+', open(native_file, "r", encoding="utf-8", errors="ignore").read()))
-                            if b_words and b_words == n_words:
-                                is_logical_match = True
-                        except Exception:
-                            pass
-                    if not is_logical_match:
-                        msg = f"Content difference in {rel}. Baseline len: {len(b_content)}, Native len: {len(n_content)}"
-                        if rel.endswith("stdout.txt"):
-                            try:
-                                b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
-                                n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
-                                b_str_norm = normalize_stdout(b_str)
-                                n_str_norm = normalize_stdout(n_str)
-                                msg += f"\n--- NORMALIZED BASELINE STDOUT ---\n{b_str_norm}\n--- NORMALIZED NATIVE STDOUT ---\n{n_str_norm}"
-                            except Exception:
-                                pass
-                        self.log(msg)
-                        mismatches.append(msg)
-                    else:
-                        matched.append(rel)
+        native_files = set()
+        for root, _, files in os.walk(native_dir):
+            for f in files:
+                rel = os.path.relpath(os.path.join(root, f), native_dir).replace("\\", "/")
+                native_files.add(rel)
+
+        all_files = sorted(baseline_files | native_files)
+        mismatches = []
+        matched = []
+
+        def normalize_stdout(content: str) -> str:
+            content = content.replace("\r\n", "\n")
+            return "\n".join(line.rstrip() for line in content.splitlines()).strip()
+
+        for rel in all_files:
+            if rel not in baseline_files:
+                mismatches.append(f"Unexpected extra file in native output: {rel}")
+                continue
+            if rel not in native_files:
+                mismatches.append(f"Missing file in native output: {rel}")
+                continue
+
+            baseline_file = os.path.join(baseline_dir, rel)
+            native_file = os.path.join(native_dir, rel)
+
+            b_content = open(baseline_file, "rb").read()
+            n_content = open(native_file, "rb").read()
+            if b_content != n_content:
+                is_logical_match = False
+                if rel.endswith("stdout.txt"):
+                    try:
+                        b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
+                        n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
+
+                        if normalize_stdout(b_str) == normalize_stdout(n_str):
+                            is_logical_match = True
+                    except Exception:
+                        pass
+                if not is_logical_match:
+                    msg = f"Content difference in {rel}. Baseline len: {len(b_content)}, Native len: {len(n_content)}"
+                    self.log(msg)
+                    mismatches.append(msg)
                 else:
                     matched.append(rel)
+            else:
+                matched.append(rel)
 
         verdict = "PASS" if not mismatches and matched else "FAIL"
         
