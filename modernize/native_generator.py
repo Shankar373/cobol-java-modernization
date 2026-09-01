@@ -1940,8 +1940,14 @@ class NativeStatementTranslator:
                     if val.upper() in self.redefines_layout and not self.redefines_layout[val.upper()]["is_array"]:
                         java_var = f"get_{java_var}()"
                     var_type = self.var_types.get(val, "String")
+                    pic = getattr(self.current_generator, "var_pics", {}).get(val, "") if self.current_generator else ""
                     if var_type == "String":
                         part_expr = java_var
+                    elif var_type == "BigDecimal":
+                        part_expr = f"new String({java_var}.toStorageImage(), java.nio.charset.StandardCharsets.ISO_8859_1)"
+                    elif var_type in ("Integer", "Long", "int", "long") and pic:
+                        signed, length, scale, _ = NativeTypeMapper.parse_pic(pic)
+                        part_expr = f"formatSigned({java_var}, {length}, {'true' if signed else 'false'})"
                     else:
                         part_expr = f"String.valueOf({java_var})"
                 else:
@@ -1980,7 +1986,10 @@ class NativeStatementTranslator:
             elif source in self.var_types:
                 j_src = to_java_var(source)
                 src_expr = f"get_{j_src}()" if source in self.redefines_layout else j_src
-                if self.var_types.get(source) != "String":
+                s_type = self.var_types.get(source)
+                if s_type == "BigDecimal":
+                    src_expr = f"new String({src_expr}.toStorageImage(), java.nio.charset.StandardCharsets.ISO_8859_1)"
+                elif s_type != "String":
                     src_expr = f"String.valueOf({src_expr})"
             else:
                 src_expr = f"\"{source}\""
@@ -1991,7 +2000,10 @@ class NativeStatementTranslator:
                 elif delimited_by in self.var_types:
                     j_delim = to_java_var(delimited_by)
                     delim_expr = f"get_{j_delim}()" if delimited_by in self.redefines_layout else j_delim
-                    if self.var_types.get(delimited_by) != "String":
+                    d_type = self.var_types.get(delimited_by)
+                    if d_type == "BigDecimal":
+                        delim_expr = f"new String({delim_expr}.toStorageImage(), java.nio.charset.StandardCharsets.ISO_8859_1)"
+                    elif d_type != "String":
                         delim_expr = f"String.valueOf({delim_expr})"
                 else:
                     delim_expr = f"\"{delimited_by}\""
@@ -2999,9 +3011,9 @@ class NativeStatementTranslator:
                     r_val = to_java_var(cond_stripped)
                     if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
                         r_val = f"get_{r_val}()"
-                    return f"Objects.equals({subj_java}, {r_val})"
+                    return f"com.systema.modernized.CobolFormatHelper.cobolEquals({subj_java}, {r_val})"
                 else:
-                    return f"Objects.equals({subj_java}, \"{cond_stripped}\")"
+                    return f'com.systema.modernized.CobolFormatHelper.cobolEquals({subj_java}, "{cond_stripped}")'
         else:
             return self._translate_condition(cond)
 
@@ -3166,7 +3178,7 @@ class NativeStatementTranslator:
                         right = f"\"{right[1:-1]}\""
                     else:
                         right = to_java_var(right)
-                    return f"{_jv}{sub}.equals({right})" if op == "==" else f"!{_jv}{sub}.equals({right})"
+                    return f"com.systema.modernized.CobolFormatHelper.cobolEquals({_jv}{sub}, {right})" if op == "==" else f"!com.systema.modernized.CobolFormatHelper.cobolEquals({_jv}{sub}, {right})"
                 cond = re.sub(pattern, repl_str, cond)
         # Resolve redefined variables to getter methods
         for v in self.redefines_layout.keys():
@@ -4396,7 +4408,7 @@ class NativeFileIOGenerator:
                     fmt_str = "".join(fmt_parts)
                     args_str = ", ".join(fmt_args)
                     lines.append(f"            {java_fd}_writer.write(String.format(\"{fmt_str}\", {args_str}).replaceAll(\"\\\\s+$\", \"\"));")
-                lines.append(f"            {java_fd}_writer.newLine();")
+                lines.append(f"            {java_fd}_writer.write(\"\\n\");")
             else:
                 lines.append(f"            if ({java_fd}_stream_out == null) return;")
                 lines.append(f"            byte[] buf = new byte[{rec_len}];")
@@ -5505,7 +5517,7 @@ class NativeProgramGenerator:
             elif parent_type in ("Integer", "Long"):
                 conds = " || ".join(f"{parent_expr} == {v}" for v in values)
             else:
-                conds = " || ".join(f'Objects.equals({parent_expr}, "{v}")' for v in values)
+                conds = " || ".join(f'com.systema.modernized.CobolFormatHelper.cobolEquals({parent_expr}, "{v}")' for v in values)
             lines.append(f"    public boolean {method_name}() {{ return {conds}; }}")
 
         # Emit group variable bytes getters

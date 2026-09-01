@@ -306,5 +306,27 @@ public class CobolFormatHelper {
         if (idx == -1) return val;
         return val.substring(0, idx);
     }
+
+    /**
+     * Compare two COBOL alphanumeric strings according to standard COBOL relational semantics:
+     * If operands are unequal in length, the shorter is compared as if padded on the right
+     * with spaces to the length of the longer operand.
+     */
+    public static boolean cobolEquals(String a, String b) {
+        if (a == null && b == null) return true;
+        if (a == null) a = "";
+        if (b == null) b = "";
+        int lenA = a.length();
+        int lenB = b.length();
+        int maxLen = Math.max(lenA, lenB);
+        for (int i = 0; i < maxLen; i++) {
+            char ca = (i < lenA) ? a.charAt(i) : ' ';
+            char cb = (i < lenB) ? b.charAt(i) : ' ';
+            if (ca != cb) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
