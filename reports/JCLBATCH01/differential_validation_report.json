@@ -3,10 +3,10 @@
   "program": "JCLBATCH01",
   "source": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\tests\\repos\\JCLBATCH01\\src\\JCLBATCH01.jcl",
   "generated_java": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\verification\\JCLBATCH01\\native",
-  "timestamp_utc": "2026-09-01T15:52:15.069299+00:00",
+  "timestamp_utc": "2026-09-01T16:02:59.807880+00:00",
   "overall_verdict": "FAIL",
   "business_equivalence": "FAIL",
-  "total_duration_ms": 39321.723,
+  "total_duration_ms": 32058.369999999995,
   "jdk": "javac 25.0.3",
   "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
   "conversion": "PASS",
@@ -32,7 +32,7 @@
   "step_results": {
     "step1_conversion": {
       "status": "PASS",
-      "duration_ms": 137.153,
+      "duration_ms": 130.075,
       "selected_src": "JCLBATCH01.jcl",
       "generated_files": [
         "CicsProgramRegistry.java",
@@ -63,14 +63,14 @@
     },
     "step2_compilation": {
       "status": "PASS",
-      "duration_ms": 18858.981,
+      "duration_ms": 13267.349,
       "compiled_classes": 28,
       "jdk": "javac 25.0.3",
       "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)"
     },
     "step3_cobol_execution": {
       "status": "UNPROVEN",
-      "duration_ms": 3230.659,
+      "duration_ms": 3787.3869999999997,
       "warning": "No GnuCOBOL baseline available"
     },
     "step4_comparison": {
@@ -85,8 +85,8 @@
         "baseline_bytes": 0,
         "java_bytes": 192
       },
-      "duration_ms": 14742.347
+      "duration_ms": 12312.244
     }
   },
-  "manifest_sha256": "d818910eea1636ae1f7aeb98c5b5f6a1c5bdc168808da3b0ba040baa65350c20"
+  "manifest_sha256": "bd79f7449565ce6a747a0d03df86f386f8ab248e87f22d03d4a54498398feb85"
 }

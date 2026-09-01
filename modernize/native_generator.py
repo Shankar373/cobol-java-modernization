@@ -4307,7 +4307,11 @@ class NativeFileIOGenerator:
                         java_var = to_java_var(f_name)
                         pic = [p for n, p in record_fields if n == f_name][0]
                         java_type = NativeTypeMapper.get_java_type(pic)
-                        lines.append(f"                String val_{java_var} = (line.length() >= {end}) ? line.substring({start}, {end}).trim() : (line.length() > {start} ? line.substring({start}).trim() : \"\");")
+                        if java_type == "String":
+                            f_len = end - start
+                            lines.append(f"                String val_{java_var} = (line.length() >= {end}) ? line.substring({start}, {end}) : (line.length() > {start} ? padString(line.substring({start}), {f_len}) : padString(\"\", {f_len}));")
+                        else:
+                            lines.append(f"                String val_{java_var} = (line.length() >= {end}) ? line.substring({start}, {end}).trim() : (line.length() > {start} ? line.substring({start}).trim() : \"\");")
                         if java_type == "BigDecimal":
                             scale = NativeTypeMapper.parse_pic(pic)[2]
                             signed = NativeTypeMapper.parse_pic(pic)[3]
@@ -5657,7 +5661,10 @@ class NativeProgramGenerator:
                 end = curr + length
                 curr += length
                 lines.append(f"        if (line.length() >= {end}) {{")
-                lines.append(f"            String val = line.substring({start}, {end}).trim();")
+                if child_type == "String":
+                    lines.append(f"            String val = line.substring({start}, {end});")
+                else:
+                    lines.append(f"            String val = line.substring({start}, {end}).trim();")
                 if child_type == "BigDecimal":
                     if signed:
                         val_expr = f"parseSigned(val, {scale})"

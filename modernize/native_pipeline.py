@@ -1170,21 +1170,23 @@ public class CicsTransactionContext {
                     break
             
             if has_sql:
-                pg_container = os.environ.get("PG_CONTAINER_NAME", "db")
+                pg_container = os.environ.get("PG_CONTAINER_NAME")
+                if not pg_container:
+                    for c_name in ("modernization-platform-db-1", "modernization-platform_db_1", "db"):
+                        try:
+                            r = subprocess.run(["docker", "inspect", c_name], capture_output=True, text=True, check=False)
+                            if r.returncode == 0:
+                                pg_container = c_name
+                                break
+                        except Exception:
+                            pass
+                    if not pg_container:
+                        pg_container = "db"
                 data_dir = os.path.join(self.repo, "data")
                 if os.path.isdir(data_dir):
                     self.log(f"Seeding database for repo {os.path.basename(self.repo)} using container {pg_container}...")
                     for sql_file in os.listdir(data_dir):
                         if sql_file.lower().endswith(".sql"):
-                            table_name = os.path.splitext(sql_file)[0]
-                            truncate_query = f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;"
-                            try:
-                                subprocess.run(
-                                    ["docker", "exec", pg_container, "psql", "-U", "modernize", "-d", "modernization_db", "-c", truncate_query],
-                                    capture_output=True, text=True, check=False, timeout=15
-                                )
-                            except Exception:
-                                pass
                             sql_path = os.path.join(data_dir, sql_file)
                             try:
                                 with open(sql_path, "r", encoding="utf-8") as fh:

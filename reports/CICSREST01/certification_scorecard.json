@@ -1,7 +1,7 @@
 {
   "scorecard_version": "2.0.0",
   "workload": "CICSREST01",
-  "evaluation_timestamp_utc": "2026-09-01T15:52:55.015187+00:00",
+  "evaluation_timestamp_utc": "2026-09-01T16:03:32.453396+00:00",
   "certification_verdict": "UNPROVEN",
   "certification_grade": "UNPROVEN",
   "total_score": 20,
@@ -42,10 +42,10 @@
         "program": "CICSREST01",
         "source": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\tests\\repos\\CICSREST01\\src\\CICSREST01.cob",
         "generated_java": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\verification\\CICSREST01\\native",
-        "timestamp_utc": "2026-09-01T15:52:52.835422+00:00",
+        "timestamp_utc": "2026-09-01T16:03:31.317348+00:00",
         "overall_verdict": "FAIL",
         "business_equivalence": "FAIL",
-        "total_duration_ms": 35631.342,
+        "total_duration_ms": 29199.2,
         "jdk": "javac 25.0.3",
         "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
         "conversion": "PASS",
@@ -71,7 +71,7 @@
         "step_results": {
           "step1_conversion": {
             "status": "PASS",
-            "duration_ms": 54.586999999999996,
+            "duration_ms": 169.13400000000001,
             "selected_src": "CICSREST01.cob",
             "generated_files": [
               "CicsProgramRegistry.java",
@@ -100,14 +100,14 @@
           },
           "step2_compilation": {
             "status": "PASS",
-            "duration_ms": 16421.399,
+            "duration_ms": 13943.785,
             "compiled_classes": 25,
             "jdk": "javac 25.0.3",
             "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)"
           },
           "step3_cobol_execution": {
             "status": "UNPROVEN",
-            "duration_ms": 2711.734,
+            "duration_ms": 2000.566,
             "warning": "No GnuCOBOL baseline available"
           },
           "step4_comparison": {
@@ -122,10 +122,10 @@
               "baseline_bytes": 0,
               "java_bytes": 143
             },
-            "duration_ms": 13815.493
+            "duration_ms": 11440.688
           }
         },
-        "manifest_sha256": "66eb10d8211bb41e859fe53df4300534aa2126dac55608c5bc9942e81c334179"
+        "manifest_sha256": "5d365b4c5306ae0298068ec73767f352c689f6aff047697af5b94e1b91a1fcd2"
       },
       "warnings": [
         "CICS transaction executed under compatibility runtime (Real IBM CICS unproven)."

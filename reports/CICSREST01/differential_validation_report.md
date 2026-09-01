@@ -10,8 +10,8 @@
 - **COBOL Runtime:** `UNPROVEN` (Exit Code: `-1`)
 - **Java Runtime:** `FAIL` (Exit Code: `0`)
 - **Business Equivalence:** `FAIL`
-- **Execution UTC:** `2026-09-01T15:52:52.835422+00:00`
-- **Cryptographic Manifest SHA-256:** `66eb10d8211bb41e859fe53df4300534aa2126dac55608c5bc9942e81c334179`
+- **Execution UTC:** `2026-09-01T16:03:31.317348+00:00`
+- **Cryptographic Manifest SHA-256:** `5d365b4c5306ae0298068ec73767f352c689f6aff047697af5b94e1b91a1fcd2`
 
 ---
 
@@ -19,10 +19,10 @@
 
 | Step | Name | Status | Duration (ms) | Details |
 |---|---|---|---|---|
-| **Step 1** | Step 1: Conversion (COBOL -> Java) | `PASS` | `54.6` | OK |
-| **Step 2** | Step 2: JDK 17+ Compilation | `PASS` | `16421.4` | OK |
-| **Step 3** | Step 3: COBOL Baseline Execution | `UNPROVEN` | `2711.7` | No GnuCOBOL baseline available |
-| **Step 4** | Step 4: Differential Equivalence | `FAIL` | `13815.5` | OK |
+| **Step 1** | Step 1: Conversion (COBOL -> Java) | `PASS` | `169.1` | OK |
+| **Step 2** | Step 2: JDK 17+ Compilation | `PASS` | `13943.8` | OK |
+| **Step 3** | Step 3: COBOL Baseline Execution | `UNPROVEN` | `2000.6` | No GnuCOBOL baseline available |
+| **Step 4** | Step 4: Differential Equivalence | `FAIL` | `11440.7` | OK |
 
 ---
 
