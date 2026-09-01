@@ -1,0 +1,116 @@
+{
+  "scorecard_version": "2.0.0",
+  "workload": "SIMPLEBASELINE01",
+  "evaluation_timestamp_utc": "2026-09-01T15:21:40.403898+00:00",
+  "certification_verdict": "UNPROVEN",
+  "certification_grade": "UNPROVEN",
+  "total_score": 20,
+  "max_score": 100,
+  "tier_breakdown": {
+    "tier_1": {
+      "name": "Syntax & AST Parsing",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {},
+      "warnings": [],
+      "errors": []
+    },
+    "tier_2": {
+      "name": "Compilation & Symbol Resolution",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {},
+      "warnings": [],
+      "errors": []
+    },
+    "tier_3": {
+      "name": "Structural & Symbol Equivalence",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {
+        "ast_nodes_mapped": true
+      },
+      "warnings": [],
+      "errors": []
+    },
+    "tier_4": {
+      "name": "Runtime Differential Equivalence",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {
+        "workload": "SIMPLEBASELINE01",
+        "timestamp_utc": "2026-09-01T15:21:40.400005+00:00",
+        "overall_verdict": "UNPROVEN",
+        "total_duration_ms": 69005.24,
+        "step_results": {
+          "step1_conversion": {
+            "status": "PASS",
+            "duration_ms": 159.122,
+            "selected_src": "SIMPLEBASELINE01.cob",
+            "generated_files": [
+              "CicsProgramRegistry.java",
+              "CicsTransactionContext.java",
+              "CobolFormatHelper.java",
+              "CobolRef.java",
+              "Db2Verify.java",
+              "JclExecutionContext.java",
+              "Idcams.java",
+              "Iebgener.java",
+              "Simplebaseline01.java",
+              "Sort.java",
+              "AssignResult.java",
+              "CobolArithmetic.java",
+              "CobolNumeric.java",
+              "CobolNumericSpec.java",
+              "CobolRoundingMode.java",
+              "CobolSignPosition.java",
+              "CobolUsage.java",
+              "ProhibitedRoundingException.java",
+              "SizeErrorPolicy.java",
+              "UnsupportedPrecisionException.java"
+            ],
+            "file_count": 20
+          },
+          "step2_compilation": {
+            "status": "PASS",
+            "duration_ms": 30945.583,
+            "compiled_classes": 23
+          },
+          "step3_cobol_execution": {
+            "status": "UNPROVEN",
+            "duration_ms": 5.395,
+            "warning": "No GnuCOBOL baseline available"
+          },
+          "step4_comparison": {
+            "status": "UNPROVEN",
+            "gate_result": "UNVERIFIED",
+            "diff_details": {
+              "stdout_match": false,
+              "stderr_match": true,
+              "exit_code_match": false,
+              "file_records_match": true,
+              "database_state_match": true,
+              "baseline_bytes": 0,
+              "java_bytes": 84
+            },
+            "duration_ms": 37894.2
+          }
+        },
+        "warnings": [],
+        "errors": [],
+        "manifest_sha256": "ac64c1ea03fe42420d17905442c355a49ba8f4f653af9005191220f1162b6d10"
+      },
+      "warnings": [],
+      "errors": []
+    },
+    "tier_5": {
+      "verdict": "UNPROVEN",
+      "status": "NOT_EVALUATED",
+      "score": 0
+    }
+  },
+  "warnings": [],
+  "blockers": [],
+  "unsupported_constructs": [],
+  "manifest_sha256": null
+}
