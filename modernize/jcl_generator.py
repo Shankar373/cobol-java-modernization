@@ -94,24 +94,25 @@ class JclGenerator:
 
     def translate_if_condition(self, cond_str):
         cond = cond_str.strip()
+        while cond.startswith("(") and cond.endswith(")"):
+            cond = cond[1:-1].strip()
+
         op_map = {
-            " EQ ": " == ",
-            " = ": " == ",
-            " NE ": " != ",
-            " GT ": " > ",
-            " LT ": " < ",
-            " GE ": " >= ",
-            " LE ": " <= "
+            "EQ": "==",
+            "=": "==",
+            "NE": "!=",
+            "GT": ">",
+            "LT": "<",
+            "GE": ">=",
+            "LE": "<="
         }
         
-        m = re.match(r'([A-Za-z0-9_\.]+)\.RC\s+(EQ|NE|GT|LT|GE|LE|=)\s+(\d+)', cond, re.IGNORECASE)
+        m = re.match(r'([A-Za-z0-9_\.]+)\.RC\s*(EQ|NE|GT|LT|GE|LE|=)\s*(\d+)', cond, re.IGNORECASE)
         if m:
             step = m.group(1).upper()
             op = m.group(2).upper()
             val = m.group(3)
             java_op = op_map.get(op, "==")
-            if op == "=":
-                java_op = "=="
             return f"JclExecutionContext.getStepReturnCode(\"{step}\") {java_op} {val}"
             
         m_run = re.match(r'([A-Za-z0-9_\.]+)\.RUN', cond, re.IGNORECASE)
@@ -119,7 +120,7 @@ class JclGenerator:
             step = m_run.group(1).upper()
             return f"JclExecutionContext.getStepReturnCode(\"{step}\") != 0"
             
-        return "true"
+        raise ValueError(f"Unsupported JCL IF condition: {cond_str}")
 
     def generate_step_method(self, step, lines):
         name = step["name"]
