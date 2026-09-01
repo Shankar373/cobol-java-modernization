@@ -1,0 +1,12 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REDEFCP3.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP.
+          05 C PIC S9(4)V99 USAGE COMP-3.
+          05 D REDEFINES C PIC X(3).
+       PROCEDURE DIVISION.
+           INITIALIZE C.
+           MOVE -12.34 TO C.
+           DISPLAY WS-GROUP.
+           GOBACK.

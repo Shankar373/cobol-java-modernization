@@ -1,0 +1,17 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REFGRP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP-A.
+          05 GA-HIGH PIC 9(2).
+          05 GA-LOW  PIC 9(2).
+       01 WS-GROUP-B REDEFINES WS-GROUP-A.
+          05 GB-FULL PIC 9(4).
+       PROCEDURE DIVISION.
+           MOVE 12 TO GA-HIGH.
+           MOVE 34 TO GA-LOW.
+           DISPLAY GB-FULL.
+           MOVE 5678 TO GB-FULL.
+           DISPLAY GA-HIGH.
+           DISPLAY GA-LOW.
+           GOBACK.

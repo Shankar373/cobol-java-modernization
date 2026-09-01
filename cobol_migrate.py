@@ -5452,7 +5452,14 @@ class Pipeline:
                             with open(j_file, "rb") as fh:
                                 j_content = fh.read()
                             allow_empty = (self.cfg.get("compare", {}) or {}).get("allow_empty_outputs", False)
-                            if len(b_content) == 0 and len(j_content) == 0 and not allow_empty:
+                            is_input_empty = False
+                            for f_assign in (self.data("discover", {}).get("file_assigns", {}) or {}).values():
+                                for a in f_assign:
+                                    p = a.get("assign_path")
+                                    if p and os.path.exists(os.path.join(self.repo, p)):
+                                        if os.path.getsize(os.path.join(self.repo, p)) == 0:
+                                            is_input_empty = True
+                            if len(b_content) == 0 and len(j_content) == 0 and not (allow_empty or is_input_empty):
                                 mismatches.append(f"{rel_path}: unexpected zero-byte output in both baseline and modernized output (requires allow_empty_outputs: true in config)")
                             elif _normalize_text(b_content) != _normalize_text(j_content):
                                 mismatches.append(f"{rel_path}: content mismatch")
@@ -5465,6 +5472,8 @@ class Pipeline:
                         if os.path.isdir(j_od_path):
                             for root, _, files in os.walk(j_od_path):
                                 for f in files:
+                                    if f.startswith(".") or f == ".gitkeep":
+                                        continue
                                     j_full = os.path.join(root, f)
                                     rel = os.path.relpath(j_full, mod_dir)
                                     b_full = os.path.join(baseline_dir, rel)

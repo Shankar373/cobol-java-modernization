@@ -1,0 +1,15 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. POSOVER.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP.
+          05 A PIC 9(2).
+          05 FILLER PIC X VALUE '|'.
+          05 B PIC 9(2).
+       PROCEDURE DIVISION.
+           INITIALIZE A B.
+           MOVE 99 TO A.
+           MOVE 10 TO B.
+           ADD 5 TO A GIVING B ON SIZE ERROR DISPLAY 'OVERFLOW'.
+           DISPLAY WS-GROUP.
+           GOBACK.

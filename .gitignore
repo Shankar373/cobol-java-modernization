@@ -1,51 +1,56 @@
-# Git ignore for cobj pipeline PoC
-target/
-!target/*.md
-!target/manifest.json
+# Git ignore for COBOL -> Java Modernization Platform
 
-# Exclude generated binaries and Java source
+# Build targets and outputs
+target/
+target_*/
+generated/
+test_out/
+acceptance_logs/
+tests/out/
+workspace/
+someout/
+
+# Legacy generated artifacts
 legacy/bin/
 legacy/generated/
 legacy/data/out/*
 !legacy/data/out/.gitkeep
 legacy/data/work/*
 !legacy/data/work/.gitkeep
-tests/out/
-workspace/
+legacy/_preprocessed/
 
-# Python cache
+# Python caches and virtualenvs
 __pycache__/
-*.pyc
-
-# Local config overrides
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
 .env
+.venv
+env/
+venv/
+
+# IDE and Editor configurations
 .idea/
 .vscode/
-
-# Local tool config and runtime logs
 .gemini/
+*.swp
+*.swo
+
+# Runtime logs
+*.log
 ui-server.log
 ui-server.err.log
+run_*.log
 
-# Compiled binaries and libraries
+# Compiled binaries and bytecode
 *.exe
 *.so
 *.dll
 *.class
-*.zip
-*.sha256
 *.dat
+temp_*
 
-# Extra target folders and scratch
-target_*/
+# Scratch directory
 scratch/
-generated/
-
-# Preprocessed shadow tree — regenerated deterministically by preprocess_cobol_for_cobj()
-legacy/_preprocessed/
-
-# Local test artifacts and logs
-artifacts/
-run_*.log
-someout/
-temp_testdisp*
