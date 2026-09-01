@@ -2257,19 +2257,32 @@ def decode_audit_baseline(path):
 def resolve_input_file(repo_dir, d, default_rel):
     """Locate the primary flat-file input for the batch reader.
 
-    Prefers a SELECT..ASSIGN path that sits under a 'data/in' directory and
-    actually exists on disk. Returns an absolute posix path or None.
+    Discovers input files across file_assigns or candidate input directories
+    (data/in, data/source, data/input, inputs, datasets) without hardcoded paths.
     """
     for src, assigns in d.get("file_assigns", {}).items():
         for a in assigns:
-            parts = posix(a.get("assign_path") or "").split("/")
-            if "in" not in parts:
+            raw_path = a.get("assign_path") or ""
+            norm_path = posix(raw_path)
+            parts = norm_path.split("/")
+            if "out" in parts or "output" in parts or "report" in parts:
                 continue
             p = os.path.abspath(os.path.join(repo_dir, *parts))
             if os.path.isfile(p):
                 return posix(p)
-    cand = os.path.abspath(os.path.join(repo_dir, *default_rel.split("/")))
-    return posix(cand) if os.path.isfile(cand) else None
+    if default_rel:
+        cand = os.path.abspath(os.path.join(repo_dir, *default_rel.split("/")))
+        if os.path.isfile(cand):
+            return posix(cand)
+    for sub in ("data/in", "data/source", "data/input", "data", "inputs", "datasets"):
+        sub_dir = os.path.join(repo_dir, *sub.split("/"))
+        if os.path.isdir(sub_dir):
+            for f in os.listdir(sub_dir):
+                full_f = os.path.join(sub_dir, f)
+                if os.path.isfile(full_f) and f.lower().endswith((".txt", ".dat", ".csv", ".raw")):
+                    if "out" not in f.lower() and "report" not in f.lower():
+                        return posix(full_f)
+    return None
 
 
 # RAW-* flat-file field -> JPA entity property name (ClaimsCore / BankCore).
@@ -2281,23 +2294,53 @@ RAW_NAME_MAP = {
 }
 
 
-def extract_raw_layout(text):
-    """Parse a 01 WS-RAW group into a contiguous flat-file layout.
+def _calculate_pic_length(pic_str):
+    """Calculate byte length from a COBOL PICTURE clause."""
+    pic_str = (pic_str or "").upper()
+    total = 0
+    for match in re.finditer(r'([9XASZB])(?:\((\d+)\))?', pic_str):
+        char = match.group(1)
+        count = int(match.group(2)) if match.group(2) else 1
+        if char in ('9', 'X', 'A', 'S', 'Z', 'B'):
+            total += count
+    return total if total > 0 else 10
 
-    Returns [{"name": <camel property>, "start": 1-based, "length": n}, ...]
-    in file order. Unmapped filler fields still advance the offset.
+
+def extract_raw_layout(text):
+    """Parse COBOL record structures into a contiguous flat-file layout.
+
+    Supports standard RAW-* naming as well as generic 01/05/10 record definitions.
     """
-    entries = re.findall(
+    raw_entries = re.findall(
         r'^\s*05\s+(RAW-[A-Z0-9\-]+)\s+PIC\s+X\((\d+)\)',
         text or "", re.IGNORECASE | re.MULTILINE,
     )
+    if raw_entries:
+        layout, pos = [], 1
+        for raw_name, length in raw_entries:
+            n = int(length)
+            name = RAW_NAME_MAP.get(raw_name.upper())
+            if name:
+                layout.append({"name": name, "start": pos, "length": n})
+            pos += n
+        if layout:
+            return layout
+
+    entries = re.findall(
+        r'^\s*(?:05|10)\s+([A-Z0-9\-]+)\s+PIC\s+([A-Z0-9\(\)Vv\.\$]+)',
+        text or "", re.IGNORECASE | re.MULTILINE,
+    )
     layout, pos = [], 1
-    for raw_name, length in entries:
-        n = int(length)
-        name = RAW_NAME_MAP.get(raw_name.upper())
-        if name:
-            layout.append({"name": name, "start": pos, "length": n})
-        pos += n
+    for field_name, pic in entries:
+        fname_upper = field_name.upper()
+        if fname_upper == "FILLER":
+            pos += _calculate_pic_length(pic)
+            continue
+        length = _calculate_pic_length(pic)
+        parts = [p.lower() for p in field_name.split("-") if p]
+        camel_name = parts[0] + "".join(p.capitalize() for p in parts[1:]) if parts else field_name.lower()
+        layout.append({"name": camel_name, "start": pos, "length": length})
+        pos += length
     return layout
 
 
@@ -4778,11 +4821,15 @@ class Pipeline:
         """Execute a logical, record-by-record database comparison between baseline and Java run states."""
         self.log("    [GATE 2] Starting database state validation...")
         tables = []
-        data_dir = os.path.join(self.repo, "data")
-        if os.path.isdir(data_dir):
-            for f in os.listdir(data_dir):
-                if f.upper().endswith(".SQL"):
-                    tables.append(f[:-4].upper())
+        sql_paths_found = {}
+        for cand_name in ("data", "sql", "database"):
+            cand_dir = os.path.join(self.repo, cand_name)
+            if os.path.isdir(cand_dir):
+                for f in os.listdir(cand_dir):
+                    if f.upper().endswith(".SQL"):
+                        tbl = f[:-4].upper()
+                        tables.append(tbl)
+                        sql_paths_found[tbl] = os.path.join(cand_dir, f)
         if not tables:
             tables = ["CUSTOMER", "CLAIM", "CLAIM_AUDIT", "CLAIM_EXCEPTIONS", "TRANSACTIONS"]
 
@@ -4829,14 +4876,43 @@ class Pipeline:
                         conn.close()
                     
                     if not baseline_rows:
-                        sql_path = os.path.join(data_dir, f"{table}.SQL")
-                        if not os.path.exists(sql_path):
-                            sql_path = os.path.join(data_dir, f"{table.lower()}.sql")
-                        if os.path.exists(sql_path):
+                        sql_path = sql_paths_found.get(table.upper())
+                        if not sql_path:
+                            for cand_name in ("data", "sql", "database"):
+                                p1 = os.path.join(self.repo, cand_name, f"{table}.SQL")
+                                p2 = os.path.join(self.repo, cand_name, f"{table.lower()}.sql")
+                                if os.path.exists(p1):
+                                    sql_path = p1
+                                    break
+                                elif os.path.exists(p2):
+                                    sql_path = p2
+                                    break
+                        if sql_path and os.path.exists(sql_path):
                             sql_text = open(sql_path, "r", encoding="utf-8", errors="replace").read()
+                            col_match = re.search(rf"(?i)insert\s+into\s+{re.escape(table)}\s*\(([^)]+)\)", sql_text)
+                            if col_match:
+                                cols = [c.strip().strip("'\"`[]") for c in col_match.group(1).split(",")]
+                            else:
+                                create_match = re.search(rf"(?i)create\s+table\s+{re.escape(table)}\s*\(([^;]+)\)", sql_text)
+                                if create_match:
+                                    raw_cols = create_match.group(1).split(",")
+                                    cols = []
+                                    for line in raw_cols:
+                                        line_clean = line.strip()
+                                        if line_clean and not line_clean.upper().startswith(("PRIMARY", "FOREIGN", "KEY", "CONSTRAINT", "UNIQUE")):
+                                            parts = line_clean.split()
+                                            if parts:
+                                                cols.append(parts[0].strip().strip("'\"`[]"))
+                                else:
+                                    cols = []
                             for match in re.finditer(r"(?i)values\s*\(([^)]+)\)", sql_text):
                                 vals = [v.strip().strip("'\"") for v in match.group(1).split(",")]
-                                baseline_rows.append({"CUST_ID": int(vals[0]) if vals[0].isdigit() else vals[0], "CUST_NAME": vals[1]})
+                                row_dict = {}
+                                for i, v in enumerate(vals):
+                                    col_name = cols[i] if i < len(cols) else f"COL_{i+1}"
+                                    row_dict[col_name.upper()] = int(v) if v.isdigit() else v
+                                if row_dict:
+                                    baseline_rows.append(row_dict)
                                 
                     if baseline_rows:
                         self.log(f"    [GATE 2] DB Table {table}: Comparing {len(java_rows)} Java rows with {len(baseline_rows)} baseline rows")
@@ -5081,26 +5157,37 @@ class Pipeline:
             return False, msg, []
 
         # Set up data directories for Gate 2 Spring Boot run:
-        # Copy only data/in/ (flat-file inputs) from the legacy repo.
-        # Create empty data/work/ and data/out/ so the Spring Boot batch starts
-        # clean and populates them with its own text-format databases — preventing
-        # GnuCOBOL SQLite/BerkeleyDB files from being picked up by the Java reader.
+        # Generic Input Directory Staging:
+        # Discover and copy all input/source data directories from repo (e.g. data/in, data/source,
+        # data/input, data/records, inputs, datasets) while skipping out/work/db/temporary directories.
         repo_data_dir = os.path.join(self.repo, "data")
+        mod_data_dir = os.path.join(mod_dir, "data")
+        shutil.rmtree(mod_data_dir, ignore_errors=True)
+        os.makedirs(mod_data_dir, exist_ok=True)
         if os.path.isdir(repo_data_dir):
-            mod_data_dir = os.path.join(mod_dir, "data")
-            shutil.rmtree(mod_data_dir, ignore_errors=True)
-            os.makedirs(mod_data_dir, exist_ok=True)
-            # Copy only data/in/
-            src_in = os.path.join(repo_data_dir, "in")
-            dst_in = os.path.join(mod_data_dir, "in")
-            if os.path.isdir(src_in):
-                shutil.copytree(src_in, dst_in)
-            # Create empty work/ and out/ with .gitkeep
-            for subdir in ("work", "out"):
-                os.makedirs(os.path.join(mod_data_dir, subdir), exist_ok=True)
-                gk = os.path.join(mod_data_dir, subdir, ".gitkeep")
-                if not os.path.exists(gk):
-                    open(gk, "w").close()
+            for item in os.listdir(repo_data_dir):
+                item_lower = item.lower()
+                if item_lower in ("out", "output", "work", "db", ".git", "__pycache__"):
+                    continue
+                src_sub = os.path.join(repo_data_dir, item)
+                dst_sub = os.path.join(mod_data_dir, item)
+                if os.path.isdir(src_sub):
+                    shutil.copytree(src_sub, dst_sub, dirs_exist_ok=True)
+                elif os.path.isfile(src_sub) and not item_lower.endswith((".db", ".sqlite")):
+                    shutil.copy2(src_sub, dst_sub)
+
+        for top_dir in ("inputs", "datasets", "source_data"):
+            top_src = os.path.join(self.repo, top_dir)
+            if os.path.isdir(top_src):
+                top_dst = os.path.join(mod_dir, top_dir)
+                shutil.copytree(top_src, top_dst, dirs_exist_ok=True)
+
+        # Create empty work/ and out/ with .gitkeep
+        for subdir in ("work", "out"):
+            os.makedirs(os.path.join(mod_data_dir, subdir), exist_ok=True)
+            gk = os.path.join(mod_data_dir, subdir, ".gitkeep")
+            if not os.path.exists(gk):
+                open(gk, "w").close()
 
         # Dynamically resolve input file path using model-driven approach
         if not is_generic:
@@ -5259,10 +5346,9 @@ class Pipeline:
                         return records
 
                     def _normalize_text(content_bytes):
-                        import re
                         try:
                             text = content_bytes.decode("utf-8", errors="replace")
-                            lines = [line.rstrip(" \t\r\n\x00") for line in text.splitlines()]
+                            lines = [line.replace("\r", "") for line in text.splitlines()]
                             while lines and not lines[-1]:
                                 lines.pop()
                             return "\n".join(lines).strip()
@@ -5847,11 +5933,7 @@ class Pipeline:
                 )
             })
             
-        # Write to target/generated/traceability_manifest.json
-        gen_dir_parent = os.path.join(os.path.dirname(self.out), "generated")
-        os.makedirs(gen_dir_parent, exist_ok=True)
-        write_json(os.path.join(gen_dir_parent, "traceability_manifest.json"), traceability_manifest)
-        
+        # Write to target/generated/traceability_manifest.json (strictly inside self.out)
         gen_dir_local = os.path.join(self.out, "generated")
         os.makedirs(gen_dir_local, exist_ok=True)
         write_json(os.path.join(gen_dir_local, "traceability_manifest.json"), traceability_manifest)
