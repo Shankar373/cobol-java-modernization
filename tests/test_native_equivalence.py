@@ -23,6 +23,7 @@ def test_equivalence_pass(tmpdir):
         fh.write("HELLO WORLD")
         
     try:
+        p.baseline_verified = True
         verdict = p.stage_equivalence_gate("MULTIFILE01.cob")
         assert verdict == "PASS"
         
@@ -52,6 +53,7 @@ def test_equivalence_fail(tmpdir):
         fh.write("HELLO DIFFERENCE")
         
     try:
+        p.baseline_verified = True
         verdict = p.stage_equivalence_gate("MULTIFILE01.cob")
         assert verdict == "FAIL"
         

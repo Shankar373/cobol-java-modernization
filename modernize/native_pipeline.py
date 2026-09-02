@@ -1307,12 +1307,8 @@ public class CicsTransactionContext {
     def stage_equivalence_gate(self, src: str) -> str:
         self.log("Running equivalence engine comparing Native vs COBOL baseline...")
         if not getattr(self, "baseline_verified", False):
-            baseline_dir = os.path.join(self.out, "baseline", "legacy")
-            if os.path.exists(baseline_dir) and os.listdir(baseline_dir):
-                self.baseline_verified = True
-            else:
-                self.log("Equivalence: UNVERIFIED (Baseline execution not verified for current run)")
-                return "UNVERIFIED"
+            self.log("Equivalence: UNVERIFIED (Baseline execution not verified for current run)")
+            return "UNVERIFIED"
 
         baseline_dir = os.path.join(self.out, "baseline", "legacy")
         native_dir = os.path.join(self.out, "results", "native")
