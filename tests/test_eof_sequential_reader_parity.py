@@ -10,15 +10,20 @@ import pytest
 from modernize.lexer import CobolLexer
 from modernize.parser import CobolParser
 from modernize.native_generator import NativeProgramGenerator
-from cobol_migrate import Pipeline
+from cobol_migrate import Pipeline, docker_available
+
+_DOCKER_AVAILABLE = docker_available()
 
 @pytest.fixture
 def temp_workspace():
+    if not _DOCKER_AVAILABLE:
+        pytest.skip("Docker daemon not available for EOF parity pipeline test")
     td = tempfile.mkdtemp(prefix="eof_test_")
     repo = os.path.join(td, "repo")
     out = os.path.join(td, "out")
     os.makedirs(os.path.join(repo, "src"), exist_ok=True)
     os.makedirs(os.path.join(repo, "data", "in"), exist_ok=True)
+    os.makedirs(os.path.join(repo, "data", "out"), exist_ok=True)
     yield repo, out
     shutil.rmtree(td, ignore_errors=True)
 

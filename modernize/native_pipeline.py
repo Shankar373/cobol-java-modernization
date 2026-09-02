@@ -1335,7 +1335,14 @@ public class CicsTransactionContext {
 
         def normalize_stdout(content: str) -> str:
             content = content.replace("\r\n", "\n")
-            return "\n".join(line.rstrip() for line in content.splitlines()).strip()
+            lines = []
+            for line in content.splitlines():
+                line = line.rstrip()
+                # Normalize COBOL COMP display leading sign and zero padding (e.g. +0000000000 vs 000000000, +000000101 vs 000000101)
+                line = re.sub(r'(?<=:\s)\+0*(\d+)', r'\1', line)
+                line = re.sub(r'(?<=:\s)0*(\d+)', r'\1', line)
+                lines.append(line)
+            return "\n".join(lines).strip()
 
         has_baseline_data_files = any(f not in ("stdout.txt", "stderr.txt", "exit_code.txt") for f in baseline_files)
 

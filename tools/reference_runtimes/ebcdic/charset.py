@@ -47,6 +47,13 @@ class CobolCharsetAdapter:
         errors = "strict" if strict else "replace"
         try:
             return text.encode(cp, errors=errors)
+        except LookupError:
+            for alt in ("cp037", "cp500"):
+                try:
+                    return text.encode(alt, errors=errors)
+                except LookupError:
+                    continue
+            raise ValueError(f"No usable EBCDIC codec found on platform for {codepage}")
         except UnicodeEncodeError as e:
             raise ValueError(f"EBCDIC transcoding error for codepage {codepage}: {e}")
 
@@ -63,6 +70,13 @@ class CobolCharsetAdapter:
         errors = "strict" if strict else "replace"
         try:
             return data.decode(cp, errors=errors)
+        except LookupError:
+            for alt in ("cp037", "cp500"):
+                try:
+                    return data.decode(alt, errors=errors)
+                except LookupError:
+                    continue
+            raise ValueError(f"No usable EBCDIC codec found on platform for {codepage}")
         except UnicodeDecodeError as e:
             raise ValueError(f"EBCDIC decode error for codepage {codepage}: {e}")
 
