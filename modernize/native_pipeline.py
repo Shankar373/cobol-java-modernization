@@ -1338,9 +1338,10 @@ public class CicsTransactionContext {
             lines = []
             for line in content.splitlines():
                 line = line.rstrip()
-                # Normalize COBOL COMP display leading sign and zero padding (e.g. +0000000000 vs 000000000, +000000101 vs 000000101)
-                line = re.sub(r'(?<=:\s)\+0*(\d+)', r'\1', line)
-                line = re.sub(r'(?<=:\s)0*(\d+)', r'\1', line)
+                # Normalize COBOL SQLCODE display leading sign and zero padding (e.g. +0000000000 vs 000000000, +0000000100 vs 000000100)
+                line = re.sub(r'(?<=SQLCODE:\s)\+0*(\d+)', r'\1', line)
+                line = re.sub(r'(?<=SQLCODE:\s)0*(\d+)', r'\1', line)
+                line = re.sub(r'(?<=SQLCODE:\s)\+0+', r'0', line)
                 lines.append(line)
             return "\n".join(lines).strip()
 
