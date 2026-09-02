@@ -49,7 +49,13 @@ class WorkloadCapabilityDetector:
                                 requires_cics = True
                                 indicators["cics_commands"] += content.count("EXEC CICS")
 
-                            if "ORGANIZATION IS INDEXED" in content or "ORGANIZATION INDEXED" in content or "ORGANIZATION RELATIVE" in content:
+                            if (
+                                "ORGANIZATION IS INDEXED" in content
+                                or "ORGANIZATION INDEXED" in content
+                                or "ORGANIZATION RELATIVE" in content
+                                or "ORGANIZATION IS RELATIVE" in content
+                                or "RELATIVE KEY" in content
+                            ):
                                 requires_vsam = True
                                 indicators["vsam_files"] += 1
 

@@ -32,3 +32,42 @@ def test_ebcdic_roundtrip_all_supported_codepages():
         assert CobolCharsetAdapter.roundtrip_verify(text, cp), f"Roundtrip failed for {cp}"
         decoded = CobolCharsetAdapter.to_unicode(CobolCharsetAdapter.to_ebcdic(text, cp), cp)
         assert decoded == text
+
+
+def test_ebcdic_fail_closed_on_unsupported_codepage():
+    """Verify that an unsupported or unproven codepage raises ValueError."""
+    with pytest.raises(ValueError, match="Unsupported or unproven EBCDIC code page"):
+        CobolCharsetAdapter.to_ebcdic("HELLO", "CP9999_UNKNOWN")
+    
+    with pytest.raises(ValueError, match="Unsupported or unproven EBCDIC code page"):
+        CobolCharsetAdapter.to_unicode(b"\xC1", "CP9999_UNKNOWN")
+
+
+def test_ebcdic_fixed_record_padding():
+    """Fixed-width records must be padded with EBCDIC spaces (0x40)."""
+    raw = CobolCharsetAdapter.to_ebcdic("REC01", "CP037")
+    padded = CobolCharsetAdapter.pad_record_ebcdic(raw, 10)
+    assert len(padded) == 10
+    # Remaining 5 bytes must all be 0x40
+    assert padded[5:] == b"\x40\x40\x40\x40\x40"
+    
+    # Truncation if longer than fixed length
+    truncated = CobolCharsetAdapter.pad_record_ebcdic(raw, 3)
+    assert len(truncated) == 3
+    assert truncated == raw[:3]
+
+
+def test_ebcdic_zoned_decimal_inspection():
+    """Verify zoned decimal detection for digits and sign nibbles."""
+    # Digits '0' (0xF0) to '9' (0xF9)
+    for b in range(0xF0, 0xFA):
+        assert CobolCharsetAdapter.is_zoned_decimal_ebcdic(b) is True
+    # Signed positive 'A'..'I' representing 1..9 with positive sign (0xC1..0xC9)
+    for b in range(0xC1, 0xCA):
+        assert CobolCharsetAdapter.is_zoned_decimal_ebcdic(b) is True
+    # Signed negative 'J'..'R' representing 1..9 with negative sign (0xD1..0xD9)
+    for b in range(0xD1, 0xDA):
+        assert CobolCharsetAdapter.is_zoned_decimal_ebcdic(b) is True
+    # Non-digit byte e.g. 0x40 (space)
+    assert CobolCharsetAdapter.is_zoned_decimal_ebcdic(0x40) is False
+

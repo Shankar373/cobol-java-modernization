@@ -1320,8 +1320,8 @@ class CobolParser:
             else:
                 tgt_tok = self.consume("IDENTIFIER", None, "Expected paragraph name after PERFORM")
                 props = {"statement_type": "PERFORM", "target": tgt_tok.value}
-                if self.match("KEYWORD", "THRU"):
-                    thru_tok = self.consume("IDENTIFIER", None, "Expected THRU paragraph name")
+                if self.match("KEYWORD", "THRU") or self.match("KEYWORD", "THROUGH") or self.match("IDENTIFIER", "THRU") or self.match("IDENTIFIER", "THROUGH"):
+                    thru_tok = self.consume("IDENTIFIER", None, "Expected THRU/THROUGH paragraph name")
                     props["thru"] = thru_tok.value
  
                 if self.match("KEYWORD", "VARYING"):

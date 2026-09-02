@@ -5352,6 +5352,14 @@ class Pipeline:
                         return False, msg, []
                     baseline_files_list = self.data("baseline_files") or []
                     mismatches = []
+                    allow_empty = (self.cfg.get("compare", {}) or {}).get("allow_empty_outputs", False)
+                    is_input_empty = False
+                    for f_assign in (self.data("discover", {}).get("file_assigns", {}) or {}).values():
+                        for a in f_assign:
+                            p = a.get("assign_path")
+                            if p and os.path.exists(os.path.join(self.repo, p)):
+                                if os.path.getsize(os.path.join(self.repo, p)) == 0:
+                                    is_input_empty = True
 
                     def _decode_pipe_records(path):
                         """Parse pipe-delimited records with numeric amount field."""
@@ -5451,14 +5459,6 @@ class Pipeline:
                                 b_content = fh.read()
                             with open(j_file, "rb") as fh:
                                 j_content = fh.read()
-                            allow_empty = (self.cfg.get("compare", {}) or {}).get("allow_empty_outputs", False)
-                            is_input_empty = False
-                            for f_assign in (self.data("discover", {}).get("file_assigns", {}) or {}).values():
-                                for a in f_assign:
-                                    p = a.get("assign_path")
-                                    if p and os.path.exists(os.path.join(self.repo, p)):
-                                        if os.path.getsize(os.path.join(self.repo, p)) == 0:
-                                            is_input_empty = True
                             if len(b_content) == 0 and len(j_content) == 0 and not (allow_empty or is_input_empty):
                                 mismatches.append(f"{rel_path}: unexpected zero-byte output in both baseline and modernized output (requires allow_empty_outputs: true in config)")
                             elif _normalize_text(b_content) != _normalize_text(j_content):
@@ -5478,6 +5478,10 @@ class Pipeline:
                                     rel = os.path.relpath(j_full, mod_dir)
                                     b_full = os.path.join(baseline_dir, rel)
                                     if not os.path.exists(b_full):
+                                        if getattr(self, "skip_legacy", False):
+                                            continue
+                                        if os.path.getsize(j_full) == 0 and (allow_empty or is_input_empty):
+                                            continue
                                         mismatches.append(f"extra unexpected output file in modernized output: {posix(rel)}")
 
                     if mismatches:

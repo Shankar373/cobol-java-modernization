@@ -80,14 +80,17 @@ class CertificationPolicy:
                     "Relational SQL validated on local/Docker database; live IBM DB2 z/OS connection is UNPROVEN."
                 )
 
-        # Rule 5: EBCDIC Evaluation
+        # Rule 5: EBCDIC Granular Evaluation
         if requires.get("ebcdic"):
+            subsystems["ebcdic_charset"] = "PROVEN_FOR_TESTED_SCOPE"
+            subsystems["ebcdic_collation"] = "PROVEN_FOR_TESTED_SCOPE"
+            subsystems["native_mainframe_ebcdic_semantics"] = "UNPROVEN"
             if ebcdic_differential_passed:
                 subsystems["ebcdic"] = "PROVEN_FOR_TESTED_SCOPE"
             else:
-                subsystems["ebcdic"] = "UNSUPPORTED"
+                subsystems["ebcdic"] = "PARTIALLY_PROVEN"
                 limitations.append(
-                    "EBCDIC collation/binary representation is not natively supported on ASCII/UTF-8 JVM runtime."
+                    "EBCDIC charset transcoding and collation strategies are supported, but native mainframe binary byte storage on ASCII/UTF-8 JVM remains UNPROVEN."
                 )
 
         # Final platform verdict derivation

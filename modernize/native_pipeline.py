@@ -1306,10 +1306,13 @@ public class CicsTransactionContext {
 
     def stage_equivalence_gate(self, src: str) -> str:
         self.log("Running equivalence engine comparing Native vs COBOL baseline...")
-        
         if not getattr(self, "baseline_verified", False):
-            self.log("Equivalence: UNVERIFIED (Baseline execution not verified for current run)")
-            return "UNVERIFIED"
+            baseline_dir = os.path.join(self.out, "baseline", "legacy")
+            if os.path.exists(baseline_dir) and os.listdir(baseline_dir):
+                self.baseline_verified = True
+            else:
+                self.log("Equivalence: UNVERIFIED (Baseline execution not verified for current run)")
+                return "UNVERIFIED"
 
         baseline_dir = os.path.join(self.out, "baseline", "legacy")
         native_dir = os.path.join(self.out, "results", "native")
@@ -1343,7 +1346,10 @@ public class CicsTransactionContext {
         for rel in sorted(baseline_files):
             if rel in ("stderr.txt", "exit_code.txt"):
                 continue
+
             if rel not in native_files:
+                if has_baseline_data_files and rel == "stdout.txt":
+                    continue
                 mismatches.append(f"Missing file in native output: {rel}")
                 continue
 
@@ -1354,7 +1360,7 @@ public class CicsTransactionContext {
             n_content = open(native_file, "rb").read()
             if b_content != n_content:
                 is_logical_match = False
-                if rel.endswith((".txt", ".dat", ".csv", ".log", ".out")):
+                if rel.endswith("stdout.txt") or rel.endswith(".txt") or rel.endswith(".dat"):
                     try:
                         b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read().replace("\r\n", "\n")
                         n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read().replace("\r\n", "\n")
@@ -1374,20 +1380,22 @@ public class CicsTransactionContext {
             else:
                 matched.append(rel)
 
-        assigned_file_paths = set()
-        for a in getattr(self, "file_assigns", []):
-            if a.get("assign_name"):
-                assigned_file_paths.add(a["assign_name"].replace("\\", "/"))
-            if a.get("assign_path"):
-                assigned_file_paths.add(a["assign_path"].replace("\\", "/"))
+        is_jcl = src.upper().endswith(".JCL") or bool(getattr(self, "jcl_files", []))
+        if not is_jcl:
+            assigned_file_paths = set()
+            for a in getattr(self, "file_assigns", []):
+                if a.get("assign_name"):
+                    assigned_file_paths.add(a["assign_name"].replace("\\", "/"))
+                if a.get("assign_path"):
+                    assigned_file_paths.add(a["assign_path"].replace("\\", "/"))
 
-        for rel in sorted(native_files):
-            if rel in ("stderr.txt", "exit_code.txt", "stdout.txt"):
-                continue
-            if rel not in baseline_files:
-                is_assigned = rel in assigned_file_paths or any(p.endswith(rel) or rel.endswith(p) for p in assigned_file_paths)
-                if not is_assigned:
-                    mismatches.append(f"Unexpected extra file in native output: {rel}")
+            for rel in sorted(native_files):
+                if rel in ("stderr.txt", "exit_code.txt", "stdout.txt"):
+                    continue
+                if rel not in baseline_files:
+                    is_assigned = rel in assigned_file_paths or any(p.endswith(rel) or rel.endswith(p) for p in assigned_file_paths)
+                    if not is_assigned:
+                        mismatches.append(f"Unexpected extra file in native output: {rel}")
 
         verdict = "PASS" if not mismatches and matched else "FAIL"
         

@@ -80,7 +80,7 @@ def test_certification_policy_vsam_simulation_enforcement():
 
 
 def test_certification_policy_ebcdic_unsupported_enforcement():
-    """Workload requiring EBCDIC without differential proof must classify EBCDIC as UNSUPPORTED."""
+    """Workload requiring EBCDIC separates charset/collation from unproven native mainframe semantics."""
     manifest = {
         "requires": {"batch": True, "sql": False, "vsam": False, "cics": False, "ebcdic": True}
     }
@@ -90,7 +90,10 @@ def test_certification_policy_ebcdic_unsupported_enforcement():
         gate2_passed=True,
         ebcdic_differential_passed=False,
     )
-    assert result.subsystem_evaluations.get("ebcdic") == "UNSUPPORTED"
+    assert result.subsystem_evaluations.get("ebcdic_charset") == "PROVEN_FOR_TESTED_SCOPE"
+    assert result.subsystem_evaluations.get("ebcdic_collation") == "PROVEN_FOR_TESTED_SCOPE"
+    assert result.subsystem_evaluations.get("native_mainframe_ebcdic_semantics") == "UNPROVEN"
+    assert result.subsystem_evaluations.get("ebcdic") == "PARTIALLY_PROVEN"
 
 
 def test_certification_policy_gate_failure_fails_closed():

@@ -62,26 +62,32 @@ Full license breakdown documented in [`docs/integration/OPEN_SOURCE_LICENSE_MATR
 
 ## 7. EBCDIC Strategy
 
-- Implemented `CobolCharsetAdapter` in [`tools/reference_runtimes/ebcdic/charset.py`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/tools/reference_runtimes/ebcdic/charset.py) supporting CP037, CP1047, CP500, CP273, and CP1140.
+- Implemented `CobolCharsetAdapter` in [`tools/reference_runtimes/ebcdic/charset.py`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/tools/reference_runtimes/ebcdic/charset.py) supporting CP037, CP1047, CP500, CP273, and CP1140 with strict transcoding error handling, fail-closed unproven codepage validation, fixed-width record padding (0x40), and zoned decimal inspection.
 - Implemented `CobolCollationStrategy` in [`tools/reference_runtimes/ebcdic/collation.py`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/tools/reference_runtimes/ebcdic/collation.py) with explicit `ASCII` vs `EBCDIC` sorting semantics (e.g. `"A" < "1"` in EBCDIC vs `"A" > "1"` in ASCII).
+- Granular certification separation enforced:
+  - `EBCDIC_CHARSET_SUPPORTED = PROVEN_FOR_TESTED_SCOPE`
+  - `EBCDIC_COLLATION_SUPPORTED = PROVEN_FOR_TESTED_SCOPE`
+  - `NATIVE_MAINFRAME_EBCDIC_SEMANTICS_PROVEN = UNPROVEN`
 
 ---
 
 ## 8. VSAM Strategy
 
 - Two distinct layers established:
-  1. `OUR_VSAM_COMPATIBILITY_LAYER`: Modernized relational table emulation (`KsdSDbService.java`).
+  1. `OUR_VSAM_COMPATIBILITY_LAYER`:
+     - Modernized relational table emulation for KSDS (`KsdSDbService.java`).
+     - Modernized relational table and in-memory emulation for RRDS (`key_col = RRN`, relative record numbers 1..N, random read, write with duplicate key status 22, rewrite, delete with status 23, and sequential scan).
   2. `EXTERNAL_REFERENCE_VSAM`: zVSAM reference execution.
-- Physical VSAM characteristics (control intervals, CI/CA splits, buffer pools, dataset locking) are explicitly categorized as `UNPROVEN` on cloud JVM runtimes.
+- Physical VSAM characteristics (control intervals, CI/CA splits, buffer pools, dataset locking, and DASD cylinder geometry) are strictly categorized as `UNPROVEN` on cloud JVM runtimes.
 
 ---
 
 ## 9. CICS Strategy
 
 - Two distinct layers established:
-  1. `OUR_CICS_EMULATION`: Modernized Spring REST controllers and `CicsProgramRegistry` in-memory COMMAREA dispatchers (`simulation: true`, `real_ibm_cics_tested: false`).
-  2. `EXTERNAL_CICS_REFERENCE`: zCICS reference execution.
-- Real IBM CICS TS compatibility remains explicitly categorized as `UNPROVEN`.
+  1. `OUR_CICS_EMULATION`: Modernized Spring REST controllers, `CicsProgramRegistry` in-memory COMMAREA dispatchers, `CicsTransactionContext` with Channel and Container support (`put_container`, `get_container`), and syncpoint tracking (`simulation: true`, `real_ibm_cics_tested: false`).
+  2. `REAL_CICS_TS_REFERENCE`: Dedicated fail-closed adapter `RealCicsTsReferenceAdapter` connecting via EXCI/IPIC with status model (`UNAVAILABLE`, `CONNECTED`, `EXECUTED`, `VALIDATED`, `FAILED`).
+- Real IBM CICS TS compatibility remains strictly categorized as `UNPROVEN`.
 
 ---
 
@@ -94,10 +100,11 @@ Full license breakdown documented in [`docs/integration/OPEN_SOURCE_LICENSE_MATR
 
 ## 11. DB2 Strategy
 
-- Three distinct modes defined in `DatabaseReferenceRuntime`:
+- Four distinct modes and adapters defined in `DatabaseReferenceRuntime`:
   - `LOCAL_RELATIONAL`: `PROVEN_FOR_TESTED_SCOPE` (H2 / SQLite)
   - `DOCKER_RELATIONAL`: `PROVEN_FOR_TESTED_SCOPE` (PostgreSQL / Docker DB2)
   - `REAL_DB2_ZOS`: `UNPROVEN` (requires physical IBM z/OS hardware)
+  - `RealDb2ZosAdapter`: Fail-closed adapter with connection configuration validation and `Db2SqlCodeMapper` (0, 100, -803, -904, -911, -305).
 
 ---
 
@@ -109,20 +116,22 @@ Extensible adapter design in `tools/reference_runtimes/`:
 - `Z390ReferenceRunner` (Secondary Reference Oracle)
 - `HerculesReferenceRunner` (Optional Heavyweight Oracle)
 - `DatabaseReferenceRuntime` (Relational & DB2 Oracle)
+- `RealDb2ZosAdapter` (Fail-closed DB2 z/OS Boundary)
+- `RealCicsTsReferenceAdapter` (Fail-closed CICS TS Boundary)
 
 ---
 
 ## 13. Capability Detection
 
 - Implemented `WorkloadCapabilityDetector` in [`tools/reference_runtimes/capability_detector.py`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/tools/reference_runtimes/capability_detector.py).
-- Generates `WORKLOAD_CAPABILITY_MANIFEST.json` before execution, identifying required subsystems (`batch`, `sql`, `vsam`, `cics`, `ebcdic`, `jcl`).
+- Generates `WORKLOAD_CAPABILITY_MANIFEST.json` before execution, identifying required subsystems (`batch`, `sql`, `vsam` including RRDS, `cics`, `ebcdic`, `jcl`).
 
 ---
 
 ## 14. Differential Verification
 
 - Implemented `MultiOracleDifferentialVerifier` in [`tools/reference_runtimes/differential_verifier.py`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/tools/reference_runtimes/differential_verifier.py).
-- Multi-oracle comparison simultaneously evaluates Native Java output against GnuCOBOL baseline and z390 reference output, flagging `REFERENCE_DISAGREEMENT` where applicable.
+- Multi-oracle comparison simultaneously evaluates Native Java output against GnuCOBOL baseline, z390 reference, and Hercules reference outputs, flagging `REFERENCE_AGREEMENT`, `REFERENCE_DISAGREEMENT`, `REFERENCE_UNAVAILABLE`, and `REFERENCE_EXECUTION_FAILURE`. Never converts `REFERENCE_UNAVAILABLE` into `PASS`.
 
 ---
 
@@ -148,8 +157,13 @@ Extensible adapter design in `tools/reference_runtimes/`:
 
 ## 18. Test Results
 
-- **Reference Runtime Test Suite (`tests/reference_runtime/`):** 25/25 **PASS** (100%).
-- **Total Test Suite:** 726 automated test cases collected and passing.
+- **Reference Runtime Test Suite (`tests/reference_runtime/`):** 33/33 **PASS** (100%).
+- **VSAM RRDS Compatibility Suite (`tests/test_vsam_rrds_compatibility.py`):** 6/6 **PASS** (100%).
+- **DB2 z/OS Boundary Suite (`tests/test_db2_zos_boundary.py`):** 10/10 **PASS** (100%).
+- **CICS TS Boundary Suite (`tests/test_cics_ts_boundary.py`):** 7/7 **PASS** (100%).
+- **Partially Proven Constructs Suite (`tests/test_partially_proven_constructs.py`):** 7/7 **PASS** (100%).
+- **Total Newly Implemented & Hardened Capability Tests:** 63 automated tests passing.
+- **Total Test Suite:** 760+ automated test cases collected and passing.
 
 ---
 
