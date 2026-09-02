@@ -58,6 +58,7 @@
 
 | Document Path | Purpose | Authority | Status | Audience |
 |---|---|---|---|---|
+| [`docs/integration/OPEN_SOURCE_REFERENCE_BASELINE.md`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/docs/integration/OPEN_SOURCE_REFERENCE_BASELINE.md) | Open-source reference stack baseline | Authoritative | Active | Engineering Team |
 | [`docs/integration/OPEN_SOURCE_EVALUATION.md`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/docs/integration/OPEN_SOURCE_EVALUATION.md) | Technical evaluation of candidate mainframe reference technologies (z390, ICU4J, Hercules, DB2) | Authoritative | Active | Architects & Tooling Engineers |
 | [`docs/integration/OPEN_SOURCE_LICENSE_MATRIX.md`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/docs/integration/OPEN_SOURCE_LICENSE_MATRIX.md) | Open-source license compatibility and distribution impact analysis | Authoritative | Active | Compliance & Legal |
 | [`docs/integration/OPEN_SOURCE_REFERENCE_INTEGRATION_REPORT.md`](file:///c:/Users/bandi/Desktop/SystemaOps/Cobol-to-java-test/docs/integration/OPEN_SOURCE_REFERENCE_INTEGRATION_REPORT.md) | Architecture and test results for external reference runtime oracles | Authoritative | Active | Verification Engineers |
