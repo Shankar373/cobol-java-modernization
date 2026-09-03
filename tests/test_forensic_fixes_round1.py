@@ -4,8 +4,11 @@ Covers:
 1. data_flow.py identifier-boundary matching (no false DERIVES_FROM/USES edges)
 2. equivalence.py one-sided DB evidence must FAIL (fail-closed), not pass
 3. lexer.py missing/failed copybook expansion must be recorded in unsupported
+4. CobolNumeric.toDisplayString() must emit leading sign for signed COMP fields
+   (verified against GnuCOBOL -fsign=ASCII oracle)
 """
 
+import os
 import pytest
 
 from execution.contracts import ExecutionContract
@@ -129,3 +132,27 @@ def test_lexer_missing_copybook_is_recorded():
     reasons = [u.get("reason", "") for u in lexer.unsupported]
     assert any("COPYBOOK_NOT_FOUND" in r and "NOSUCHBOOK-XYZ" in r
                for r in reasons), f"missing-record copybook not surfaced: {reasons}"
+
+
+def test_cobol_numeric_signed_comp_display_emits_sign():
+    """GnuCOBOL -fsign=ASCII prints signed COMP with leading +/-:
+    DISPLAY of PIC S9(9) COMP value 101 => '+000000101'.
+    The Java runtime CobolNumeric.toDisplayString() must emit the sign
+    for ALL signed usages (COMP, COMP-3, DISPLAY) — not suppress it
+    for COMP. Verified against GnuCOBOL oracle."""
+    java_path = os.path.join(
+        "modernize", "java_helpers", "src", "main", "java",
+        "com", "systema", "modernized", "runtime", "CobolNumeric.java"
+    )
+    with open(java_path, encoding="utf-8") as fh:
+        src = fh.read()
+    # The fix: non-separate signed branch must NOT branch on usage
+    # (no "spec.usage == CobolUsage.DISPLAY" guard around the sign logic).
+    assert "spec.usage == CobolUsage.DISPLAY" not in src, (
+        "toDisplayString still has usage-based sign suppression for COMP — "
+        "must emit sign for all signed usages"
+    )
+    # Positive sign must be emitted for signed fields (not just negatives)
+    assert '"+" + digitsStr' in src or 'sign + digitsStr' in src, (
+        "toDisplayString does not emit leading '+' for positive signed values"
+    )

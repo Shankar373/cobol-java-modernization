@@ -10,7 +10,7 @@ from modernize.native_pipeline import NativePipeline
 # CI-portable container name:  docker-compose uses "modernization-platform-db-1"
 # but CI starts the container as "db" (see ci.yml). Allow override via env.
 # ---------------------------------------------------------------------------
-_PG_CONTAINER = os.environ.get("PG_CONTAINER_NAME", "db")
+_PG_CONTAINER = os.environ.get("PG_CONTAINER_NAME", "modernization-platform-db-1")
 
 
 def test_sql_baseline_differential():
