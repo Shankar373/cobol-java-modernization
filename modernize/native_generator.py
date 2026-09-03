@@ -4663,9 +4663,7 @@ class NativeProgramGenerator:
                     "physical_path": assign_path,
                     "is_input": is_input
                 })
-        print("SELECT FILES:", select_files)
-        print("FILE ASSIGNS:", self.file_assigns)
-        
+
         # Populate using_args
         for n in sorted_nodes:
             if n.kind == "DIVISION" and n.properties.get("name") == "PROCEDURE":

@@ -343,9 +343,16 @@ class EquivalenceEngine:
                         "Database affected tables mismatch.", key)
 
                 # Deep state comparison: only when both sides captured data.
+                # FAIL-CLOSED: if exactly one side captured evidence, that is a
+                # verification gap -> record a mismatch instead of silently passing.
                 b_rows = b_db.get("row_counts") or {}
                 j_rows = j_db.get("row_counts") or {}
-                if b_rows and j_rows and b_rows != j_rows:
+                if bool(b_rows) != bool(j_rows):
+                    _record_db_diff(
+                        "database_row_counts_one_sided",
+                        b_rows, j_rows,
+                        "Row counts captured on only one side; comparison cannot be proven.", key)
+                elif b_rows and j_rows and b_rows != j_rows:
                     _record_db_diff(
                         "database_row_counts_mismatch",
                         b_rows, j_rows,
@@ -353,7 +360,12 @@ class EquivalenceEngine:
 
                 b_keys = b_db.get("relevant_keys") or {}
                 j_keys = j_db.get("relevant_keys") or {}
-                if b_keys and j_keys and b_keys != j_keys:
+                if bool(b_keys) != bool(j_keys):
+                    _record_db_diff(
+                        "database_keys_one_sided",
+                        b_keys, j_keys,
+                        "Relevant keys captured on only one side; comparison cannot be proven.", key)
+                elif b_keys and j_keys and b_keys != j_keys:
                     _record_db_diff(
                         "database_keys_mismatch",
                         b_keys, j_keys,
@@ -361,7 +373,12 @@ class EquivalenceEngine:
 
                 b_state = b_db.get("before_after_state") or {}
                 j_state = j_db.get("before_after_state") or {}
-                if b_state and j_state and b_state != j_state:
+                if bool(b_state) != bool(j_state):
+                    _record_db_diff(
+                        "database_state_one_sided",
+                        str(b_state)[:500], str(j_state)[:500],
+                        "Before/after state captured on only one side; comparison cannot be proven.", key)
+                elif b_state and b_state != j_state:
                     _record_db_diff(
                         "database_state_mismatch",
                         str(b_state)[:500], str(j_state)[:500],
@@ -369,7 +386,12 @@ class EquivalenceEngine:
 
                 b_txn = (b_db.get("transaction_status") or "").lower()
                 j_txn = (j_db.get("transaction_status") or "").lower()
-                if b_txn and j_txn and b_txn != j_txn:
+                if bool(b_txn) != bool(j_txn):
+                    _record_db_diff(
+                        "database_transaction_one_sided",
+                        b_db.get("transaction_status"), j_db.get("transaction_status"),
+                        "Transaction status captured on only one side; comparison cannot be proven.", key)
+                elif b_txn and b_txn != j_txn:
                     _record_db_diff(
                         "database_transaction_mismatch",
                         b_db.get("transaction_status"), j_db.get("transaction_status"),
