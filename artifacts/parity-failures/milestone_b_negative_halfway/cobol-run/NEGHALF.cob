@@ -1,0 +1,15 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NEGHALF.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP.
+          05 A PIC S9(4)V99 SIGN IS TRAILING .
+          05 FILLER PIC X VALUE '|'.
+          05 B PIC S9(4)V9(2) SIGN IS TRAILING .
+       PROCEDURE DIVISION.
+           INITIALIZE A B.
+           MOVE -1.235 TO A.
+           MOVE 0 TO B.
+           COMPUTE B ROUNDED = A.
+           DISPLAY WS-GROUP.
+           GOBACK.

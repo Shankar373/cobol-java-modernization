@@ -1,0 +1,11 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SIZEERR.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-TGT PIC 9(2) VALUE 50.
+       PROCEDURE DIVISION.
+            ADD 60 TO WS-TGT
+                ON SIZE ERROR DISPLAY "OVERFLOW"
+            END-ADD
+            DISPLAY WS-TGT.
+           GOBACK.

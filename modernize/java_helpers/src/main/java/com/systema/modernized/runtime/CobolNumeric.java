@@ -260,19 +260,13 @@ public class CobolNumeric {
                     return digitsStr + sign;
                 }
             } else {
-                // No separate sign byte.
-                // DISPLAY-usage fields (PIC S9(n)) render with an explicit +/- sign
-                // (GnuCOBOL -fsign=ASCII behaviour).
-                // COMP / COMP-3 / COMP-5 binary/packed fields suppress the '+' for
-                // positive values — the sign lives in the binary encoding, not the
-                // display representation.
-                if (spec.usage == CobolUsage.DISPLAY) {
-                    String sign = currentVal.signum() < 0 ? "-" : "+";
-                    return sign + digitsStr;
-                } else {
-                    // COMP / COMP_3 / COMP_5
-                    return currentVal.signum() < 0 ? "-" + digitsStr : digitsStr;
-                }
+                // Signed numeric DISPLAY: COBOL renders an explicit leading
+                // sign for signed items REGARDLESS of internal USAGE (COMP,
+                // COMP-3, COMP-5, DISPLAY). Verified against the GnuCOBOL
+                // oracle (-fsign=ASCII): DISPLAY of PIC S9(9) COMP prints
+                // "+000000101" and PIC S9(9) prints the same.
+                String sign = currentVal.signum() < 0 ? "-" : "+";
+                return sign + digitsStr;
             }
         } else {
             return digitsStr;

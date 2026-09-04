@@ -1,0 +1,6 @@
+-- Golden reference scenarios
+-- CLM001: requested 100000, cap 500000, deductible 5000 => net 95000
+-- CLM002: requested 600000, cap 500000, deductible 5000 => net 495000
+-- CLM003: requested 250001 => MANUAL_REVIEW
+-- CLM004: expired policy => REJECTED
+-- CLM005: duplicate claim => REJECTED

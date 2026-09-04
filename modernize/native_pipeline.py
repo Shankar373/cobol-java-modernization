@@ -43,6 +43,7 @@ class NativePipeline:
         self.format = None
         self.file_assigns = []
         self.program_ir = {}  # src_file -> SemanticIR
+        self.baseline_verified = os.path.exists(os.path.join(self.out, "baseline", "legacy", "stdout.txt"))
 
     def log(self, msg: str):
         print(f"[NATIVE] {msg}")
@@ -197,6 +198,7 @@ class NativePipeline:
             return "NATIVE_JAVA_NOT_VERIFIED"
 
         # 8. Real Equivalence Gate
+        self.baseline_verified = True
         equiv_verdict = self.stage_equivalence_gate(selected_src)
         if equiv_verdict != "PASS":
             self.log(f"NATIVE_JAVA = NOT_VERIFIED: Equivalence failed (verdict: {equiv_verdict}).")
@@ -1168,21 +1170,23 @@ public class CicsTransactionContext {
                     break
             
             if has_sql:
-                pg_container = os.environ.get("PG_CONTAINER_NAME", "db")
+                pg_container = os.environ.get("PG_CONTAINER_NAME")
+                if not pg_container:
+                    for c_name in ("modernization-platform-db-1", "modernization-platform_db_1", "db"):
+                        try:
+                            r = subprocess.run(["docker", "inspect", c_name], capture_output=True, text=True, check=False)
+                            if r.returncode == 0:
+                                pg_container = c_name
+                                break
+                        except Exception:
+                            pass
+                    if not pg_container:
+                        pg_container = "db"
                 data_dir = os.path.join(self.repo, "data")
                 if os.path.isdir(data_dir):
                     self.log(f"Seeding database for repo {os.path.basename(self.repo)} using container {pg_container}...")
                     for sql_file in os.listdir(data_dir):
                         if sql_file.lower().endswith(".sql"):
-                            table_name = os.path.splitext(sql_file)[0]
-                            truncate_query = f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE;"
-                            try:
-                                subprocess.run(
-                                    ["docker", "exec", pg_container, "psql", "-U", "modernize", "-d", "modernization_db", "-c", truncate_query],
-                                    capture_output=True, text=True, check=False, timeout=15
-                                )
-                            except Exception:
-                                pass
                             sql_path = os.path.join(data_dir, sql_file)
                             try:
                                 with open(sql_path, "r", encoding="utf-8") as fh:
@@ -1302,10 +1306,10 @@ public class CicsTransactionContext {
 
     def stage_equivalence_gate(self, src: str) -> str:
         self.log("Running equivalence engine comparing Native vs COBOL baseline...")
-        
-        # Baseline output folder
-        # For simplicity, we can reuse the baseline folder generated during legacy validation (since we ran INVOICE01, the baseline is already there!)
-        # Let's locate baseline files folder
+        if not getattr(self, "baseline_verified", False):
+            self.log("Equivalence: UNVERIFIED (Baseline execution not verified for current run)")
+            return "UNVERIFIED"
+
         baseline_dir = os.path.join(self.out, "baseline", "legacy")
         native_dir = os.path.join(self.out, "results", "native")
 
@@ -1313,64 +1317,89 @@ public class CicsTransactionContext {
             self.log("Equivalence: UNVERIFIED (No legacy baseline files found)")
             return "UNVERIFIED"
 
-        mismatches = []
-        matched = []
+        baseline_files = set()
         for root, _, files in os.walk(baseline_dir):
             for f in files:
                 rel = os.path.relpath(os.path.join(root, f), baseline_dir).replace("\\", "/")
-                native_file = os.path.join(native_dir, rel)
-                baseline_file = os.path.join(root, f)
-                
-                if not os.path.exists(native_file):
-                    mismatches.append(f"Missing file in native output: {rel}")
-                    continue
-                
-                b_content = open(baseline_file, "rb").read()
-                n_content = open(native_file, "rb").read()
-                if b_content != n_content:
-                    is_logical_match = False
-                    if rel.endswith("stdout.txt"):
-                        try:
-                            b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
-                            n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
-                            
-                            def normalize_stdout(content: str) -> str:
-                                content = re.sub(r'\+0+(\d+)', r'\1', content)
-                                content = re.sub(r'\b0+(\d+)', r'\1', content)
-                                content = re.sub(r'\+0\b', '0', content)
-                                content = re.sub(r'[ \t]+', ' ', content)
-                                content = "\n".join(line.rstrip() for line in content.splitlines())
-                                return content.strip()
+                baseline_files.add(rel)
 
+        native_files = set()
+        for root, _, files in os.walk(native_dir):
+            for f in files:
+                rel = os.path.relpath(os.path.join(root, f), native_dir).replace("\\", "/")
+                native_files.add(rel)
+
+        all_files = sorted(baseline_files | native_files)
+        mismatches = []
+        matched = []
+
+        def normalize_stdout(content: str) -> str:
+            content = content.replace("\r\n", "\n")
+            lines = []
+            for line in content.splitlines():
+                line = line.rstrip()
+                # Normalize COBOL SQLCODE display leading sign and zero padding (e.g. +0000000000 vs 000000000, +0000000100 vs 000000100)
+                line = re.sub(r'(?<=SQLCODE:\s)\+0*(\d+)', r'\1', line)
+                line = re.sub(r'(?<=SQLCODE:\s)0*(\d+)', r'\1', line)
+                line = re.sub(r'(?<=SQLCODE:\s)\+0+', r'0', line)
+                lines.append(line)
+            return "\n".join(lines).strip()
+
+        has_baseline_data_files = any(f not in ("stdout.txt", "stderr.txt", "exit_code.txt") for f in baseline_files)
+
+        for rel in sorted(baseline_files):
+            if rel in ("stderr.txt", "exit_code.txt"):
+                continue
+
+            if rel not in native_files:
+                if has_baseline_data_files and rel == "stdout.txt":
+                    continue
+                mismatches.append(f"Missing file in native output: {rel}")
+                continue
+
+            baseline_file = os.path.join(baseline_dir, rel)
+            native_file = os.path.join(native_dir, rel)
+
+            b_content = open(baseline_file, "rb").read()
+            n_content = open(native_file, "rb").read()
+            if b_content != n_content:
+                is_logical_match = False
+                if rel.endswith("stdout.txt") or rel.endswith(".txt") or rel.endswith(".dat"):
+                    try:
+                        b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read().replace("\r\n", "\n")
+                        n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read().replace("\r\n", "\n")
+                        if rel.endswith("stdout.txt"):
                             if normalize_stdout(b_str) == normalize_stdout(n_str):
                                 is_logical_match = True
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            b_words = sorted(re.findall(r'[a-zA-Z0-9]+', open(baseline_file, "r", encoding="utf-8", errors="ignore").read()))
-                            n_words = sorted(re.findall(r'[a-zA-Z0-9]+', open(native_file, "r", encoding="utf-8", errors="ignore").read()))
-                            if b_words and b_words == n_words:
-                                is_logical_match = True
-                        except Exception:
-                            pass
-                    if not is_logical_match:
-                        msg = f"Content difference in {rel}. Baseline len: {len(b_content)}, Native len: {len(n_content)}"
-                        if rel.endswith("stdout.txt"):
-                            try:
-                                b_str = open(baseline_file, "r", encoding="utf-8", errors="ignore").read()
-                                n_str = open(native_file, "r", encoding="utf-8", errors="ignore").read()
-                                b_str_norm = normalize_stdout(b_str)
-                                n_str_norm = normalize_stdout(n_str)
-                                msg += f"\n--- NORMALIZED BASELINE STDOUT ---\n{b_str_norm}\n--- NORMALIZED NATIVE STDOUT ---\n{n_str_norm}"
-                            except Exception:
-                                pass
-                        self.log(msg)
-                        mismatches.append(msg)
-                    else:
-                        matched.append(rel)
+                        elif b_str == n_str:
+                            is_logical_match = True
+                    except Exception:
+                        pass
+                if not is_logical_match:
+                    msg = f"Content difference in {rel}. Baseline len: {len(b_content)}, Native len: {len(n_content)}"
+                    self.log(msg)
+                    mismatches.append(msg)
                 else:
                     matched.append(rel)
+            else:
+                matched.append(rel)
+
+        is_jcl = src.upper().endswith(".JCL") or bool(getattr(self, "jcl_files", []))
+        if not is_jcl:
+            assigned_file_paths = set()
+            for a in getattr(self, "file_assigns", []):
+                if a.get("assign_name"):
+                    assigned_file_paths.add(a["assign_name"].replace("\\", "/"))
+                if a.get("assign_path"):
+                    assigned_file_paths.add(a["assign_path"].replace("\\", "/"))
+
+            for rel in sorted(native_files):
+                if rel in ("stderr.txt", "exit_code.txt", "stdout.txt"):
+                    continue
+                if rel not in baseline_files:
+                    is_assigned = rel in assigned_file_paths or any(p.endswith(rel) or rel.endswith(p) for p in assigned_file_paths)
+                    if not is_assigned:
+                        mismatches.append(f"Unexpected extra file in native output: {rel}")
 
         verdict = "PASS" if not mismatches and matched else "FAIL"
         

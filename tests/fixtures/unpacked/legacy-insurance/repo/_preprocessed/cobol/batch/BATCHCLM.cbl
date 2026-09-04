@@ -1,0 +1,26 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BATCHCLM.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT CLAIM-IN ASSIGN TO 'claims.in'
+               ORGANIZATION IS LINE SEQUENTIAL.
+           SELECT CLAIM-OUT ASSIGN TO 'claims.out'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD CLAIM-IN.
+       01 CLAIM-IN-REC PIC X(160).
+       FD CLAIM-OUT.
+       01 CLAIM-OUT-REC PIC X(160).
+       PROCEDURE DIVISION.
+           OPEN INPUT CLAIM-IN OUTPUT CLAIM-OUT.
+           PERFORM UNTIL 1 = 0
+               READ CLAIM-IN
+                   AT END EXIT PERFORM
+               END-READ
+               MOVE CLAIM-IN-REC TO CLAIM-OUT-REC
+               WRITE CLAIM-OUT-REC
+           END-PERFORM.
+           CLOSE CLAIM-IN CLAIM-OUT.
+           GOBACK.

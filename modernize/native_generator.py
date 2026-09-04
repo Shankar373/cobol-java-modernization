@@ -1940,8 +1940,14 @@ class NativeStatementTranslator:
                     if val.upper() in self.redefines_layout and not self.redefines_layout[val.upper()]["is_array"]:
                         java_var = f"get_{java_var}()"
                     var_type = self.var_types.get(val, "String")
+                    pic = getattr(self.current_generator, "var_pics", {}).get(val, "") if self.current_generator else ""
                     if var_type == "String":
                         part_expr = java_var
+                    elif var_type == "BigDecimal":
+                        part_expr = f"new String({java_var}.toStorageImage(), java.nio.charset.StandardCharsets.ISO_8859_1)"
+                    elif var_type in ("Integer", "Long", "int", "long") and pic:
+                        signed, length, scale, _ = NativeTypeMapper.parse_pic(pic)
+                        part_expr = f"formatSigned({java_var}, {length}, {'true' if signed else 'false'})"
                     else:
                         part_expr = f"String.valueOf({java_var})"
                 else:
@@ -1980,7 +1986,10 @@ class NativeStatementTranslator:
             elif source in self.var_types:
                 j_src = to_java_var(source)
                 src_expr = f"get_{j_src}()" if source in self.redefines_layout else j_src
-                if self.var_types.get(source) != "String":
+                s_type = self.var_types.get(source)
+                if s_type == "BigDecimal":
+                    src_expr = f"new String({src_expr}.toStorageImage(), java.nio.charset.StandardCharsets.ISO_8859_1)"
+                elif s_type != "String":
                     src_expr = f"String.valueOf({src_expr})"
             else:
                 src_expr = f"\"{source}\""
@@ -1991,7 +2000,10 @@ class NativeStatementTranslator:
                 elif delimited_by in self.var_types:
                     j_delim = to_java_var(delimited_by)
                     delim_expr = f"get_{j_delim}()" if delimited_by in self.redefines_layout else j_delim
-                    if self.var_types.get(delimited_by) != "String":
+                    d_type = self.var_types.get(delimited_by)
+                    if d_type == "BigDecimal":
+                        delim_expr = f"new String({delim_expr}.toStorageImage(), java.nio.charset.StandardCharsets.ISO_8859_1)"
+                    elif d_type != "String":
                         delim_expr = f"String.valueOf({delim_expr})"
                 else:
                     delim_expr = f"\"{delimited_by}\""
@@ -2999,9 +3011,9 @@ class NativeStatementTranslator:
                     r_val = to_java_var(cond_stripped)
                     if cond_stripped.upper() in self.redefines_layout and not self.redefines_layout[cond_stripped.upper()]["is_array"]:
                         r_val = f"get_{r_val}()"
-                    return f"Objects.equals({subj_java}, {r_val})"
+                    return f"com.systema.modernized.CobolFormatHelper.cobolEquals({subj_java}, {r_val})"
                 else:
-                    return f"Objects.equals({subj_java}, \"{cond_stripped}\")"
+                    return f'com.systema.modernized.CobolFormatHelper.cobolEquals({subj_java}, "{cond_stripped}")'
         else:
             return self._translate_condition(cond)
 
@@ -3137,10 +3149,14 @@ class NativeStatementTranslator:
                     op = match.group(2)
                     right = match.group(3)
                     right_upper = right.upper()
-                    if right_upper in self.var_types:
+                    # The right operand may already be Java-cased (underscores).
+                    # var_types is keyed with COBOL hyphens, so try both forms.
+                    right_cobol = right_upper.replace("_", "-")
+                    resolved_right_type = self.var_types.get(right_upper) or self.var_types.get(right_cobol)
+                    if resolved_right_type is not None:
                         r_java = to_java_var(right)
-                        if self.var_types[right_upper] == "BigDecimal":
-                            if right_upper in self.redefines_layout:
+                        if resolved_right_type == "BigDecimal":
+                            if right_upper in self.redefines_layout or right_cobol in self.redefines_layout:
                                 r_val = r_java
                             else:
                                 r_val = f"{r_java}.getValue()"
@@ -3166,7 +3182,7 @@ class NativeStatementTranslator:
                         right = f"\"{right[1:-1]}\""
                     else:
                         right = to_java_var(right)
-                    return f"{_jv}{sub}.equals({right})" if op == "==" else f"!{_jv}{sub}.equals({right})"
+                    return f"com.systema.modernized.CobolFormatHelper.cobolEquals({_jv}{sub}, {right})" if op == "==" else f"!com.systema.modernized.CobolFormatHelper.cobolEquals({_jv}{sub}, {right})"
                 cond = re.sub(pattern, repl_str, cond)
         # Resolve redefined variables to getter methods
         for v in self.redefines_layout.keys():
@@ -4295,7 +4311,11 @@ class NativeFileIOGenerator:
                         java_var = to_java_var(f_name)
                         pic = [p for n, p in record_fields if n == f_name][0]
                         java_type = NativeTypeMapper.get_java_type(pic)
-                        lines.append(f"                String val_{java_var} = (line.length() >= {end}) ? line.substring({start}, {end}).trim() : (line.length() > {start} ? line.substring({start}).trim() : \"\");")
+                        if java_type == "String":
+                            f_len = end - start
+                            lines.append(f"                String val_{java_var} = (line.length() >= {end}) ? line.substring({start}, {end}) : (line.length() > {start} ? padString(line.substring({start}), {f_len}) : padString(\"\", {f_len}));")
+                        else:
+                            lines.append(f"                String val_{java_var} = (line.length() >= {end}) ? line.substring({start}, {end}).trim() : (line.length() > {start} ? line.substring({start}).trim() : \"\");")
                         if java_type == "BigDecimal":
                             scale = NativeTypeMapper.parse_pic(pic)[2]
                             signed = NativeTypeMapper.parse_pic(pic)[3]
@@ -4396,7 +4416,7 @@ class NativeFileIOGenerator:
                     fmt_str = "".join(fmt_parts)
                     args_str = ", ".join(fmt_args)
                     lines.append(f"            {java_fd}_writer.write(String.format(\"{fmt_str}\", {args_str}).replaceAll(\"\\\\s+$\", \"\"));")
-                lines.append(f"            {java_fd}_writer.newLine();")
+                lines.append(f"            {java_fd}_writer.write(\"\\n\");")
             else:
                 lines.append(f"            if ({java_fd}_stream_out == null) return;")
                 lines.append(f"            byte[] buf = new byte[{rec_len}];")
@@ -4647,9 +4667,7 @@ class NativeProgramGenerator:
                     "physical_path": assign_path,
                     "is_input": is_input
                 })
-        print("SELECT FILES:", select_files)
-        print("FILE ASSIGNS:", self.file_assigns)
-        
+
         # Populate using_args
         for n in sorted_nodes:
             if n.kind == "DIVISION" and n.properties.get("name") == "PROCEDURE":
@@ -4714,6 +4732,8 @@ class NativeProgramGenerator:
                         self.occurs_map[name] = (occurs_val, elem_type)
 
         # Populate group_fields
+        # Level-78 (constants) and level-88 (condition names) are not real data
+        # fields; they must never appear in binary serialisation helpers.
         current_group = None
         for n in sorted_nodes:
             if n.kind in ("VARIABLE", "DATA_ITEM"):
@@ -4727,6 +4747,10 @@ class NativeProgramGenerator:
                     else:
                         current_group = None
                 elif level > 1 and current_group:
+                    # Skip level-78 constants and level-88 condition names —
+                    # they have no storage and must not appear in get_*_bytes().
+                    if level == 88 or (name and name.upper() in self.constants_map):
+                        continue
                     self.group_fields[current_group].append(name)
 
         in_file_section = False
@@ -5505,7 +5529,7 @@ class NativeProgramGenerator:
             elif parent_type in ("Integer", "Long"):
                 conds = " || ".join(f"{parent_expr} == {v}" for v in values)
             else:
-                conds = " || ".join(f'Objects.equals({parent_expr}, "{v}")' for v in values)
+                conds = " || ".join(f'com.systema.modernized.CobolFormatHelper.cobolEquals({parent_expr}, "{v}")' for v in values)
             lines.append(f"    public boolean {method_name}() {{ return {conds}; }}")
 
         # Emit group variable bytes getters
@@ -5645,7 +5669,10 @@ class NativeProgramGenerator:
                 end = curr + length
                 curr += length
                 lines.append(f"        if (line.length() >= {end}) {{")
-                lines.append(f"            String val = line.substring({start}, {end}).trim();")
+                if child_type == "String":
+                    lines.append(f"            String val = line.substring({start}, {end});")
+                else:
+                    lines.append(f"            String val = line.substring({start}, {end}).trim();")
                 if child_type == "BigDecimal":
                     if signed:
                         val_expr = f"parseSigned(val, {scale})"

@@ -1,0 +1,171 @@
+{
+  "scorecard_version": "2.0.0",
+  "workload": "MULTIFILE01",
+  "evaluation_timestamp_utc": "2026-09-01T16:01:48.360209+00:00",
+  "certification_verdict": "UNPROVEN",
+  "certification_grade": "UNPROVEN",
+  "total_score": 20,
+  "max_score": 100,
+  "tier_breakdown": {
+    "tier_1": {
+      "name": "Syntax & AST Parsing",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {},
+      "warnings": [],
+      "errors": []
+    },
+    "tier_2": {
+      "name": "Compilation & Symbol Resolution",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {},
+      "warnings": [],
+      "errors": []
+    },
+    "tier_3": {
+      "name": "Structural & Symbol Equivalence",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {
+        "ast_nodes_mapped": true
+      },
+      "warnings": [],
+      "errors": []
+    },
+    "tier_4": {
+      "name": "Runtime Differential Equivalence",
+      "verdict": "UNPROVEN",
+      "score": 5,
+      "details": {
+        "workload": "MULTIFILE01",
+        "program": "MULTIFILE01",
+        "source": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\tests\\repos\\MULTIFILE01\\MULTIFILE01.cob",
+        "generated_java": "C:\\Users\\bandi\\Desktop\\SystemaOps\\Cobol-to-java-test\\target\\verification\\MULTIFILE01\\native",
+        "timestamp_utc": "2026-09-01T16:01:46.393511+00:00",
+        "overall_verdict": "UNPROVEN",
+        "business_equivalence": "UNPROVEN",
+        "total_duration_ms": 33113.332,
+        "jdk": "javac 25.0.3",
+        "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
+        "conversion": "PASS",
+        "compilation": "PASS",
+        "cobol_runtime": "PASS",
+        "java_runtime": "FAIL",
+        "cobol_exit_code": 0,
+        "java_exit_code": 0,
+        "cobol_stdout": "",
+        "java_stdout": "",
+        "stdout_comparison": "MATCH",
+        "stderr_comparison": "MATCH",
+        "file_comparison": [
+          {
+            "file": "source/input-b.dat",
+            "legacy_sha256": "MISSING",
+            "java_sha256": "da2c2f5fb0f051f9f0a6485b6ff0be8e7ef8fa7b3d1df5ebcdd576754220b0d6",
+            "match": false,
+            "size_bytes": 44
+          },
+          {
+            "file": "source/input-a.dat",
+            "legacy_sha256": "MISSING",
+            "java_sha256": "c5cac2f5e9e9b1b5a29104b3060fd11830979e4f11c8377c0d099622756b2691",
+            "match": false,
+            "size_bytes": 34
+          },
+          {
+            "file": "reports/report-b.dat",
+            "legacy_sha256": "MISSING",
+            "java_sha256": "d499037b69b79226e7d403874e8592f75e8bfe72493dfa3b0a4df807fe6f950f",
+            "match": false,
+            "size_bytes": 44
+          },
+          {
+            "file": "reports/report-a.dat",
+            "legacy_sha256": "MISSING",
+            "java_sha256": "21b359d4e47f65859420fff062e7e00db4ba685a1dccd3be6fa15c98e94a6c6e",
+            "match": false,
+            "size_bytes": 32
+          }
+        ],
+        "database_comparison": {
+          "status": "NOT_APPLICABLE",
+          "details": "No SQL embedded in workload."
+        },
+        "unsupported_constructs": [],
+        "warnings": [],
+        "errors": [],
+        "step_results": {
+          "step1_conversion": {
+            "status": "PASS",
+            "duration_ms": 100.475,
+            "selected_src": "MULTIFILE01.cob",
+            "generated_files": [
+              "CicsProgramRegistry.java",
+              "CicsTransactionContext.java",
+              "CobolFormatHelper.java",
+              "CobolRef.java",
+              "Db2Verify.java",
+              "JclExecutionContext.java",
+              "Idcams.java",
+              "Iebgener.java",
+              "Multifile01.java",
+              "Sort.java",
+              "AssignResult.java",
+              "CobolArithmetic.java",
+              "CobolNumeric.java",
+              "CobolNumericSpec.java",
+              "CobolRoundingMode.java",
+              "CobolSignPosition.java",
+              "CobolUsage.java",
+              "ProhibitedRoundingException.java",
+              "SizeErrorPolicy.java",
+              "UnsupportedPrecisionException.java"
+            ],
+            "file_count": 20
+          },
+          "step2_compilation": {
+            "status": "PASS",
+            "duration_ms": 12850.313999999998,
+            "compiled_classes": 23,
+            "jdk": "javac 25.0.3",
+            "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)"
+          },
+          "step3_cobol_execution": {
+            "status": "PASS",
+            "mode": "REAL_GNUCOBOL_DOCKER",
+            "duration_ms": 3010.964,
+            "exit_code": 0,
+            "image": "gnucobol-ocesql:latest"
+          },
+          "step4_comparison": {
+            "status": "UNPROVEN",
+            "gate_result": "PASS",
+            "diff_details": {
+              "stdout_match": true,
+              "stderr_match": true,
+              "exit_code_match": true,
+              "file_records_match": false,
+              "database_state_match": true,
+              "baseline_bytes": 0,
+              "java_bytes": 0
+            },
+            "duration_ms": 14855.306
+          }
+        },
+        "manifest_sha256": "1e11b4e924cbae600a94a5b2eae6ed4fc33f4c55a12d71765540eaf17956922f"
+      },
+      "warnings": [],
+      "errors": []
+    },
+    "tier_5": {
+      "verdict": "UNPROVEN",
+      "status": "NOT_EVALUATED",
+      "score": 0
+    }
+  },
+  "warnings": [],
+  "blockers": [],
+  "unsupported_constructs": [],
+  "manifest_sha256": null
+}

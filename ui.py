@@ -730,6 +730,48 @@ class Handler(BaseHTTPRequestHandler):
             with open(resolved, "rb") as fh:
                 self._send(200, fh.read(), "application/json; charset=utf-8")
             return
+        if u.path == "/api/differential-report":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            workload = q.get("workload", [""])[0]
+            report_file = None
+            if workload:
+                report_file = os.path.join(ROOT, "reports", workload, "differential_validation_report.json")
+            elif rid and rid in RUNS:
+                report_file = os.path.join(RUNS[rid]["out"], "differential_validation_report.json")
+                if not os.path.exists(report_file):
+                    report_file = os.path.join(ROOT, "reports", rid, "differential_validation_report.json")
+            if report_file and os.path.exists(report_file):
+                try:
+                    with open(report_file, "r", encoding="utf-8") as fh:
+                        self._json({"ok": True, "report": json.load(fh)})
+                        return
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e)}, 500)
+                    return
+            self._json({"ok": False, "error": "Differential report not found"}, 404)
+            return
+        if u.path == "/api/certification-scorecard":
+            q = urllib.parse.parse_qs(u.query)
+            rid = q.get("run_id", [""])[0]
+            workload = q.get("workload", [""])[0]
+            scorecard_file = None
+            if workload:
+                scorecard_file = os.path.join(ROOT, "reports", workload, "certification_scorecard.json")
+            elif rid and rid in RUNS:
+                scorecard_file = os.path.join(RUNS[rid]["out"], "certification_scorecard.json")
+                if not os.path.exists(scorecard_file):
+                    scorecard_file = os.path.join(ROOT, "reports", rid, "certification_scorecard.json")
+            if scorecard_file and os.path.exists(scorecard_file):
+                try:
+                    with open(scorecard_file, "r", encoding="utf-8") as fh:
+                        self._json({"ok": True, "scorecard": json.load(fh)})
+                        return
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e)}, 500)
+                    return
+            self._json({"ok": False, "error": "Certification scorecard not found"}, 404)
+            return
         self._send(404, b"not found")
 
     def do_POST(self):
@@ -750,6 +792,29 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._json({"ok": False, "error": "bad json"}, 400)
+            return
+        if u.path == "/api/verify-differential":
+            try:
+                rid = payload.get("run_id")
+                workload = payload.get("workload")
+                repo = None
+                out = None
+                if rid and rid in RUNS:
+                    repo = RUNS[rid]["repo"]
+                    out = RUNS[rid]["out"]
+                    workload = workload or rid
+                elif workload:
+                    repo = os.path.join(ROOT, "tests", "repos", workload)
+                    out = os.path.join(ROOT, "target", "verification", workload)
+                if not repo or not os.path.exists(repo):
+                    self._json({"ok": False, "error": "Repository path not found"}, 400)
+                    return
+                from tools.cobol_java_differential_verifier import DifferentialVerifier
+                verifier = DifferentialVerifier(repo, out, workload)
+                res = verifier.run_all()
+                self._json({"ok": True, "result": res})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 500)
             return
         if u.path == "/api/ingest":
             ok, result = ingest(payload)

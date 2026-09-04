@@ -1,0 +1,14 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. COMP3RT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP.
+          05 A PIC S9(4)V99 USAGE COMP-3.
+          05 FILLER PIC X VALUE '|'.
+          05 B PIC 9(4)V99 USAGE COMP-3.
+       PROCEDURE DIVISION.
+           INITIALIZE A B.
+           MOVE -12.34 TO A.
+           MOVE 12.34 TO B.
+           DISPLAY WS-GROUP.
+           GOBACK.

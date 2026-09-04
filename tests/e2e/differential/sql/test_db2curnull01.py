@@ -1,10 +1,12 @@
 """Cursor + NULL indicators differential test.
 
-COBOL: Cursor over table with nullable column, fetch rows, check null indicators.
-Compares: rows fetched, NULL detection, SQLCODE/SQLSTATE values.
+COBOL: Cursor over a table with a nullable column; fetch rows, check null
+indicator values, count NULLs. Compares: rows fetched, NULL detection,
+SQLCODE output.
 
-Note: This test requires a DB2/PostgreSQL backend with the ocesql preprocessor.
-When Docker/DB2 is unavailable, the test will be SKIP'd gracefully.
+Note: requires the ocesql/PostgreSQL parity infrastructure (Docker). The
+harness injects DECLARE SECTION + CONNECT and swaps the SQLCA group for
+COPY "sqlca.cbl".
 """
 import os
 import pytest
@@ -13,100 +15,87 @@ from tests.utils.parity_harness import ParityFixture, run_parity
 
 
 # COBOL fixture: Cursor + NULL indicators test
-# Uses ocesql preprocessor; INCLUDE SQLCA is injected by the harness.
+# Valid ocesql-compatible SQL; self-seeding so no external schema fixture
+# is needed for the parity run.
 DB2CURNULL01_CODE = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. DB2CURNULL01.
-       
        ENVIRONMENT DIVISION.
-       CONFIGURATION SECTION.
-       SPECIAL-NAMES.
-       
        DATA DIVISION.
        WORKING-STORAGE SECTION.
-       01 WS-DBNAME PIC X(30) VALUE "modernization_db".
-       01 WS-USERNAME PIC X(30) VALUE "modernize".
-       01 WS-PASSWD PIC X(30) VALUE "modernize".
-       
-       * SQLCA is injected by ocesql preprocessor
-       
-       01 WS-EMPTABLE OCCURS 10 TIMES.
-           05 WS-EMPNO PIC 9(4).
-           05 WS-EMPNAME PIC X(20).
-           05 WS-SALARY PIC 9(5)V99 COMP-3.
-           05 WS-COMM PIC 9(3) VALUE 0.
-           05 WS-NULL-INDICATOR PIC S9(4) COMP VALUE 0.
-       
-       01 WS-ROW-NUM PIC 9(2) VALUE 1.
-       01 WS-DISPLAY-LINE PIC X(80) VALUE SPACES.
-       01 WS-NULL-COUNT PIC 9(2) VALUE 0.
-       
-       EXEC SQL DECLARE EMP_CURSOR CURSOR FOR
-           SELECT EMPNO, EMPNAME, SALARY, COMM, :WS-NULL-INDICATOR AS NULL_IND
-           FROM STAFF.EMPTABLE
-           FOR READ ONLY
-       END-EXEC.
-       
-       EXEC SQL WHENEVER NOT FOUND STOP RUN END-EXEC.
-       
+       01  SQLCA-VARIABLES.
+           05  SQLCODE    PIC S9(9) COMP.
+           05  SQLSTATE   PIC X(5).
+       01  WS-EMPNO      PIC S9(9) COMP.
+       01  WS-EMPNAME    PIC X(20) VALUE SPACES.
+       01  WS-COMM       PIC S9(5) COMP VALUE 0.
+       01  WS-COMM-IND   PIC S9(4) COMP VALUE 0.
+       01  WS-ROW-NUM    PIC 9(2) VALUE 1.
+       01  WS-NULL-COUNT PIC 9(2) VALUE 0.
        PROCEDURE DIVISION.
        MAIN-SECTION.
-           EXEC SQL CONNECT TO :WS-DBNAME IDENTIFIED BY :WS-USERNAME
-               USING :WS-DBNAME END-EXEC.
-           
-           EXEC SQL INSERT INTO STAFF.EMPTABLE
-               (EMPNO, EMPNAME, SALARY, COMM, NULL_IND)
-               VALUES (1001, 'JONES', 30000, 100, 0)
+           EXEC SQL
+               DROP TABLE IF EXISTS EMPTABLE
            END-EXEC.
-           
-           EXEC SQL INSERT INTO STAFF.EMPTABLE
-               (EMPNO, EMPNAME, SALARY, COMM, NULL_IND)
-               VALUES (1002, 'SMITH', 25000, NULL, -1)
+           EXEC SQL
+               CREATE TABLE EMPTABLE (
+                   EMPNO    INT,
+                   EMPNAME  VARCHAR(20),
+                   COMM     INT
+               )
            END-EXEC.
-           
-           EXEC SQL INSERT INTO STAFF.EMPTABLE
-               (EMPNO, EMPNAME, SALARY, COMM, NULL_IND)
-               VALUES (1003, 'ALLEN', 30000, 500, 0)
+           EXEC SQL
+               INSERT INTO EMPTABLE VALUES (1, 'JONES', 100)
            END-EXEC.
-           
-           EXEC SQL OPEN EMP_CURSOR END-EXEC.
-           
-           DISPLAY 'Cursor opened. Fetching rows...'
-           
-           EXEC SQL FETCH EMP_CURSOR INTO :WS-EMPNO, :WS-EMPNAME, :WS-SALARY, :WS-COMM, :WS-NULL-INDICATOR END-EXEC.
-           
-           PERFORM
-               WHILE SQLCODE > -999
-                   DISPLAY 'Row ' WS-ROW-NUM ': EMPNO=' WS-EMPNO ' EMPNAME=' WS-EMPNAME
-                        ' SALARY=' WS-SALARY ' COMM=' WS-COMM
-                        ' NULL-IND=' WS-NULL-INDICATOR
-                   
-                   IF WS-NULL-INDICATOR = -1
-                       DISPLAY '  *** NULL detected in COMM column ***'
-                       ADD 1 TO WS-NULL-COUNT
-                   END-IF
-                   
-                   ADD 1 TO WS-ROW-NUM
-                   EXEC SQL FETCH EMP_CURSOR INTO :WS-EMPNO, :WS-EMPNAME, :WS-SALARY, :WS-COMM, :WS-NULL-INDICATOR END-EXEC.
-               END-PERFORM
-           
-           DISPLAY 'Total NULL columns found: ' WS-NULL-COUNT
-           
-       end-program:
-           EXEC SQL CLOSE EMP_CURSOR END-EXEC.
-           EXEC SQL COMMIT END-EXEC.
-           EXEC SQL COMMIT WORK END-EXEC.
-           EXEC SQL DISCONNECT ALL END-EXEC.
-           STOP RUN.
+           EXEC SQL
+               INSERT INTO EMPTABLE VALUES (2, 'SMITH', NULL)
+           END-EXEC.
+           EXEC SQL
+               INSERT INTO EMPTABLE VALUES (3, 'ALLEN', 500)
+           END-EXEC.
+           DISPLAY 'ROWS SEEDED FOR CURSOR TEST'
+           EXEC SQL
+               DECLARE C1 CURSOR FOR
+               SELECT EMPNO, EMPNAME, COMM FROM EMPTABLE
+           END-EXEC.
+           EXEC SQL OPEN C1 END-EXEC.
+           DISPLAY 'OPEN SQLCODE: ' SQLCODE
+           PERFORM UNTIL SQLCODE NOT EQUAL 0
+               EXEC SQL
+                   FETCH C1 INTO
+                       :WS-EMPNO, :WS-EMPNAME, :WS-COMM:WS-COMM-IND
+               END-EXEC
+               EVALUATE TRUE
+                   WHEN SQLCODE EQUAL 0
+                       DISPLAY 'ROW ' WS-ROW-NUM
+                           ' EMPNO=' WS-EMPNO
+                           ' NULL-IND=' WS-COMM-IND
+                       IF WS-COMM-IND < 0
+                           DISPLAY '  *** NULL IN COMM ***'
+                           ADD 1 TO WS-NULL-COUNT
+                       END-IF
+                       ADD 1 TO WS-ROW-NUM
+                   WHEN SQLCODE EQUAL 100
+                       CONTINUE
+                   WHEN OTHER
+                       DISPLAY 'FETCH ERROR SQLCODE: ' SQLCODE
+               END-EVALUATE
+           END-PERFORM.
+           DISPLAY 'TOTAL NULL COLUMNS FOUND: ' WS-NULL-COUNT
+           EXEC SQL CLOSE C1 END-EXEC.
+           EXEC SQL DROP TABLE EMPTABLE END-EXEC.
+           DISPLAY 'CLOSE SQLCODE: ' SQLCODE
+           GOBACK.
 """
 
 # Skip unless PARITY_ALLOW_SKIP=true
 _DB2CURNULL01_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "false").lower() != "true"
 
 
-@pytest.mark.skipif(_DB2CURNULL01_SKIP, reason="Docker parity images not available — run with PARITY_ALLOW_SKIP=true to execute.")
+@pytest.mark.skipif(_DB2CURNULL01_SKIP, reason="Docker/DB parity infrastructure unavailable — run with PARITY_ALLOW_SKIP=true to execute.")
 def test_db2curnull01_parity():
-    """Run DB2CURNULL01 through the parity harness and compare COBOL vs Java outputs."""
+    """Compile the DB2CURNULL01 COBOL under GnuCOBOL+ocesql and
+    verify it runs. (Java parity pending native SQL generation.)"""
     fixture = ParityFixture(
         name="DB2CURNULL01",
         program_name="DB2CURNULL01",
@@ -116,6 +105,7 @@ def test_db2curnull01_parity():
         env={},
     )
     comparison = run_parity(fixture)
+
     assert comparison.status in ("PASS", "SKIP"), (
         f"DB2CURNULL01 parity FAILED:\n"
         + "".join(

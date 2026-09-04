@@ -5,7 +5,7 @@ COBOL_KEYWORDS = {
     "IDENTIFICATION", "PROGRAM-ID", "ENVIRONMENT", "CONFIGURATION", "INPUT-OUTPUT", "FILE-CONTROL",
     "SELECT", "ASSIGN", "ORGANIZATION", "INDEXED", "ACCESS", "DYNAMIC", "RECORD", "KEY", "STATUS", "ALTERNATE",
     "DATA", "FILE", "FD", "WORKING-STORAGE", "LINKAGE", "PROCEDURE", "DIVISION", "SECTION",
-    "MOVE", "TO", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE", "IF", "ELSE", "PERFORM", "THRU", "UNTIL",
+    "MOVE", "TO", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "COMPUTE", "IF", "ELSE", "PERFORM", "THRU", "THROUGH", "UNTIL",
     "DISPLAY", "GOBACK", "EXIT", "INITIALIZE", "READ", "WRITE", "REWRITE", "OPEN", "CLOSE",
     "STOP", "RUN", "COPY", "PIC", "PICTURE", "USAGE", "COMP", "COMP-3", "DISPLAY", "BINARY", "PACKED-DECIMAL",
     "REDEFINES", "OCCURS", "JUSTIFIED", "JUST", "VALUE", "VALUES", "WHEN", "TRUE", "FALSE", "EVALUATE",
@@ -128,9 +128,25 @@ class CobolLexer:
                         sub_lexer = CobolLexer(cp_file, format_mode=self.format_mode)
                         expanded = sub_lexer.preprocess_copybooks(cp_content)
                         new_lines.append(expanded)
-                    except Exception:
+                    except Exception as exc:
+                        # Record the failure instead of silently emitting the
+                        # unexpanded COPY line: parsing would then proceed on the
+                        # unexpanded source and produce wrong field layouts with
+                        # no signal. Expanding a copybook must be observable.
+                        self.unsupported.append({
+                            "reason": f"COPYBOOK_EXPANSION_FAILED: {cp_file}: {exc}",
+                            "line": line.strip(),
+                            "context": "copybook_expansion",
+                        })
                         new_lines.append(line)
                 else:
+                    # COPYBOOK NOT FOUND: record it so downstream stages can see
+                    # that the source was parsed with an unexpanded COPY.
+                    self.unsupported.append({
+                        "reason": f"COPYBOOK_NOT_FOUND: {cp_path}",
+                        "line": line.strip(),
+                        "context": "copybook_expansion",
+                    })
                     new_lines.append(line)
             else:
                 new_lines.append(line)
