@@ -3058,7 +3058,7 @@ class Pipeline:
                       for s in sources}
         fmt = self.cfg.get("format") or detect_format(list(texts.values()))
 
-        # Entry point: config > MAIN heuristic > first program
+        # Entry point: config > MAIN heuristic > call-graph root > first program
         cfg_entry = self.cfg.get("entry") or self.cfg.get("main_program")
         if cfg_entry:
             entry = cfg_entry.upper()
@@ -3085,6 +3085,21 @@ class Pipeline:
 
         # --- CALL dependency graph ---
         call_graph_data = build_call_graph(sources, texts, program_ids)
+
+        # Refine entry point: if pick_entry produced a non-MAIN heuristic result
+        # AND the call graph has exactly one unambiguous root, prefer the root.
+        # This fixes multi-program repositories where the caller (root) was not
+        # discovered first alphabetically (e.g. SALESPROG calls SALESCALC but
+        # SALESCALC sorts first).
+        if not cfg_entry:
+            call_roots = call_graph_data.get("roots", [])
+            if len(call_roots) == 1 and call_roots[0].upper() != entry:
+                self.log(
+                    f"  [INFO] entry overridden by call-graph root: "
+                    f"{entry} -> {call_roots[0]} "
+                    f"(pick_entry heuristic was ambiguous)"
+                )
+                entry = call_roots[0].upper()
 
         if call_graph_data["dynamic_callers"]:
             for prog in call_graph_data["dynamic_callers"]:

@@ -3149,10 +3149,14 @@ class NativeStatementTranslator:
                     op = match.group(2)
                     right = match.group(3)
                     right_upper = right.upper()
-                    if right_upper in self.var_types:
+                    # The right operand may already be Java-cased (underscores).
+                    # var_types is keyed with COBOL hyphens, so try both forms.
+                    right_cobol = right_upper.replace("_", "-")
+                    resolved_right_type = self.var_types.get(right_upper) or self.var_types.get(right_cobol)
+                    if resolved_right_type is not None:
                         r_java = to_java_var(right)
-                        if self.var_types[right_upper] == "BigDecimal":
-                            if right_upper in self.redefines_layout:
+                        if resolved_right_type == "BigDecimal":
+                            if right_upper in self.redefines_layout or right_cobol in self.redefines_layout:
                                 r_val = r_java
                             else:
                                 r_val = f"{r_java}.getValue()"
@@ -4728,6 +4732,8 @@ class NativeProgramGenerator:
                         self.occurs_map[name] = (occurs_val, elem_type)
 
         # Populate group_fields
+        # Level-78 (constants) and level-88 (condition names) are not real data
+        # fields; they must never appear in binary serialisation helpers.
         current_group = None
         for n in sorted_nodes:
             if n.kind in ("VARIABLE", "DATA_ITEM"):
@@ -4741,6 +4747,10 @@ class NativeProgramGenerator:
                     else:
                         current_group = None
                 elif level > 1 and current_group:
+                    # Skip level-78 constants and level-88 condition names —
+                    # they have no storage and must not appear in get_*_bytes().
+                    if level == 88 or (name and name.upper() in self.constants_map):
+                        continue
                     self.group_fields[current_group].append(name)
 
         in_file_section = False

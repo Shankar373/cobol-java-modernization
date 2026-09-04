@@ -39,3 +39,28 @@ This document lists the architectural constraints and emulation limits of the cu
 3.  **Live IBM DB2 z/OS & CICS TS Subsystems**:
     *   *Limit*: Without active connections to real IBM z/OS hardware, DB2 and CICS operate via modernized Spring Boot equivalents (`JdbcTemplate`, JPA, REST controllers, `CicsProgramRegistry`). Live mainframe connections remain classified as `UNPROVEN` with fail-closed adapters (`RealDb2ZosAdapter`, `RealCicsTsReferenceAdapter`).
 
+
+---
+
+## 4. Generator Defects Found and Resolved
+
+### 4.1 Multi-Program Entry-Point Selection (pick_entry)
+
+- **Symptom:** When a multi-program repository's entry program sorts alphabetically after
+  a subprogram, stage_discover selected the wrong entry. stage_baseline then ran
+  cobc -x on a PROCEDURE DIVISION USING subprogram, causing:
+  error: executable program requested but PROCEDURE/ENTRY has USING clause
+- **Root cause:** pick_entry() returned program_ids[0] (first in discovery order) when no
+  MAIN-named program existed. The call graph correctly identified the root but was built
+  AFTER pick_entry had already set entry.
+- **Fix:** After building the call graph, if exactly one unambiguous root exists and no
+  explicit config entry is provided, the call-graph root overrides pick_entry.
+- **Status:** RESOLVED in cobol_migrate.py stage_discover (2026-09-04).
+- **Verification:** SALESPROG+SALESCALC CALL chain: baseline=done execute=done
+  compare=PASS EXACT_BINARY SHA-256: 5776fd92150df00330250f044150cd8d155cc67958368ec0f19af459f51a70ca
+
+### 4.2 GnuCOBOL CALL Chain Capability Confirmed
+
+GnuCOBOL 3.1.2.0 fully supports multi-program static CALL chains via shared objects.
+No open-source toolchain limitation exists for this pattern.
+The prior baseline failure was solely due to the pipeline entry-point selection defect.
