@@ -64,3 +64,67 @@ This document lists the architectural constraints and emulation limits of the cu
 GnuCOBOL 3.1.2.0 fully supports multi-program static CALL chains via shared objects.
 No open-source toolchain limitation exists for this pattern.
 The prior baseline failure was solely due to the pipeline entry-point selection defect.
+
+---
+
+## 5. Audit Findings (2026-09-04 Post-Hardening Session)
+
+### 5.1 Ambiguous Multi-Entry Repositories
+
+- **Symptom:** When the call graph has multiple independent roots (two programs that do not
+  call each other), stage_discover silently fell through to pick_entry heuristic with no
+  log warning. Operators had no visibility that an ambiguous topology was encountered.
+- **Root cause:** The `if not cfg_entry:` block only handled `len(roots)==1` (correct
+  override) and `len(roots)==0` (no graph data). `len(roots)>1` fell through silently.
+- **Fix:** Added explicit `elif len(call_roots) > 1:` branch that emits
+  `[WARN] AMBIGUOUS_ENTRY_POINT` with machine-readable label, the root list, and
+  instruction to provide `entry` in `migration_config.json`.
+- **Status:** RESOLVED in cobol_migrate.py stage_discover (2026-09-04).
+- **Remaining risk:** Entry selection remains heuristic for ambiguous topologies.
+  Pipeline does not fail-closed; set `entry` in migration_config.json to disambiguate.
+
+### 5.2 skip_legacy Seeded Baseline: No Freshness Verification
+
+- **Symptom:** `--skip-legacy` reused files from `baseline/legacy/` with no SHA-256
+  manifest and no WARN log tag. CI had no way to detect stale baseline artifacts
+  automatically or verify the oracle files were valid GnuCOBOL outputs.
+- **Fix:** Added SHA-256 manifest (`seeded_baseline_sha256: {file: sha256_hex}`) to
+  `legacy` state data. Replaced silent log with `[WARN] STALE_BASELINE_RISK:` message.
+- **Status:** RESOLVED in cobol_migrate.py stage_baseline (2026-09-04).
+- **CI guidance:** Grep pipeline logs for `STALE_BASELINE_RISK` to detect seeded
+  baselines. The SHA-256 manifest in `target/state.json` can be compared across runs.
+
+### 5.3 Parser Error Recovery: Unsupported Statements Vanished from IR
+
+- **Symptom:** When a COBOL statement failed to parse (ParserDiagnostic), the error
+  recovery loop skipped forward until it found `PERIOD`, `MOVE`, `IF`, or `PERFORM`.
+  This silently discarded all sibling statements after the unsupported one within the
+  same sentence, dropping them from the IR entirely.
+- **Root cause:** The recovery keywords (MOVE/IF/PERFORM) were arbitrary — if an INSERT
+  or DROP statement appeared after an unsupported verb, valid statements were skipped.
+- **Fix:** Recovery now adds the malformed statement to the IR as `status="UNSUPPORTED"`,
+  making it visible to downstream stages and the generated Java. The skip loop stops at
+  the next statement boundary (using `is_tok_statement_start`) rather than arbitrary
+  keyword matches.
+- **Status:** RESOLVED in modernize/parser.py (2026-09-04).
+
+### 5.4 Stdout Comparison Truncation (Documented Operational Limit)
+
+- **Limit:** Stdout comparison is capped at min(1500, 2000) = 1500 bytes tail.
+  Programs producing more than 1500 bytes of stdout: only the tail is compared.
+- **Detection:** Pipeline emits `[WARN] stdout comparison used truncated tail`
+  when either side approaches the cap.
+- **Mitigation:** Use file output (`WRITE` to sequential file) for large volumes.
+  Increasing `STDOUT_TRUNCATE_LIMIT_LEGACY` requires re-testing all stdout workloads.
+
+### 5.5 Empty Output Files Not Captured by snapshot()
+
+- **Limit:** `snapshot()` skips files with `os.path.getsize(p) == 0`.
+  Programs that intentionally produce empty output files are not captured.
+- **Risk:** If Java produces an empty output where COBOL produced a non-empty one, the
+  difference may not surface if the baseline also produced empty (due to skip).
+  If COBOL produced non-empty but Java produced empty, the non-empty baseline IS captured
+  and the PRESENT_EMPTY Java status would trigger `nonempty_status_mismatch` FAIL.
+- **Classification:** PARTIALLY_MITIGATED — non-empty vs empty is detected; empty vs
+  empty is not captured (both sides skip). Add files to `expected_empty_files` in
+  `migration_config.json` to make empty-output contracts explicit.
