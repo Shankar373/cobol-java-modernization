@@ -3100,6 +3100,18 @@ class Pipeline:
                     f"(pick_entry heuristic was ambiguous)"
                 )
                 entry = call_roots[0].upper()
+            elif len(call_roots) > 1:
+                # Ambiguous: multiple independent roots discovered.
+                # pick_entry heuristic selected one, but this is UNPROVEN.
+                # Log a machine-readable warning so CI/operators can detect
+                # unsupported multi-entry repositories rather than silently
+                # relying on an arbitrary heuristic selection.
+                self.log(
+                    f"  [WARN] AMBIGUOUS_ENTRY_POINT: call graph has {len(call_roots)} roots "
+                    f"{call_roots} — entry set to '{entry}' by heuristic only. "
+                    f"Provide 'entry' or 'main_program' in migration_config.json to disambiguate. "
+                    f"Equivalence result will be UNPROVEN for this topology."
+                )
 
         if call_graph_data["dynamic_callers"]:
             for prog in call_graph_data["dynamic_callers"]:
@@ -3483,14 +3495,31 @@ class Pipeline:
         except Exception:
             pass
         if self.skip_legacy:
+            import hashlib as _hashlib
             bl = load_snapshot_dir(os.path.join(self.out, "baseline", "legacy"))
+            # Record a SHA-256 manifest so downstream stages / CI can verify
+            # that the seeded baseline has not changed between runs.
+            # STALE_BASELINE_RISK: without a live GnuCOBOL execution this path
+            # relies on pre-existing files from a previous run.  The manifest
+            # provides a fingerprint but does NOT guarantee the files are the
+            # correct oracle for the current COBOL source.
+            bl_manifest = {
+                k: _hashlib.sha256(v).hexdigest()
+                for k, v in bl.items()
+            }
             self.set_data("legacy", {
                 "skipped": True,
                 "seeded_baseline_files": sorted(bl),
+                "seeded_baseline_sha256": bl_manifest,
             })
             self.set_data("baseline_files", sorted(bl))
             if bl:
-                self.log(f"  baseline reused (--skip-legacy): {len(bl)} pre-seeded output file(s)")
+                self.log(
+                    f"  [WARN] STALE_BASELINE_RISK: baseline reused (--skip-legacy): "
+                    f"{len(bl)} pre-seeded output file(s). "
+                    f"SHA-256 manifest recorded; equivalence is PROVEN_FOR_TESTED_SCOPE "
+                    f"only when seeded files are a verified GnuCOBOL oracle."
+                )
             else:
                 self.log("  [WARN] --skip-legacy set but no pre-seeded baseline found "
                          "— equivalence will be UNVERIFIED, never PASS")

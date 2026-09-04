@@ -950,7 +950,33 @@ class CobolParser:
                 self.sentence_id += 1
         except ParserDiagnostic as e:
             self.diagnostics.append(e)
-            while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.check("KEYWORD", "MOVE") and not self.check("KEYWORD", "IF") and not self.check("KEYWORD", "PERFORM"):
+            # Fail-closed: record the malformed/unsupported statement in the IR
+            # instead of letting it vanish. Downstream stages (and the generated
+            # Java via "// Unsupported statement:") can then see and report it.
+            bad_tok = self.peek(-1) if self.current > 0 else self.peek()
+            bad_node = SemanticIRNode(
+                node_id=self.next_node_id(),
+                kind="STATEMENT",
+                properties={
+                    "statement_type": "UNKNOWN",
+                    "offending_token": getattr(e, "token_value", "") or (bad_tok.value if bad_tok else "")
+                },
+                source_file=self.file_path,
+                source_line=bad_tok.line if bad_tok else 0,
+                source_column=bad_tok.column if bad_tok else 0,
+                start_offset=bad_tok.start_offset if bad_tok else 0,
+                end_offset=bad_tok.end_offset if bad_tok else 0,
+                status="UNSUPPORTED"
+            )
+            self.ir.add_node(bad_node)
+            # Skip ONLY to the next statement boundary or sentence end.
+            # Previously this loop skipped until a period OR MOVE/IF/PERFORM,
+            # which silently discarded arbitrary valid sibling statements (e.g.
+            # CREATE/INSERT/DISPLAY after an unsupported DROP inside the same
+            # period-free sentence) — dropping them from the IR entirely.
+            while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                if is_tok_statement_start(self.peek()):
+                    break
                 self.current += 1
             if self.match("PUNCTUATION", "."):
                 self.close_implicit_scopes(self.peek(-1))
