@@ -56,10 +56,13 @@ from .nodes import (
     GoToStatement,
     IdentifierExpression,
     IfStatement,
+    Level88Declaration,
     LiteralExpression,
     LogicalExpression,
     MoveStatement,
     MultiplyStatement,
+    OccursClause,
+    OdoClause,
     ParserResult,
     PerformStatement,
     PicClause,
@@ -298,24 +301,70 @@ class Parser:
             if item_match is not None:
                 (level, name, redefines_target, pic_string,
                  pic_clause_node, usage_clause_node, value_clause_node,
-                 item_start, item_end) = item_match
+                 occurs_clause_node, odo_clause_node,
+                 item_start, item_end, clause_diags) = item_match
                 item_span = self._make_span(item_start, item_end)
                 item_kind = _DATA_ITEM_LEVEL_KIND[f"{level:02d}"]
                 item_id = self._make_id(item_kind, item_start)
-                data_items.append(
-                    DataItemDeclaration(
-                        node_id=item_id,
-                        kind=item_kind,
-                        span=item_span,
-                        level=level,
-                        name=name,
-                        redefines_target=redefines_target,
-                        pic_string=pic_string,
-                        pic_clause=pic_clause_node,
-                        usage_clause=usage_clause_node,
-                        value_clause=value_clause_node,
+                if level == 88:
+                    # T-2B-04R.4: level-88 condition names get a
+                    # dedicated syntax node.  They remain in the
+                    # flat, source-ordered data_items collection
+                    # (the R.2 contract) but are no longer ordinary
+                    # DataItemDeclaration instances.
+                    clause_diags = list(clause_diags)
+                    if value_clause_node is None:
+                        clause_diags.append(Diagnostic(
+                            severity=DiagnosticSeverity.ERROR,
+                            kind=DiagnosticKind.PARSER_RECOVERY,
+                            message="level-88: missing VALUE clause",
+                            span=item_span,
+                        ))
+                    if (
+                        occurs_clause_node is not None
+                        or odo_clause_node is not None
+                        or pic_clause_node is not None
+                        or usage_clause_node is not None
+                        or redefines_target is not None
+                    ):
+                        clause_diags.append(Diagnostic(
+                            severity=DiagnosticSeverity.ERROR,
+                            kind=DiagnosticKind.PARSER_RECOVERY,
+                            message=(
+                                "level-88: only a VALUE clause is valid "
+                                "on a condition name"
+                            ),
+                            span=item_span,
+                        ))
+                    diagnostics.extend(clause_diags)
+                    data_items.append(
+                        Level88Declaration(
+                            node_id=item_id,
+                            kind=item_kind,
+                            span=item_span,
+                            level=level,
+                            name=name,
+                            value_clause=value_clause_node,
+                        )
                     )
-                )
+                else:
+                    diagnostics.extend(clause_diags)
+                    data_items.append(
+                        DataItemDeclaration(
+                            node_id=item_id,
+                            kind=item_kind,
+                            span=item_span,
+                            level=level,
+                            name=name,
+                            redefines_target=redefines_target,
+                            pic_string=pic_string,
+                            pic_clause=pic_clause_node,
+                            usage_clause=usage_clause_node,
+                            value_clause=value_clause_node,
+                            occurs_clause=occurs_clause_node,
+                            odo_clause=odo_clause_node,
+                        )
+                    )
                 continue
             # Handle period at top level (no statement in progress).
             if tok.kind == TokenKind.PERIOD:
@@ -1442,14 +1491,15 @@ class Parser:
     def _match_data_item_declaration(
         self,
         in_data_division_subsection: bool,
-    ) -> Optional[Tuple[int, str, Optional[str], Optional[str], Optional[PicClause], Optional[UsageClause], Optional[ValueClause], int, int]]:
-        """T-2B-04R.2 + T-2B-04R.3: Recognize a Data Item declaration
-        with optional PIC, USAGE, and VALUE clauses.
+    ) -> Optional[Tuple[int, str, Optional[str], Optional[str], Optional[PicClause], Optional[UsageClause], Optional[ValueClause], Optional[OccursClause], Optional[OdoClause], int, int, Tuple[Diagnostic, ...]]]:
+        """T-2B-04R.2 + T-2B-04R.3 + T-2B-04R.4: Recognize a Data
+        Item declaration with optional PIC, USAGE, VALUE, OCCURS,
+        and DEPENDING ON (ODO) clauses.
 
         Matches a COBOL data-item declaration that begins with a
         recognized level number (01-49, 66, 77, 78, 88) followed
         by a data-item name and optional clauses in any order
-        (REDEFINES, PIC, USAGE, VALUE).
+        (REDEFINES, PIC, USAGE, VALUE, OCCURS, DEPENDING ON).
 
         R.2 captures only the *syntactic* structure:
           * the level number (as a Python int)
@@ -1461,11 +1511,17 @@ class Parser:
         clause nodes alongside the raw text.  The raw ``pic_string``
         field is preserved for R.2 compatibility.
 
-        R.2 and R.3 do NOT:
+        R.4 additionally captures structured OCCURS (``OccursClause``)
+        and DEPENDING ON (``OdoClause``) clause nodes.  Malformed
+        OCCURS / ODO syntax is reported through the trailing
+        ``clause_diags`` element of the returned tuple so that no
+        invalid clause is silently swallowed.
+
+        R.2, R.3, and R.4 do NOT:
           * resolve any name to a symbol
           * interpret the PIC clause
           * compute storage layout
-          * validate REDEFINES semantics
+          * validate REDEFINES / ODO semantics
           * construct parent / child hierarchy
         """
         if not in_data_division_subsection:
@@ -1514,10 +1570,15 @@ class Parser:
         pic_clause_node: Optional[PicClause] = None
         usage_clause_node: Optional[UsageClause] = None
         value_clause_node: Optional[ValueClause] = None
+        occurs_clause_node: Optional[OccursClause] = None
+        odo_clause_node: Optional[OdoClause] = None
+        #: Clause-level diagnostics for malformed OCCURS / ODO /
+        #: level-88 syntax collected while scanning clauses.
+        diags: List[Diagnostic] = []
 
         # Continue consuming clauses until we reach the trailing
-        # period.  The order of clauses is not enforced by R.3
-        # (COBOL allows PIC, USAGE, VALUE in any order with
+        # period.  The order of clauses is not enforced by R.4
+        # (COBOL allows PIC, USAGE, VALUE, OCCURS in any order with
         # REDEFINES).
         while not self._is_eof() and self._current().kind != TokenKind.PERIOD:
             cur = self._current()
@@ -1548,6 +1609,24 @@ class Parser:
                 value_clause_node = self._parse_value_clause()
                 continue
 
+            # T-2B-04R.4: Handle OCCURS clause (and its optional
+            # DEPENDING ON / ODO suffix).
+            if cur.kind == TokenKind.KEYWORD and cur.text.upper() == "OCCURS":
+                if occurs_clause_node is not None:
+                    # Duplicate OCCURS clause.
+                    break
+                occurs_node, odo_node, clause_diags = self._parse_occurs_clause()
+                diags.extend(clause_diags)
+                if occurs_node is None:
+                    # Malformed OCCURS (no count): the OCCURS token
+                    # was consumed; stop processing so the remaining
+                    # tokens are handled by the normal parser
+                    # dispatch, which reports them.
+                    break
+                occurs_clause_node = occurs_node
+                odo_clause_node = odo_node
+                continue
+
             # Unknown clause-starting keyword: stop processing
             # additional clauses so the unknown token can be
             # handled by the normal parser dispatch (which will
@@ -1570,8 +1649,11 @@ class Parser:
             pic_clause_node,
             usage_clause_node,
             value_clause_node,
+            occurs_clause_node,
+            odo_clause_node,
             start_byte,
             end_byte,
+            tuple(diags),
         )
 
     def _parse_pic_clause(
@@ -1747,6 +1829,171 @@ class Parser:
             literal_kind=literal_kind,
             literal_value=literal_raw,
         )
+
+    def _parse_occurs_clause(
+        self,
+    ) -> Tuple[Optional[OccursClause], Optional[OdoClause], Tuple[Diagnostic, ...]]:
+        """T-2B-04R.4: Parse an OCCURS clause.
+
+        Supports the fixed-count form ``OCCURS n TIMES``, the range
+        form ``OCCURS l TO u TIMES``, and the optional
+        ``DEPENDING ON <name>`` (ODO) suffix.
+
+        Returns ``(occurs_clause, odo_clause, diagnostics)``.
+
+        * A ``None`` occurs clause means the OCCURS keyword was
+          malformed (no integer count): OCCURS has been consumed and
+          the remaining tokens are left for the normal parser
+          dispatch, which reports them, so nothing is swallowed
+          silently.
+        * Diagnostics are returned for a malformed range (``TO``
+          without an upper count) and for malformed ODO syntax
+          (``DEPENDING`` without ``ON``, or ``DEPENDING ON`` without
+          an identifier).
+
+        This is syntax-only: the counts are recorded as integers and
+        the DEPENDING ON identifier as verbatim raw text.  No symbol
+        resolution, bound validation, or layout computation is
+        performed (those are T-2B-05 / T-2B-06 / T-2B-08 concerns).
+        """
+        occ_start = self._current().span.start.byte_offset
+        self._advance()  # consume OCCURS
+        diags: List[Diagnostic] = []
+
+        # Fixed count: OCCURS <n> [TO <m>] TIMES [DEPENDING ON <id>].
+        # The frozen T-2B-02 lexer emits numeric literals as
+        # IDENTIFIER tokens, so the count is an all-digit IDENTIFIER.
+        if (
+            self._is_eof()
+            or self._current().kind != TokenKind.IDENTIFIER
+            or not self._current().text.isdigit()
+        ):
+            span = self._make_span(
+                occ_start,
+                self._last_consumed_end_byte() or occ_start + len("OCCURS"),
+            )
+            diags.append(Diagnostic(
+                severity=DiagnosticSeverity.ERROR,
+                kind=DiagnosticKind.PARSER_RECOVERY,
+                message="OCCURS: missing integer count",
+                span=span,
+            ))
+            return None, None, tuple(diags)
+
+        count_val = int(self._current().text)
+        self._advance()  # consume the count
+
+        occurs: Optional[int] = None
+        lower_bound: Optional[int] = None
+        upper_bound: Optional[int] = None
+
+        # Optional range: OCCURS l TO u TIMES.
+        if (
+            not self._is_eof()
+            and self._current().kind == TokenKind.KEYWORD
+            and self._current().text.upper() == "TO"
+        ):
+            to_start = self._current().span.start.byte_offset
+            nxt = self._peek(1)
+            if (
+                nxt is not None
+                and nxt.kind == TokenKind.IDENTIFIER
+                and nxt.text.isdigit()
+            ):
+                self._advance()  # consume TO
+                lower_bound = count_val
+                upper_bound = int(self._current().text)
+                self._advance()  # consume the upper bound
+            else:
+                # Malformed range: TO is present but no upper count
+                # follows.  Recover as a fixed count and report.
+                self._advance()  # consume TO
+                occurs = count_val
+                diags.append(Diagnostic(
+                    severity=DiagnosticSeverity.ERROR,
+                    kind=DiagnosticKind.PARSER_RECOVERY,
+                    message="OCCURS: range requires an upper count after TO",
+                    span=self._make_span(
+                        to_start,
+                        self._last_consumed_end_byte() or to_start + len("TO"),
+                    ),
+                ))
+        else:
+            occurs = count_val
+
+        # Optional TIMES keyword.  TIMES is not a reserved word in
+        # the frozen T-2B-02 lexer, so it is an IDENTIFIER token;
+        # match it textually (case-insensitive).
+        if (
+            not self._is_eof()
+            and self._current().text.upper() == "TIMES"
+        ):
+            self._advance()  # consume TIMES
+
+        # Snapshot the OCCURS clause span end *before* parsing the
+        # ODO suffix so that the OdoClause keeps its own span.  The
+        # two clauses are stored as siblings on the data item.
+        occurs_end = self._last_consumed_end_byte()
+        if occurs_end is None:
+            occurs_end = occ_start + len("OCCURS")
+
+        # Optional OCCURS DEPENDING ON <identifier> (ODO).
+        odo_node: Optional[OdoClause] = None
+        if (
+            not self._is_eof()
+            and self._current().text.upper() == "DEPENDING"
+        ):
+            dep_start = self._current().span.start.byte_offset
+            nxt = self._peek(1)
+            if nxt is not None and nxt.text.upper() == "ON":
+                self._advance()  # consume DEPENDING
+                on_tok = self._expect(TokenKind.KEYWORD, "ON")
+                id_tok = self._current() if not self._is_eof() else None
+                if id_tok is None or id_tok.kind != TokenKind.IDENTIFIER:
+                    diags.append(Diagnostic(
+                        severity=DiagnosticSeverity.ERROR,
+                        kind=DiagnosticKind.PARSER_RECOVERY,
+                        message="OCCURS: DEPENDING ON requires an identifier",
+                        span=on_tok.span,
+                    ))
+                else:
+                    identifier = id_tok.text
+                    self._advance()  # consume the DEPENDING ON identifier
+                    odo_end = self._last_consumed_end_byte()
+                    if odo_end is None:
+                        odo_end = dep_start + len("DEPENDING")
+                    odo_span = self._make_span(dep_start, odo_end)
+                    odo_id = self._make_id(IRKind.ODO_CLAUSE, dep_start)
+                    odo_node = OdoClause(
+                        node_id=odo_id,
+                        kind=IRKind.ODO_CLAUSE,
+                        span=odo_span,
+                        identifier=identifier,
+                    )
+            else:
+                # DEPENDING present but not followed by ON.
+                self._advance()  # consume DEPENDING
+                diags.append(Diagnostic(
+                    severity=DiagnosticSeverity.ERROR,
+                    kind=DiagnosticKind.PARSER_RECOVERY,
+                    message="OCCURS: DEPENDING must be followed by ON",
+                    span=self._make_span(
+                        dep_start,
+                        self._last_consumed_end_byte() or dep_start + len("DEPENDING"),
+                    ),
+                ))
+
+        occurs_span = self._make_span(occ_start, occurs_end)
+        occurs_id = self._make_id(IRKind.OCCURS_CLAUSE, occ_start)
+        occurs_node = OccursClause(
+            node_id=occurs_id,
+            kind=IRKind.OCCURS_CLAUSE,
+            span=occurs_span,
+            occurs=occurs,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+        )
+        return occurs_node, odo_node, tuple(diags)
 
     @staticmethod
     def _classify_value_literal(literal: str) -> str:

@@ -15,7 +15,7 @@ Reuses existing IR infrastructure:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Any
+from typing import Any, Optional, Tuple, Union
 
 from modernize_v2.ir.diagnostic import Diagnostic, SourceSpan, SourcePosition
 from modernize_v2.ir.ids import DeterministicId
@@ -604,6 +604,123 @@ class DataItemDeclaration:
     #: responsibility.
     value_clause: "ValueClause | None" = None
 
+    # ----- T-2B-04R.4 additive fields (structured OCCURS / ODO) -----
+    #: Optional structured OCCURS clause.  This is a parser-level
+    #: representation of ``OCCURS n TIMES`` or
+    #: ``OCCURS l TO u TIMES``.  R.4 records the integer bounds
+    #: syntactically; it does not compute array layout, subscript
+    #: mapping, or Java array sizing (those are later-phase
+    #: concerns).
+    occurs_clause: "OccursClause | None" = None
+    #: Optional structured OCCURS DEPENDING ON (ODO) clause.
+    #: R.4 records the DEPENDING ON identifier as raw text, in
+    #: its own node, without resolving it to a symbol (symbol
+    #: resolution is T-2B-05's responsibility).  When non-None
+    #: the corresponding ``occurs_clause`` is also non-None.
+    odo_clause: "OdoClause | None" = None
+
+
+# ==================================================================
+# T-2B-04R.4: OCCURS / ODO / level-88 structural nodes
+# ==================================================================
+
+@dataclass(frozen=True)
+class OccursClause:
+    """A syntactic OCCURS clause recognized by the parser.
+
+    T-2B-04R.4 introduces this node to represent the *syntactic*
+    structure of an OCCURS clause:
+
+        * fixed count:    ``OCCURS 10 TIMES``
+        * range:          ``OCCURS 1 TO 10 TIMES``
+
+    The clause is attached to its ``DataItemDeclaration`` through
+    the additive ``occurs_clause`` field.  A valid clause sets
+    exactly one of ``occurs`` (fixed count) or ``lower_bound`` /
+    ``upper_bound`` (range); the other fields are ``None``.
+
+    This is a structural-only node.  It does *not*:
+
+        * resolve the DEPENDING ON identifier to a symbol
+        * compute array storage / Java array sizing
+        * validate the bounds (e.g. lower <= upper)
+
+    Those concerns belong to T-2B-06 / T-2B-08 and beyond.
+    """
+
+    node_id: DeterministicId
+    kind: IRKind  # OCCURS_CLAUSE
+    span: SourceSpan
+    #: Fixed count for ``OCCURS n TIMES``; ``None`` when the
+    #: clause is a range form.
+    occurs: int | None = None
+    #: Range lower bound for ``OCCURS l TO u TIMES``; ``None``
+    #: when the clause is a fixed-count form.
+    lower_bound: int | None = None
+    #: Range upper bound for ``OCCURS l TO u TIMES``; ``None``
+    #: when the clause is a fixed-count form.
+    upper_bound: int | None = None
+
+
+@dataclass(frozen=True)
+class OdoClause:
+    """A syntactic OCCURS DEPENDING ON (ODO) clause.
+
+    T-2B-04R.4 introduces this node to represent the DEPENDING ON
+    portion of an OCCURS clause (e.g. ``DEPENDING ON WS-COUNT``).
+    R.4 captures the identifier as verbatim raw text only; it does
+    NOT resolve the identifier to a symbol (T-2B-05 will).
+
+    The clause is attached to the same ``DataItemDeclaration`` as
+    its OCCURS clause through the additive ``odo_clause`` field.
+    """
+
+    node_id: DeterministicId
+    kind: IRKind  # ODO_CLAUSE
+    span: SourceSpan
+    #: The DEPENDING ON identifier name, exactly as it appears in
+    #: the source (verbatim, case-preserved).  No symbol resolution
+    #: is performed.
+    identifier: str
+
+
+@dataclass(frozen=True)
+class Level88Declaration:
+    """A dedicated syntactic representation of an 88-level condition name.
+
+    T-2B-04R.4 introduces this node so that an 88-level condition
+    name (e.g. ``88 WS-VALID VALUE 'Y'``) is represented by its own
+    node type rather than an ordinary data-item declaration.  The
+    node retains the parser-level fields that the R.2/R.3 contract
+    already exposes for level-88 items (``level`` == 88, ``kind`` ==
+    LEVEL_88_ITEM, ``name`` == the condition name) so the existing
+    data-items collection contract is unchanged.
+
+    The node is placed in the same ``data_items`` tuple (source
+    order) as ordinary declarations.  It carries the condition
+    name and the optional VALUE clause.  R.4 does NOT:
+
+        * resolve the condition name to a symbol
+        * interpret or type-check the VALUE literal
+        * build a parent / child (condition-on-item) relationship
+
+    Those concerns belong to T-2B-05 / T-2B-06 / T-2B-08.
+    """
+
+    node_id: DeterministicId
+    kind: IRKind  # LEVEL_88_ITEM
+    span: SourceSpan
+    #: The COBOL level number (== 88 for a condition name).
+    level: int
+    #: The condition name, exactly as it appears in the source
+    #: (verbatim, case-preserved).
+    name: str
+    #: The optional VALUE clause carrying the condition value
+    #: literal (verbatim lexer-observable text).  ``None`` means no
+    #: VALUE clause was recognized; R.4 reports a malformed-88
+    #: diagnostic in that case.
+    value_clause: "ValueClause | None" = None
+
 
 # ==================================================================
 # Compilation unit – root of the syntax tree
@@ -647,7 +764,13 @@ class CompilationUnit:
     #: computation, or hierarchy construction is performed here.
     #: The list is in source order.  T-2B-06 will build the
     #: canonical semantic DataItem tree from these.
-    data_items: Tuple["DataItemDeclaration", ...] = ()
+    #:
+    #: T-2B-04R.4 adds ``Level88Declaration`` entries: level-88
+    #: condition names keep their source-order position here (the
+    #: R.2 contract) but use a dedicated node type.
+    data_items: Tuple[
+        Union["DataItemDeclaration", "Level88Declaration"], ...
+    ] = ()
 
 
 # ==================================================================
