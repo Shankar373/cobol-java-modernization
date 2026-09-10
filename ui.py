@@ -829,7 +829,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 active = [r for r in RUNS.values() if r.get("status") == "running"]
             if active:
-                self._json({"ok": False, "error": "another run is in progress"})
+                self._json({"ok": False, "error": "another run is in progress"}, 409)
                 return
             ok, msg = start_run(run_id, restart)
             self._json({"ok": ok, "error": None if ok else msg})

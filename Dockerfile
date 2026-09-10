@@ -28,6 +28,7 @@ COPY third_party/      ./third_party/
 COPY tests/            ./tests/
 COPY docs/             ./docs/
 COPY legacy/           ./legacy/
+COPY tools/            ./tools/
 COPY *.py              ./
 COPY ui.html           ./
 COPY requirements.txt  ./

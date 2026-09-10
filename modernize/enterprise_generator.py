@@ -201,6 +201,27 @@ class EnterpriseApplicationGenerator:
             f.write("\n".join(lines))
 
     def _write_spring_batch_config(self, java_base: str):
+        # Collect input/output logical names from file_assigns so we can wire
+        # --app.batch.input / --app.report.output into JclExecutionContext
+        # before calling the COBOL entry program.  Without this wiring the
+        # generated program falls back to a bare relative filename that does
+        # not exist in the Spring Boot working directory.
+        file_assigns = self.model.get("file_assigns") or {}
+        file_ops    = self.model.get("file_ops")    or {}
+        input_logical_names  = []  # list of (logical_name, assign_path)
+        output_logical_names = []  # list of (logical_name, assign_path)
+        for src, ops in file_ops.items():
+            assigns = file_assigns.get(src, [])
+            for logical_name, info in ops.items():
+                for a in assigns:
+                    if a.get("logical_name") == logical_name:
+                        ap = a.get("assign_path", "")
+                        if info.get("is_input"):
+                            input_logical_names.append((logical_name, ap))
+                        elif info.get("is_output"):
+                            output_logical_names.append((logical_name, ap))
+                        break
+
         lines = []
         lines.append("package com.systema.modernized.batch;")
         lines.append("")
@@ -209,12 +230,22 @@ class EnterpriseApplicationGenerator:
         lines.append("import org.springframework.batch.core.job.builder.JobBuilder;")
         lines.append("import org.springframework.batch.core.repository.JobRepository;")
         lines.append("import org.springframework.batch.core.step.builder.StepBuilder;")
+        lines.append("import org.springframework.beans.factory.annotation.Value;")
         lines.append("import org.springframework.context.annotation.Bean;")
         lines.append("import org.springframework.context.annotation.Configuration;")
         lines.append("import org.springframework.transaction.PlatformTransactionManager;")
         lines.append("")
         lines.append("@Configuration")
         lines.append("public class SpringBatchConfig {")
+        lines.append("")
+        # Inject batch input/output paths from Spring properties / CLI args
+        lines.append("    /** Absolute path to the batch input file (passed via --app.batch.input=<path>). */")
+        lines.append("    @Value(\"${app.batch.input:}\")")
+        lines.append("    private String batchInputPath;")
+        lines.append("")
+        lines.append("    /** Relative output file name (passed via --app.report.output=<name>). */")
+        lines.append("    @Value(\"${app.report.output:}\")")
+        lines.append("    private String batchOutputPath;")
         lines.append("")
         lines.append("    @Bean")
         lines.append("    public Job modernizedJob(JobRepository jobRepository, Step step1) {")
@@ -230,6 +261,31 @@ class EnterpriseApplicationGenerator:
         lines.append("                .tasklet((contribution, chunkContext) -> {")
         lines.append("                    com.systema.modernized.SpringContextHelper.jdbcTemplate = jdbcTemplate;")
         lines.append("                    com.systema.modernized.SpringContextHelper.transactionManager = transactionManager;")
+        # Wire input file path into JclExecutionContext for every input DD
+        if input_logical_names:
+            lines.append("                    // Wire batch input path into JCL DD assignments so the")
+            lines.append("                    // generated COBOL program resolves files correctly.")
+            lines.append("                    if (batchInputPath != null && !batchInputPath.isEmpty()) {")
+            for ln, ap in input_logical_names:
+                lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{ln}", batchInputPath);')
+                if ap:
+                    # Also register the raw assign_path basename as an alternate key
+                    import os as _os
+                    base = _os.path.basename(ap)
+                    if base and base.upper() != ln.upper():
+                        lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{base}", batchInputPath);')
+            lines.append("                    }")
+        # Wire output file path into JclExecutionContext for every output DD
+        if output_logical_names:
+            lines.append("                    if (batchOutputPath != null && !batchOutputPath.isEmpty()) {")
+            for ln, ap in output_logical_names:
+                lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{ln}", batchOutputPath);')
+                if ap:
+                    import os as _os
+                    base = _os.path.basename(ap)
+                    if base and base.upper() != ln.upper():
+                        lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{base}", batchOutputPath);')
+            lines.append("                    }")
         lines.append("                    try {")
         lines.append(f"                        new com.systema.modernized.native_gen.{to_java_class(self.native_class_name)}().execute();")
         lines.append(f"                    }} catch (com.systema.modernized.native_gen.{to_java_class(self.native_class_name)}.StopRunException e) {{")
@@ -242,7 +298,7 @@ class EnterpriseApplicationGenerator:
         lines.append("                .build();")
         lines.append("    }")
         lines.append("}")
-        
+
         path = os.path.join(java_base, "batch", "SpringBatchConfig.java")
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
@@ -385,7 +441,12 @@ class EnterpriseApplicationGenerator:
         if self._check_batch_evidence():
             lines.append("spring.batch.job.enabled=true")
             lines.append("spring.batch.jdbc.initialize-schema=always")
-            
+            # Placeholder properties consumed by SpringBatchConfig @Value injection.
+            # The actual values are supplied at runtime via --app.batch.input=<path>
+            # and --app.report.output=<name> command-line arguments.
+            lines.append("app.batch.input=")
+            lines.append("app.report.output=")
+
         path = os.path.join(resources_dir, "application.properties")
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))

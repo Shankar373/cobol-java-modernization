@@ -34,6 +34,15 @@ if os.path.exists("/.dockerenv"):
 # Stage name for dynamic CALL targets that cannot be statically resolved
 DYNAMIC_CALL_MARKER = "DYNAMIC_CALL_REQUIRES_REVIEW"
 
+# Gate 2 Spring Boot startup / batch completion timeout (seconds).
+# The generated fat JAR requires JVM warm-up; 120 s is a safe default for
+# most developer machines.  Override via env var for slow CI environments.
+# IMPORTANT: this is the *total* allowed time from process launch to batch
+# completion — not just startup. Do not set below 30 s.
+SPRING_BOOT_STARTUP_TIMEOUT_SECONDS: int = int(
+    os.environ.get("SPRING_BOOT_STARTUP_TIMEOUT_SECONDS", "120")
+)
+
 # Canonical 13-stage professional enterprise lifecycle order (matches STEP_LABELS in ui.py)
 STAGES = [
     "ingest",       # 0 — Upload repository, fingerprint source, establish immutability baseline
@@ -1225,7 +1234,7 @@ def docker_run(image, mounts, workdir, cmd, shell="bash", timeout=None, network=
             cmd = " && ".join(symlink_cmds) + (f" && {cd_back}" if cd_back else "") + " && " + cmd
     else:
         for host, guest in mounts:
-            full += ["-v", f"{host}:{guest}"]
+            full += ["-v", f"{posix(host)}:{guest}"]
             
     if workdir:
         full += ["-w", workdir]
@@ -2098,6 +2107,8 @@ def snapshot(repo_dir, rel_dirs, to_dir=None):
                 if os.path.getsize(p) == 0:
                     continue
                 rel = posix(os.path.relpath(p, repo_dir))
+                if d == "." and ("/" in rel or rel.endswith(".cob") or rel.endswith(".cbl") or rel.endswith(".cpy") or rel.endswith(".py") or rel.endswith(".json") or rel.endswith(".exe") or rel.endswith(".so") or rel.startswith(".")):
+                    continue
                 with open(p, "rb") as fh:
                     snap[rel] = fh.read()
                 if to_dir:
@@ -2128,6 +2139,8 @@ def clean_outputs(repo_dir, rel_dirs, file_assigns=None, skip_paths=None):
             skip_rel.add(p.lower().replace("\\", "/").strip("/"))
 
     for d in rel_dirs:
+        if d == ".":
+            continue
         base = os.path.join(repo_dir, d)
         if os.path.isdir(base):
             for root, _, files in os.walk(base):
@@ -2863,8 +2876,9 @@ class Pipeline:
         # as current stages or skew resume/restart behaviour.
         self.state["stages"] = {k: v for k, v in self.state["stages"].items() if k in STAGES}
 
-    # -- state --------------------------------------------------------------
     def save_state(self):
+        if "certification_result" in self.state and isinstance(self.state["certification_result"], dict):
+            self.state["certification_result"]["stages"] = {k: dict(v) for k, v in self.state.get("stages", {}).items()}
         write_json(self.state_path, self.state)
 
     def emit_event(self, event_type, **kwargs):
@@ -2912,6 +2926,8 @@ class Pipeline:
                     st["duration_seconds"] = round((t1 - t0).total_seconds(), 3)
                 except Exception:  # noqa: BLE001
                     pass
+        if "certification_result" in self.state and isinstance(self.state["certification_result"], dict):
+            self.state["certification_result"]["stages"] = {k: dict(v) for k, v in self.state["stages"].items()}
         self.save_state()
 
         st_event_map = {
@@ -2942,6 +2958,43 @@ class Pipeline:
     def set_data(self, key, value):
         self.state["data"][key] = value
         self.save_state()
+
+    def _seed_missing_input_files(self, file_assigns, file_ops):
+        """Seed missing assigned input files if found in test/input subdirectories."""
+        seeded = set()
+        file_ops = file_ops or {}
+        file_assigns = file_assigns or {}
+        for src, ops in file_ops.items():
+            assigns = file_assigns.get(src, [])
+            for logical_name, info in ops.items():
+                if info.get("is_input"):
+                    for a in assigns:
+                        if a.get("logical_name") == logical_name:
+                            rel_path = a.get("assign_path")
+                            if not rel_path:
+                                continue
+                            target_full = os.path.join(self.repo, rel_path)
+                            seeded.add(rel_path)
+                            if os.path.exists(target_full):
+                                continue
+                            # Search for matching filename in repo subdirectories
+                            base_name = os.path.basename(rel_path).lower()
+                            candidate = None
+                            for root, _, files in os.walk(self.repo):
+                                for f in files:
+                                    if f.lower() == base_name:
+                                        found = os.path.join(root, f)
+                                        if os.path.realpath(found) != os.path.realpath(target_full):
+                                            candidate = found
+                                            break
+                                if candidate:
+                                    break
+                            if candidate:
+                                os.makedirs(os.path.dirname(target_full), exist_ok=True)
+                                shutil.copy2(candidate, target_full)
+                                rel_src = posix(os.path.relpath(candidate, self.repo))
+                                self.log(f"  [INPUT_SEEDING] Seeded missing input file '{rel_path}' from '{rel_src}'")
+        return seeded
 
     # -- runner --------------------------------------------------------------
     def run(self, restart_from=None):
@@ -3131,8 +3184,8 @@ class Pipeline:
                 if ops.get(logical, {}).get("is_output"):
                     path = a.get("assign_path")
                     if path:
-                        parent = os.path.dirname(path)
-                        if parent and parent not in output_dirs:
+                        parent = os.path.dirname(path) or "."
+                        if parent not in output_dirs:
                             output_dirs.append(parent)
 
         d = {
@@ -3533,18 +3586,7 @@ class Pipeline:
                      if os.path.basename(s) not in self.cfg.get("legacy_exclude_sources", [])]
         # Sort so the entry program compiles last (it may CALL the subprograms).
         rm_legacy.sort(key=lambda s: 0 if d["program_ids"][s] == d["entry"] else 1)
-        input_paths = set()
-        file_ops = d.get("file_ops", {})
-        file_assigns = d.get("file_assigns", {}) or {}
-        for src, ops in file_ops.items():
-            assigns = file_assigns.get(src, [])
-            for logical_name, info in ops.items():
-                if info.get("is_input"):
-                    for a in assigns:
-                        if a.get("logical_name") == logical_name:
-                            path = a.get("assign_path")
-                            if path:
-                                input_paths.add(path)
+        input_paths = self._seed_missing_input_files(d.get("file_assigns"), d.get("file_ops"))
         
         # Ensure all output directories exist
         for od in d["output_dirs"]:
@@ -3835,18 +3877,7 @@ class Pipeline:
         # NOTE: --skip-legacy never fabricates execution evidence; the transpiled
         # Java is always executed for real (or the stage fails honestly).
         d = self.data("discover")
-        input_paths = set()
-        file_ops = d.get("file_ops", {})
-        file_assigns = d.get("file_assigns", {}) or {}
-        for src, ops in file_ops.items():
-            assigns = file_assigns.get(src, [])
-            for logical_name, info in ops.items():
-                if info.get("is_input"):
-                    for a in assigns:
-                        if a.get("logical_name") == logical_name:
-                            path = a.get("assign_path")
-                            if path:
-                                input_paths.add(path)
+        input_paths = self._seed_missing_input_files(d.get("file_assigns"), d.get("file_ops"))
         clean_outputs(self.repo, d["output_dirs"], d.get("file_assigns"), skip_paths=input_paths)
 
         # Ensure all output directories exist (mirrors stage_baseline) so file
@@ -5354,7 +5385,8 @@ class Pipeline:
                 # The app has a web server (Tomcat) so it won't exit on its own.
                 # Detect batch completion from the application log instead.
                 job_completed = False
-                for _ in range(240): # ~120s ceiling
+                _poll_iters = max(2, SPRING_BOOT_STARTUP_TIMEOUT_SECONDS * 2)  # 0.5s per tick
+                for _ in range(_poll_iters):
                     if getattr(self, "cancelled", False):
                         raise KeyboardInterrupt("Pipeline execution cancelled by user.")
                     rc = proc.poll()
@@ -5431,8 +5463,10 @@ class Pipeline:
 
                     def _normalize_text(content_bytes):
                         try:
-                            text = content_bytes.decode("utf-8", errors="replace")
-                            lines = [line.replace("\r", "").replace("\x00", " ").rstrip() for line in text.splitlines()]
+                            # Strip null bytes: COBOL writes binary null-padded fixed records;
+                            # Java writes text lines. Both should compare as blank/empty lines.
+                            text = content_bytes.replace(b"\x00", b"").decode("utf-8", errors="replace")
+                            lines = [line.replace("\r", "").rstrip() for line in text.splitlines()]
                             while lines and not lines[-1]:
                                 lines.pop()
                             return "\n".join(lines).strip()
@@ -5449,8 +5483,38 @@ class Pipeline:
                                 return spec
                         return None
 
+                    # Build a set of assign_paths that are input-only (OPEN INPUT, no OPEN OUTPUT).
+                    # These are captured by the baseline snapshot (pass-through) but Spring Boot
+                    # does not produce them — exclude them from the Gate 2 output comparison.
+                    _input_only_assigns = set()
+                    # Also build the full set of all known file-assign basenames (inputs + outputs).
+                    # Any baseline_file NOT in this set is a pre-existing repo artifact (e.g. README.md)
+                    # that was captured by the snapshot but is not produced by either COBOL or Java.
+                    _all_assign_basenames = set()
+                    _file_ops = self.data("discover", {}).get("file_ops", {})
+                    _file_assigns = self.data("discover", {}).get("file_assigns", {})
+                    for _src, _assigns in _file_assigns.items():
+                        for _a in (_assigns or []):
+                            if _a.get("assign_path"):
+                                _all_assign_basenames.add(os.path.basename(_a["assign_path"]))
+                    for _src, _ops in _file_ops.items():
+                        for _lname, _op in _ops.items():
+                            if _op.get("is_input") and not _op.get("is_output"):
+                                for _a in (_file_assigns.get(_src) or []):
+                                    if _a.get("logical_name") == _lname and _a.get("assign_path"):
+                                        _input_only_assigns.add(os.path.basename(_a["assign_path"]))
+
                     for rel_path in baseline_files_list:
                         if "data/work" in posix(rel_path):
+                            continue
+                        _bn = os.path.basename(rel_path)
+                        # Skip pre-existing repo files not referenced in file_assigns (e.g. README.md)
+                        if _all_assign_basenames and _bn not in _all_assign_basenames:
+                            self.log(f"    [SKIP] {rel_path}: pre-existing repo file, not a program output")
+                            continue
+                        # Skip files that are pure inputs (not produced by the program)
+                        if _bn in _input_only_assigns:
+                            self.log(f"    [SKIP] {rel_path}: input-only file, not compared as output")
                             continue
                         b_file = os.path.join(baseline_dir, rel_path)
                         j_file = os.path.join(mod_dir, rel_path)
@@ -5508,9 +5572,16 @@ class Pipeline:
                             elif _normalize_text(b_content) != _normalize_text(j_content):
                                 mismatches.append(f"{rel_path}: content mismatch")
 
-                    # Output topology verification: detect extra unexpected files in output directories
+                    # Output topology verification: detect extra unexpected files in output directories.
+                    # IMPORTANT: skip od='.' — when output_dirs=['.'}, it means the program writes to
+                    # the repo root, but mod_dir is the entire Spring Boot project tree containing
+                    # thousands of .java/.class files which are not outputs of the batch run.
                     output_dirs = self.data("discover", {}).get("output_dirs", ["data/out"])
                     for od in output_dirs:
+                        if od in (".", ""):
+                            # Root-dir output_dir: only check the explicit baseline_files list,
+                            # which we already did above. Skip broad tree scan.
+                            continue
                         j_od_path = os.path.join(mod_dir, od)
                         b_od_path = os.path.join(baseline_dir, od)
                         if os.path.isdir(j_od_path):
@@ -5551,7 +5622,8 @@ class Pipeline:
 
             job_completed = False
             job_terminal = None
-            for _ in range(240):          # ~120 s hard ceiling
+            _poll_iters = max(2, SPRING_BOOT_STARTUP_TIMEOUT_SECONDS * 2)  # 0.5s per tick
+            for _ in range(_poll_iters):          # configurable hard ceiling
                 if getattr(self, "cancelled", False):
                     raise KeyboardInterrupt("Pipeline execution cancelled by user.")
                 rc = proc.poll()
@@ -5764,8 +5836,9 @@ class Pipeline:
             else:
                 # Check if process had error output
                 try:
-                    proc.terminate()
-                    proc.wait(timeout=5)
+                    if proc.poll() is None:  # only terminate if still alive
+                        proc.terminate()
+                        proc.wait(timeout=5)
                 except Exception as _exc:
                     self.log(f"    [WARN] process terminate error: {_exc}")
                 try:
@@ -5787,15 +5860,17 @@ class Pipeline:
 
         finally:
             self.active_process = None
-            # Terminate process cleanly
+            # Terminate process cleanly; skip if it already exited on its own.
             if proc is not None:
                 try:
-                    proc.terminate()
-                    proc.wait(timeout=5)
+                    if proc.poll() is None:  # only terminate if still alive
+                        proc.terminate()
+                        proc.wait(timeout=5)
                 except Exception as _exc:
                     self.log(f"    [WARN] process terminate error: {_exc}")
                     try:
-                        proc.kill()
+                        if proc.poll() is None:
+                            proc.kill()
                     except Exception as _exc2:
                         self.log(f"    [WARN] process kill error: {_exc2}")
             try:
@@ -6331,11 +6406,27 @@ class Pipeline:
             }
         }
 
+        # Ensure package stage record reflects completed state in manifest and state.json
+        stage_records_complete = {k: dict(v) for k, v in stage_records.items()}
+        stage_records_complete["package"] = {
+            "status": "done",
+            "at": now_iso(),
+            "detail": f"verdict {verdict}",
+            "artifacts": present_artifacts,
+            "warnings": [],
+            "errors": [],
+        }
+        manifest["stages"] = stage_records_complete
+
         # Write state.json
         state_path = os.path.join(self.out, "state.json")
         state_obj = self.state.copy()
+        state_obj["stages"] = stage_records_complete
         state_obj["final_verdict"] = verdict
-        state_obj["certification_result"] = self.data("certification_result_model")
+        cert_model = self.data("certification_result_model")
+        if isinstance(cert_model, dict):
+            cert_model["stages"] = stage_records_complete
+        state_obj["certification_result"] = cert_model
         write_json(state_path, state_obj)
 
         # Write pipeline_execution_manifest.json
@@ -6717,6 +6808,7 @@ class Pipeline:
             duration = 0
 
         res = CertificationResult(posix(self.repo), pipe_started, now, duration)
+        res.stages = {k: dict(v) for k, v in stage_records.items()}
         for gate_name, gate_status in cert_report.items():
             sev = "NONE" if gate_status == "PASS" else ("MEDIUM" if gate_status == "REVIEW" else "HIGH")
             res.gates[gate_name] = {"status": gate_status, "severity": sev, "details": "", "evidence_references": []}
@@ -6807,11 +6899,134 @@ class Pipeline:
                     dirs[:] = [d for d in dirs if d not in ("target", ".idea")]
                     for file in files:
                         full_p = os.path.join(root, file)
+                        # PKG-001: exclude runtime-produced artifacts at the project root
+                        # (e.g. customer.out written by the validate stage's Spring Boot run)
+                        if root == modernized_dir and os.path.splitext(file)[1] in (".out", ".log", ".tmp"):
+                            continue
                         archive_name = "modernized/" + os.path.relpath(full_p, modernized_dir).replace("\\", "/")
                         zh.write(full_p, archive_name)
 
-            self.log(f"    Package created: {pkg_zip} ({os.path.getsize(pkg_zip)} bytes)")
-            return True, "modernized application packaged successfully", [pkg_zip]
+            # Phase 3: Generate a generic customer-facing README into the ZIP.
+            # Written directly via writestr so no file is created on disk.
+            readme_content = (
+                "# Modernized Application — Source Distribution\n\n"
+                "## Overview\n\n"
+                "This package is a **source distribution** generated by the SystemaOps "
+                "COBOL→Java modernization pipeline. It contains all source code, "
+                "configuration, and reference artifacts required to rebuild and run "
+                "the modernized application independently.\n\n"
+                "> **Important:** This package does NOT contain a pre-built JAR. "
+                "You must build it from source using the instructions below.\n\n"
+                "---\n\n"
+                "## Prerequisites\n\n"
+                "| Requirement | Minimum Version | Notes |\n"
+                "|---|---|---|\n"
+                "| Java (JDK) | 17 | JDK 21 or 25 also supported |\n"
+                "| Apache Maven | 3.6 | 3.9+ recommended |\n"
+                "| Internet access | — | Required for Maven dependency download |\n\n"
+                "---\n\n"
+                "## Build\n\n"
+                "From the `modernized/` directory of the extracted package:\n\n"
+                "```bash\n"
+                "cd modernized\n"
+                "mvn clean package\n"
+                "```\n\n"
+                "On success:\n"
+                "- Compiled classes appear under `target/classes/`\n"
+                "- Executable Spring Boot fat JAR produced at `target/<artifact>-<version>.jar`\n\n"
+                "---\n\n"
+                "## Runtime Configuration\n\n"
+                "The application accepts configuration via Spring Boot properties or "
+                "command-line arguments.\n\n"
+                "### Input file\n\n"
+                "Supply the input data file path via:\n\n"
+                "```bash\n"
+                "java -jar target/<artifact>.jar --app.batch.input=/path/to/input-file\n"
+                "```\n\n"
+                "The input file must be in the format expected by the original COBOL program "
+                "(LINE SEQUENTIAL, one record per line).\n\n"
+                "### Output file\n\n"
+                "Supply the output file path via:\n\n"
+                "```bash\n"
+                "java -jar target/<artifact>.jar \\\n"
+                "     --app.batch.input=/path/to/input-file \\\n"
+                "     --app.report.output=/path/to/output-file\n"
+                "```\n\n"
+                "If `--app.report.output` is omitted, output is written to the current "
+                "working directory using the name configured in `application.properties`.\n\n"
+                "### Spring Boot web port\n\n"
+                "The application starts an embedded Tomcat on port 8080 by default. "
+                "To change it:\n\n"
+                "```bash\n"
+                "java -jar target/<artifact>.jar --server.port=9090 ...\n"
+                "```\n\n"
+                "---\n\n"
+                "## Running\n\n"
+                "```bash\n"
+                "java -jar target/<artifact>-<version>.jar \\\n"
+                "     --app.batch.input=/absolute/path/to/input \\\n"
+                "     --app.report.output=/absolute/path/to/output\n"
+                "```\n\n"
+                "The Spring Batch job runs at startup. Look for `[COMPLETED]` in the log. "
+                "Business summary lines (record counts, totals) are written to stdout.\n\n"
+                "---\n\n"
+                "## Package Contents\n\n"
+                "```\n"
+                "modernized/          Generated Spring Boot application (this directory)\n"
+                "  src/               Java source code (COBOL→Java translation)\n"
+                "  pom.xml            Maven build configuration\n"
+                "  application.properties  Runtime defaults\n"
+                "  Dockerfile         Optional containerization\n"
+                "legacy/              Original COBOL source and reference artifacts\n"
+                "  src/               COBOL source programs (.cbl)\n"
+                "  src/copybooks/     COBOL copybooks (.cpy)\n"
+                "  customer.in        Input test fixture\n"
+                "  customer.out       Actual COBOL runtime output (reference)\n"
+                "  expected/          Reference/expected outputs for comparison\n"
+                "  mainprog.exe       Compiled COBOL executable (for baseline re-runs)\n"
+                "transpiled/          cobj-generated Java (reference only, not production)\n"
+                "reports/             Pipeline execution manifests and analysis reports\n"
+                "```\n\n"
+                "### Intentionally excluded\n\n"
+                "- Compiled JAR (`target/*.jar`) — recipients must build from source\n"
+                "- `.class` files from the modernized application\n"
+                "- Maven `target/` directories\n"
+                "- Python migration engine source\n"
+                "- `tools/` migration utilities\n\n"
+                "---\n\n"
+                "## Reference and Baseline Artifacts\n\n"
+                "`legacy/customer.out` — the **actual output** produced by running the "
+                "original compiled COBOL program against `legacy/customer.in`. "
+                "This file documents the real COBOL runtime behavior and is the "
+                "authoritative business-equivalence baseline.\n\n"
+                "`legacy/expected/` — reference outputs showing the intended output "
+                "layout for comparison and documentation purposes.\n\n"
+                "---\n\n"
+                "## Equivalence Notice\n\n"
+                "The generated Java application is designed to be **semantically equivalent** "
+                "to the original COBOL program — producing the same business results "
+                "(record counts, totals, calculated values) for the same inputs.\n\n"
+                "Physical output representation may differ:\n\n"
+                "| Dimension | COBOL | Java | Status |\n"
+                "|---|---|---|---|\n"
+                "| Business fields (stdout) | Displayed via DISPLAY | Written via System.out | EQUIVALENT |\n"
+                "| Record cardinality | N records in → N records out | Same | EQUIVALENT |\n"
+                "| Output file bytes | Fixed-width / null-padded (COMP-3 WS) | Text / newline-delimited | MAY DIFFER |\n\n"
+                "If your downstream system depends on the exact binary layout of the COBOL "
+                "output file (e.g. fixed-width packed-decimal fields), additional output "
+                "format adaptation may be required. Consult the pipeline equivalence report "
+                "in `reports/` for the full analysis.\n\n"
+                "---\n\n"
+                "## Generated by\n\n"
+                "SystemaOps COBOL→Java Modernization Pipeline  \n"
+                "For support, refer to the pipeline execution manifest in `reports/`.\n"
+            )
+            from zipfile import ZipInfo
+            readme_zi = ZipInfo("modernized/README.md")
+            zh.writestr(readme_zi, readme_content.encode("utf-8"))
+
+        self.log(f"    Package created: {pkg_zip} ({os.path.getsize(pkg_zip)} bytes)")
+        return True, "modernized application packaged successfully", [pkg_zip]
 
 
 def clean_model_name(filename):
