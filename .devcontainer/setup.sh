@@ -30,12 +30,6 @@ printf "  Maven:    %s\n" "$(mvn -version 2>&1 | head -n1)"
 printf "  GnuCOBOL: %s\n" "$(cobc --version 2>&1 | head -n1)"
 printf "  psql:     %s\n" "$(psql --version 2>&1 | head -n1)"
 
-# Note: Docker daemon is available via devcontainer feature, but no containers
-# are started at boot (saving memory and CPU). Tests run containers on-demand.
-if command -v docker >/dev/null 2>&1; then
-    printf "  Docker:   %s (on-demand daemon available)\n" "$(docker --version)"
-fi
-
 # Note: Maven dependencies resolve lazily on first build/test to minimize
 # startup duration and initial Codespace storage consumption.
 
