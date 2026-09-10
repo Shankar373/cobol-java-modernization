@@ -259,12 +259,27 @@ public class CobolNumeric {
                 } else {
                     return digitsStr + sign;
                 }
+            } else if (spec.usage == CobolUsage.COMP || spec.usage == CobolUsage.COMP_5) {
+                // COMP/COMP-5 (binary): DISPLAY shows plain digits for positive,
+                // '-' prefix for negative. No '+' prefix for positive values.
+                // GnuCOBOL verification: DISPLAY PIC S9(8) COMP VALUE 1500 → "00001500"
+                if (currentVal.signum() < 0) {
+                    return "-" + digitsStr;
+                } else {
+                    return digitsStr;
+                }
+            } else if (spec.usage == CobolUsage.COMP_3) {
+                // COMP-3 (packed decimal): DISPLAY shows no '+' for positive values.
+                // GnuCOBOL verification: DISPLAY of S9(5) COMP-3 positive → plain digits.
+                if (currentVal.signum() < 0) {
+                    return "-" + digitsStr;
+                } else {
+                    return digitsStr;
+                }
             } else {
-                // Signed numeric DISPLAY: COBOL renders an explicit leading
-                // sign for signed items REGARDLESS of internal USAGE (COMP,
-                // COMP-3, COMP-5, DISPLAY). Verified against the GnuCOBOL
-                // oracle (-fsign=ASCII): DISPLAY of PIC S9(9) COMP prints
-                // "+000000101" and PIC S9(9) prints the same.
+                // DISPLAY usage, no SIGN SEPARATE:
+                // GnuCOBOL -fsign=ASCII: signed DISPLAY S9 items embed sign in last digit byte.
+                // The Java display representation mirrors this: '+' for >= 0, '-' for < 0.
                 String sign = currentVal.signum() < 0 ? "-" : "+";
                 return sign + digitsStr;
             }
@@ -272,6 +287,7 @@ public class CobolNumeric {
             return digitsStr;
         }
     }
+
 
     private BigDecimal unpackComp3(byte[] buffer, int offset, int length) {
         StringBuilder sb = new StringBuilder();

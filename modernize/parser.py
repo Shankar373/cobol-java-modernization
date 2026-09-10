@@ -499,6 +499,10 @@ class CobolParser:
                     org_type = "LINE SEQUENTIAL"
                 elif self.match("KEYWORD", "SEQUENTIAL") or self.match("IDENTIFIER", "SEQUENTIAL"):
                     org_type = "SEQUENTIAL"
+                elif self.match("KEYWORD", "RECORD") or self.match("IDENTIFIER", "RECORD"):
+                    # ORGANIZATION IS RECORD SEQUENTIAL — RECORD is an optional qualifier
+                    self.match("KEYWORD", "SEQUENTIAL") or self.match("IDENTIFIER", "SEQUENTIAL")
+                    org_type = "SEQUENTIAL"
             elif self.match("KEYWORD", "ACCESS"):
                 if self.check("KEYWORD", "MODE") or (self.check("IDENTIFIER") and self.peek().value.upper() == "MODE"):
                     self.current += 1
@@ -510,9 +514,17 @@ class CobolParser:
                 elif self.match("KEYWORD", "DYNAMIC") or self.match("IDENTIFIER", "DYNAMIC"):
                     access_mode = "DYNAMIC"
             elif self.match("KEYWORD", "RECORD"):
-                self.consume("KEYWORD", "KEY")
-                self.match_is_keyword()
-                record_key = self.consume("IDENTIFIER", None, "Expected record key identifier").value
+                # Guard: bare RECORD SEQUENTIAL without ORGANIZATION prefix → treat as SEQUENTIAL org
+                if self.check("KEYWORD", "SEQUENTIAL") or self.check("IDENTIFIER", "SEQUENTIAL"):
+                    self.current += 1  # consume SEQUENTIAL
+                    org_type = "SEQUENTIAL"
+                else:
+                    # RECORD [IS] KEY <identifier>
+                    self.match("KEYWORD", "IS") or self.match("IDENTIFIER", "IS")
+                    if self.check("KEYWORD", "KEY") or self.check("IDENTIFIER", "KEY"):
+                        self.current += 1
+                        self.match_is_keyword()
+                        record_key = self.consume("IDENTIFIER", None, "Expected record key identifier").value
             elif self.match("KEYWORD", "ALTERNATE") or self.match("IDENTIFIER", "ALTERNATE"):
                 if self.match("KEYWORD", "RECORD"):
                     self.match("KEYWORD", "KEY")
@@ -1501,6 +1513,23 @@ class CobolParser:
 
             self.consume("KEYWORD", "INTO", "Expected INTO keyword in STRING")
             tgt_tok = self.consume("IDENTIFIER", None, "Expected target identifier in STRING")
+
+            # Optional: WITH POINTER <identifier>
+            pointer_var = None
+            if self.match("KEYWORD", "WITH") or self.check("KEYWORD", "POINTER"):
+                if not self.match("KEYWORD", "POINTER"):
+                    self.match("KEYWORD", "POINTER")
+                ptr_tok = self.consume("IDENTIFIER", None, "Expected POINTER variable in STRING")
+                pointer_var = ptr_tok.value
+
+            # Optional: ON OVERFLOW / END-STRING
+            if self.check("KEYWORD", "ON"):
+                self.match("KEYWORD", "ON")
+                self.match("KEYWORD", "OVERFLOW")
+            self.match("KEYWORD", "NOT")
+            self.match("KEYWORD", "ON")
+            self.match("KEYWORD", "OVERFLOW")
+            self.match("KEYWORD", "END-STRING")
             self.match("PUNCTUATION", ".")
 
             node = SemanticIRNode(
@@ -1509,7 +1538,8 @@ class CobolParser:
                 properties={
                     "statement_type": "STRING",
                     "parts": parts,
-                    "target": tgt_tok.value
+                    "target": tgt_tok.value,
+                    "pointer": pointer_var,
                 },
                 source_file=self.file_path,
                 source_line=start_tok.line,

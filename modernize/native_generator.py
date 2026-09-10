@@ -1978,7 +1978,38 @@ class NativeStatementTranslator:
                 java_parts.append(part_expr)
 
             concat_expr = " + ".join(java_parts)
-            return self.generate_assignment(tgt, concat_expr)
+            pointer = props.get("pointer")
+            if pointer:
+                j_ptr = to_java_var(pointer)
+                tgt_len = 0
+                if self.current_generator:
+                    tgt_pic = self.current_generator.var_pics.get(tgt.upper(), "")
+                    if tgt_pic:
+                        _, tgt_len, _, _ = NativeTypeMapper.parse_pic(tgt_pic)
+                # Generate: String __str_result = cobolStringInto(target, ptr-1, concat);
+                # then update ptr and target.
+                lines_out = []
+                lines_out.append(f"{{")
+                lines_out.append(f"    String __str_src_{java_tgt} = {concat_expr};")
+                lines_out.append(f"    int __str_ptr_{java_tgt} = {j_ptr} - 1;")
+                lines_out.append(f"    if (__str_ptr_{java_tgt} < 0) __str_ptr_{java_tgt} = 0;")
+                lines_out.append(f"    String __str_tgt_{java_tgt} = {java_tgt};")
+                if tgt_len > 0:
+                    lines_out.append(f"    if (__str_tgt_{java_tgt} == null) __str_tgt_{java_tgt} = String.format(\"%-{tgt_len}s\", \"\");")
+                    lines_out.append(f"    if (__str_tgt_{java_tgt}.length() < {tgt_len}) __str_tgt_{java_tgt} = String.format(\"%-{tgt_len}s\", __str_tgt_{java_tgt});")
+                else:
+                    lines_out.append(f"    if (__str_tgt_{java_tgt} == null) __str_tgt_{java_tgt} = \"\";")
+                lines_out.append(f"    char[] __str_chars_{java_tgt} = __str_tgt_{java_tgt}.toCharArray();")
+                lines_out.append(f"    for (int __si = 0; __si < __str_src_{java_tgt}.length() && (__str_ptr_{java_tgt} + __si) < __str_chars_{java_tgt}.length; __si++) {{")
+                lines_out.append(f"        __str_chars_{java_tgt}[__str_ptr_{java_tgt} + __si] = __str_src_{java_tgt}.charAt(__si);")
+                lines_out.append(f"    }}")
+                lines_out.append(f"    {java_tgt} = new String(__str_chars_{java_tgt});")
+                ptr_assign = self.generate_assignment(pointer, f"__str_ptr_{java_tgt} + __str_src_{java_tgt}.length() + 1")
+                lines_out.append(f"    {ptr_assign}")
+                lines_out.append(f"}}")
+                return "\n".join(lines_out)
+            else:
+                return self.generate_assignment(tgt, concat_expr)
 
         elif stype == "UNSTRING":
             source = props.get("source", "")
