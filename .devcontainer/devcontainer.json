@@ -20,6 +20,10 @@
     // but not required for normal development.
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "enableNonRootDocker": "true"
+    },
+    // SSH server to support gh codespace ssh non-interactive command execution
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
     }
   },
 
