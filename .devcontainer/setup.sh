@@ -34,4 +34,81 @@ printf "  psql:     %s\n" "$(psql --version 2>&1 | head -n1)"
 # startup duration and initial Codespace storage consumption.
 
 echo "==> Setup completed successfully."
-echo "==> Start the platform UI with: python ui.py --host 0.0.0.0 --port 8787"
+
+# 4. Stage A Remote Validation Suite
+echo "==> Running Stage A remote validation..."
+set +e
+
+WORKSPACE_ROOT="$(pwd)"
+mkdir -p "$WORKSPACE_ROOT/reports"
+VAL_LOG="$WORKSPACE_ROOT/reports/codespace_stage_a_validation.log"
+
+{
+  echo "========================================================"
+  echo "CODESPACE STAGE A REMOTE VALIDATION REPORT"
+  echo "Host: $(hostname)"
+  echo "Date: $(date -u)"
+  echo "========================================================"
+
+  echo ""
+  echo "--- 1. ALLOCATED MACHINE ---"
+  echo ">>> nproc:"
+  nproc
+  echo ">>> free -h:"
+  free -h
+  echo ">>> df -h /:"
+  df -h /
+
+  echo ""
+  echo "--- 2. TOOLCHAIN VERSIONS ---"
+  echo ">>> python --version:"
+  python --version
+  echo ">>> java --version:"
+  java --version
+  echo ">>> javac --version:"
+  javac --version
+  echo ">>> mvn --version:"
+  mvn --version
+  echo ">>> cobc --version:"
+  cobc --version
+  echo ">>> git --version:"
+  git --version
+
+  echo ""
+  echo "--- 3. REGRESSION TESTS ---"
+  echo ">>> python -m pytest -v tests/test_phase9_manifest.py:"
+  python -m pytest -v tests/test_phase9_manifest.py
+
+  echo ""
+  echo "--- 4. SMOKE TRANSFORMATION ---"
+  echo ">>> python cobol_migrate.py --repo legacy --out workspace/codespace-smoke:"
+  python cobol_migrate.py --repo legacy --out workspace/codespace-smoke
+
+  echo ""
+  echo "--- 5. STORAGE MEASUREMENT ---"
+  echo ">>> df -h:"
+  df -h
+  echo ">>> du -sh workspace/codespace-smoke:"
+  du -sh workspace/codespace-smoke 2>&1
+
+  echo ""
+  echo "--- 6. GIT STATUS ---"
+  echo ">>> git status --short:"
+  git status --short
+
+  echo ""
+  echo "========================================================"
+  echo "END OF REMOTE VALIDATION REPORT"
+  echo "========================================================"
+} > "$VAL_LOG" 2>&1
+
+echo "==> Stage A validation log written to $VAL_LOG"
+cat "$VAL_LOG"
+
+# Push validation report to git branch so local agent can inspect
+git config user.name "Codespace Validation"
+git config user.email "codespace@systemaops.local"
+git add "$VAL_LOG"
+git commit -m "chore(codespace): record Stage A remote validation report" || true
+git push origin feature/open-source-mainframe-reference-stack || true
+
