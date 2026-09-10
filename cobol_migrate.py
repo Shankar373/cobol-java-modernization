@@ -3469,8 +3469,19 @@ class Pipeline:
         if not co.get("java_files"):
             return False, "cannot assemble target: no generated Java sources", []
 
-        # Preserve cobj runtime library inside the Generate stage internally
-        jar_info, err = preserve_runtime(self.out)
+        # Preserve cobj runtime library inside the Generate stage internally.
+        # If libcobj.jar already exists in out_dir (e.g. pre-seeded or from a
+        # previous run), skip the Docker extraction and use it directly.
+        existing_jar = os.path.join(self.out, "libcobj.jar")
+        if os.path.isfile(existing_jar):
+            jar_info = {
+                "path": existing_jar,
+                "size": os.path.getsize(existing_jar),
+                "sha256": sha256_file(existing_jar),
+            }
+            err = ""
+        else:
+            jar_info, err = preserve_runtime(self.out)
         if not jar_info:
             return False, "could not vendor libcobj.jar: " + err[:300], []
         pr = {

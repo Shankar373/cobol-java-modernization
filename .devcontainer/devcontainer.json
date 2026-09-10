@@ -1,0 +1,63 @@
+{
+  "name": "COBOL-to-Java Modernization Platform (Free Tier)",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+
+  // Target free-tier 2-core machine only. Do NOT select 4/8/16 cores.
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+
+  "features": {
+    // JDK 17 (LTS) + Maven 3.9
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17",
+      "installMaven": "true",
+      "mavenVersion": "3.9.6"
+    },
+    // Optional Docker-in-Docker: Daemon installed for tests needing containers,
+    // but not required for normal development.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "enableNonRootDocker": "true"
+    }
+  },
+
+  "forwardPorts": [8787, 8080, 5432],
+  "portsAttributes": {
+    "8787": {
+      "label": "Modernization Platform UI",
+      "onAutoForward": "notify"
+    },
+    "8080": {
+      "label": "Modernized Spring Boot App",
+      "onAutoForward": "silent"
+    },
+    "5432": {
+      "label": "PostgreSQL Database",
+      "onAutoForward": "silent"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "vscjava.vscode-java-pack",
+        "bitlang.cobol"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+          "tests"
+        ],
+        "files.trimTrailingWhitespace": true
+      }
+    }
+  },
+
+  // Setup script runs after container creation
+  "postCreateCommand": "bash .devcontainer/setup.sh"
+}
