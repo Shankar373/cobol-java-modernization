@@ -2273,29 +2273,33 @@ def resolve_input_file(repo_dir, d, default_rel):
     Discovers input files across file_assigns or candidate input directories
     (data/in, data/source, data/input, inputs, datasets) without hardcoded paths.
     """
-    for src, assigns in d.get("file_assigns", {}).items():
-        for a in assigns:
-            raw_path = a.get("assign_path") or ""
-            norm_path = posix(raw_path)
-            parts = norm_path.split("/")
-            if "out" in parts or "output" in parts or "report" in parts:
-                continue
-            p = os.path.abspath(os.path.join(repo_dir, *parts))
-            if os.path.isfile(p):
-                return posix(p)
     if default_rel:
         cand = os.path.abspath(os.path.join(repo_dir, *default_rel.split("/")))
         if os.path.isfile(cand):
             return posix(cand)
+    for src, assigns in d.get("file_assigns", {}).items():
+        for a in assigns:
+            org = str(a.get("organization", "")).upper()
+            if org in ("INDEXED", "RELATIVE"):
+                continue
+            raw_path = a.get("assign_path") or ""
+            norm_path = posix(raw_path)
+            parts = norm_path.split("/")
+            if "out" in parts or "output" in parts or "report" in parts or "work" in parts:
+                continue
+            p = os.path.abspath(os.path.join(repo_dir, *parts))
+            if os.path.isfile(p):
+                return posix(p)
     for sub in ("data/in", "data/source", "data/input", "data", "inputs", "datasets"):
         sub_dir = os.path.join(repo_dir, *sub.split("/"))
         if os.path.isdir(sub_dir):
             for f in os.listdir(sub_dir):
                 full_f = os.path.join(sub_dir, f)
                 if os.path.isfile(full_f) and f.lower().endswith((".txt", ".dat", ".csv", ".raw")):
-                    if "out" not in f.lower() and "report" not in f.lower():
+                    if "out" not in f.lower() and "report" not in f.lower() and "work" not in f.lower():
                         return posix(full_f)
     return None
+
 
 
 # RAW-* flat-file field -> JPA entity property name (ClaimsCore / BankCore).
@@ -2768,16 +2772,30 @@ class ApplicationSemanticModel:
                     elif matched_model == self.output_record and not self.output_path:
                         self.output_path = posix(a.get("assign_path") or "")
 
+        # Resolve primary input/output paths using the centralized enterprise resolver
+        try:
+            from modernize.enterprise_generator import resolve_primary_io_files
+            io_res = resolve_primary_io_files({
+                "file_assigns": self.file_assigns,
+                "file_ops": self.file_ops
+            })
+            if not self.input_path and io_res.get("primary_input"):
+                self.input_path = posix(io_res["primary_input"]["assign_path"])
+            if not self.output_path and io_res.get("primary_output"):
+                self.output_path = posix(io_res["primary_output"]["assign_path"])
+        except Exception:
+            pass
+
         # Fallback for paths if not matched by role
         if not self.input_path:
             for src, assigns in self.file_assigns.items():
                 for a in assigns:
                     org = str(a.get("organization", "")).upper()
-                    if org != "INDEXED":
+                    if org not in ("INDEXED", "RELATIVE"):
                         log_name = a.get("logical_name", "").upper()
                         file_op = self.file_ops.get(src, {}).get(log_name, {"is_input": False, "is_output": False})
                         norm_path = posix(a.get("assign_path") or "").upper()
-                        if file_op["is_input"] or "IN" in norm_path.split("/") or "INPUT" in log_name:
+                        if "WORK" not in norm_path.split("/") and (file_op["is_input"] or "IN" in norm_path.split("/") or "INPUT" in log_name):
                             self.input_path = posix(a.get("assign_path") or "")
                             break
                 if self.input_path:
@@ -2787,11 +2805,11 @@ class ApplicationSemanticModel:
             for src, assigns in self.file_assigns.items():
                 for a in assigns:
                     org = str(a.get("organization", "")).upper()
-                    if org != "INDEXED":
+                    if org not in ("INDEXED", "RELATIVE"):
                         log_name = a.get("logical_name", "").upper()
                         file_op = self.file_ops.get(src, {}).get(log_name, {"is_input": False, "is_output": False})
                         norm_path = posix(a.get("assign_path") or "").upper()
-                        if file_op["is_output"] or "OUT" in norm_path.split("/") or "OUTPUT" in log_name or "REPT" in log_name:
+                        if "WORK" not in norm_path.split("/") and (file_op["is_output"] or "OUT" in norm_path.split("/") or "OUTPUT" in log_name or "REPT" in log_name):
                             self.output_path = posix(a.get("assign_path") or "")
                             break
                 if self.output_path:
@@ -3577,9 +3595,6 @@ class Pipeline:
                 self.log("  [WARN] --skip-legacy set but no pre-seeded baseline found "
                          "— equivalence will be UNVERIFIED, never PASS")
             return True, "baseline reused (--skip-legacy)", sorted(bl)
-        if not ensure_image(DEFAULT_GNUCOBOL_IMAGE, self.pull):
-            return False, "GnuCOBOL image not available", []
-
         gflags = ["-free"] if d["format"] == "free" else []
         inc = " ".join(["-I " + posix(cb) for cb in d["copybook_dirs"]])
         rm_legacy = [s for s in d["sources"]
@@ -3644,6 +3659,11 @@ class Pipeline:
             self.set_data("legacy", leg)
             self.mark(STAGES.index("baseline"), "blocked", msg)
             return True, msg, []
+
+        use_host_cobol = (not has_sql) and bool(shutil.which("cobc"))
+        if not use_host_cobol:
+            if not ensure_image(DEFAULT_GNUCOBOL_IMAGE, self.pull):
+                return False, "GnuCOBOL image not available", []
 
         if has_sql:
             # Check connection — explicit 15-second timeout; a ready PostgreSQL
@@ -3756,22 +3776,80 @@ class Pipeline:
                 + ' '.join(entry_files)
             )
 
-        build = docker_run(
-            DEFAULT_GNUCOBOL_IMAGE,
-            [(self.repo, "/repo"), (ocesql_temp, "/ocesql_temp")],
-            "/repo",
-            " && ".join(build_cmds),
-            shell="sh",
-        )
-        leg = {"build_rc": build.returncode,
-               "build_stderr_tail": (build.stderr + build.stdout)[-1500:],
-               "image": DEFAULT_GNUCOBOL_IMAGE}
-        if build.returncode != 0:
+        if use_host_cobol:
+            build_stdout_parts = []
+            build_stderr_parts = []
+            build_rc = 0
+            if module_src:
+                for m_src in module_src:
+                    m_base = os.path.splitext(os.path.basename(m_src))[0]
+                    so_path = os.path.join(self.repo, f"{m_base}.so")
+                    if os.path.exists(so_path):
+                        try:
+                            os.remove(so_path)
+                        except Exception:
+                            pass
+                    inc_args = [f"-I{posix(cb)}" for cb in d["copybook_dirs"]]
+                    m_cmd = ["cobc", "-m"] + gflags + inc_args + ["-o", f"{m_base}.so", posix(m_src)]
+                    res_m = subprocess.run(
+                        m_cmd,
+                        cwd=self.repo,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    build_stdout_parts.append(res_m.stdout)
+                    build_stderr_parts.append(res_m.stderr)
+                    if res_m.returncode != 0:
+                        build_rc = res_m.returncode
+                        break
+
+            if build_rc == 0:
+                entry_list = entry_src or rm_legacy
+                entry_files = [posix(s) for s in entry_list]
+                inc_args = [f"-I{posix(cb)}" for cb in d["copybook_dirs"]]
+                e_cmd = ["cobc", "-x"] + gflags + inc_args + ["-o", exe_name] + entry_files
+                res_e = subprocess.run(
+                    e_cmd,
+                    cwd=self.repo,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                build_stdout_parts.append(res_e.stdout)
+                build_stderr_parts.append(res_e.stderr)
+                build_rc = res_e.returncode
+
+            build_out_str = "".join(build_stdout_parts)
+            build_err_str = "".join(build_stderr_parts)
+            leg = {
+                "build_rc": build_rc,
+                "build_stderr_tail": (build_err_str + build_out_str)[-1500:],
+                "image": "host-gnucobol",
+            }
+        else:
+            build = docker_run(
+                DEFAULT_GNUCOBOL_IMAGE,
+                [(self.repo, "/repo"), (ocesql_temp, "/ocesql_temp")],
+                "/repo",
+                " && ".join(build_cmds),
+                shell="sh",
+            )
+            build_rc = build.returncode
+            build_out_str = build.stdout
+            build_err_str = build.stderr
+            leg = {
+                "build_rc": build_rc,
+                "build_stderr_tail": (build_err_str + build_out_str)[-1500:],
+                "image": DEFAULT_GNUCOBOL_IMAGE,
+            }
+
+        if build_rc != 0:
             leg["status"] = "BASELINE_UNPRODUCIBLE"
             if self.cfg.get("strict_baseline"):
                 self.set_data("legacy", leg)
                 return False, "GnuCOBOL build failed (strict_baseline enabled): " + \
-                    (build.stderr or build.stdout)[-400:], []
+                    (build_err_str or build_out_str)[-400:], []
             # Fault-tolerant baseline: log compiler output but don't abort the
             # full pipeline. Missing IDENTIFICATION DIVISION on a utility stub
             # or a single malformed program should not block transpilation of
@@ -3779,7 +3857,7 @@ class Pipeline:
             # will mark all files as "baseline-only" / "java-only" rather than
             # failing with a hard error.
             self.set_data("legacy", leg)
-            stderr_preview = (build.stderr or build.stdout)[-2000:]
+            stderr_preview = (build_err_str or build_out_str)[-2000:]
             self.log(stderr_preview)
             self.log("  [WARN] GnuCOBOL build had errors — baseline will be empty. "
                      "Transpile + Gate 1 compare will still run.")
@@ -3812,7 +3890,7 @@ class Pipeline:
             try:
                 exec_result = run_cobol_with_scenario(
                     self.repo, scenario, d, self.out, self.cfg,
-                    gnucobol_image=DEFAULT_GNUCOBOL_IMAGE,
+                    gnucobol_image=None if use_host_cobol else DEFAULT_GNUCOBOL_IMAGE,
                     exe_name=exe_name,
                 )
             except (ExecutionTimeout, OutputLimitExceeded) as exc:
@@ -3823,6 +3901,7 @@ class Pipeline:
             run_stdout = exec_result.stdout
             run_stderr = exec_result.stderr
             term_status = exec_result.termination_status
+            duration = exec_result.duration_seconds
         else:
             # Non-interactive: run with watchdog protection (repository-agnostic)
             from execution.scenario_runner import run_command_with_watchdog
@@ -3831,26 +3910,46 @@ class Pipeline:
             timeout = int(exec_cfg.get("timeout_seconds", 120))
             max_out = int(exec_cfg.get("max_output_bytes", 5 * 1024 * 1024))
 
-            cmd_str = f"cd /repo && export COB_LIBRARY_PATH=. && ./{exe_name}"
-            try:
-                rc, stdout, stderr, duration, term_status = run_command_with_watchdog(
-                    DEFAULT_GNUCOBOL_IMAGE,
-                    [(self.repo, "/repo")],
-                    "/repo",
-                    cmd_str,
-                    timeout_seconds=timeout,
-                    max_output_bytes=max_out,
-                )
-            except (ExecutionTimeout, OutputLimitExceeded) as exc:
-                self.set_data("legacy", leg)
-                return False, str(exc), []
+            if use_host_cobol:
+                inner_cmd = f"./{exe_name}" if sys.platform != "win32" else exe_name
+                try:
+                    rc, stdout, stderr, duration, term_status = run_command_with_watchdog(
+                        None,
+                        [],
+                        self.repo,
+                        inner_cmd,
+                        timeout_seconds=timeout,
+                        max_output_bytes=max_out,
+                        env={"COB_LIBRARY_PATH": "."},
+                    )
+                except (ExecutionTimeout, OutputLimitExceeded) as exc:
+                    self.set_data("legacy", leg)
+                    return False, str(exc), []
+            else:
+                cmd_str = f"cd /repo && export COB_LIBRARY_PATH=. && ./{exe_name}"
+                try:
+                    rc, stdout, stderr, duration, term_status = run_command_with_watchdog(
+                        DEFAULT_GNUCOBOL_IMAGE,
+                        [(self.repo, "/repo")],
+                        "/repo",
+                        cmd_str,
+                        timeout_seconds=timeout,
+                        max_output_bytes=max_out,
+                    )
+                except (ExecutionTimeout, OutputLimitExceeded) as exc:
+                    self.set_data("legacy", leg)
+                    return False, str(exc), []
 
             run_rc = rc
             run_stdout = stdout
             run_stderr = stderr
             # No execution_scenario for non-interactive programs.
 
-        gcc = docker_run(DEFAULT_GNUCOBOL_IMAGE, [], None, "cobc -V", shell="sh").stdout.splitlines()
+        if use_host_cobol:
+            v_res = subprocess.run(["cobc", "-V"], capture_output=True, text=True)
+            gcc = (v_res.stdout or v_res.stderr).splitlines()
+        else:
+            gcc = docker_run(DEFAULT_GNUCOBOL_IMAGE, [], None, "cobc -V", shell="sh").stdout.splitlines()
         leg.update({
             "run_rc": run_rc,
             "run_stdout": run_stdout[-1500:],
@@ -3859,6 +3958,7 @@ class Pipeline:
             "execution_mode": "interactive-scripted" if mode != "NON_INTERACTIVE" else "non-interactive",
             "interactivity": mode,
             "termination_status": term_status,
+            "duration_seconds": duration,
         })
         if run_rc != 0:
             self.set_data("legacy", leg)
@@ -5285,7 +5385,7 @@ class Pipeline:
             if not os.path.exists(gk):
                 open(gk, "w").close()
 
-        # Dynamically resolve input file path using model-driven approach
+        # Dynamically resolve input and output paths using canonical model
         if not is_generic:
             is_bank = "Transactions" in spring_job_name
             is_claims = "Claims" in spring_job_name
@@ -5293,27 +5393,33 @@ class Pipeline:
             is_bank = False
             is_claims = False
         
-        # Search assigns for input file
-        input_assign = None
-        file_ops = d.get("file_ops", {})
-        file_assigns = d.get("file_assigns", {}) or {}
-        for src, ops in file_ops.items():
-            assigns = file_assigns.get(src, [])
-            for logical_name, info in ops.items():
-                if info.get("is_input"):
-                    for a in assigns:
-                        if a.get("logical_name") == logical_name:
-                            input_assign = a.get("assign_path")
-                            break
-            if input_assign:
-                break
+        model_data = self.data("semantic_model", {}) or {}
+        input_assign = model_data.get("input_path")
+        out_rel_path = model_data.get("output_path") or ""
 
         if not input_assign:
-            # Fallback to naming conventions
-            for s, assigns in file_assigns.items():
+            try:
+                from modernize.enterprise_generator import resolve_primary_io_files
+                io_res = resolve_primary_io_files(d)
+                if io_res.get("primary_input"):
+                    input_assign = io_res["primary_input"]["assign_path"]
+                if not out_rel_path and io_res.get("primary_output"):
+                    out_rel_path = io_res["primary_output"]["assign_path"]
+            except Exception:
+                pass
+
+        if not input_assign:
+            # Fallback to naming conventions in file_assigns
+            for s, assigns in (d.get("file_assigns", {}) or {}).items():
                 for a in assigns:
+                    org = str(a.get("organization", "")).upper()
+                    if org in ("INDEXED", "RELATIVE"):
+                        continue
                     norm_path = posix(a.get("assign_path") or "")
-                    if "in" in norm_path.split("/") or "input" in norm_path.split("/") or "in" in a.get("logical_name", "").lower():
+                    parts = norm_path.split("/")
+                    if "work" in parts:
+                        continue
+                    if "in" in parts or "input" in parts or "in" in a.get("logical_name", "").lower():
                         input_assign = norm_path
                         break
                 if input_assign:
@@ -5334,8 +5440,6 @@ class Pipeline:
             self.log("    [NOTE] no flat-file input resolved; standalone batch execution")
 
         # Override app.report.output from resolved semantic model if present
-        model_data = self.data("semantic_model", {})
-        out_rel_path = model_data.get("output_path") or ""
         if out_rel_path:
             app_args.append(f"--app.report.output={out_rel_path}")
             self.log(f"    [GATE 2] batch output: {out_rel_path}")

@@ -16,9 +16,186 @@ def to_java_var(name: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z0-9]', '', name)
     if not cleaned:
         return "var"
-    return cleaned[0].lower() + cleaned[1:]
+def resolve_primary_io_files(model: dict) -> dict:
+    """
+    Deterministically resolve primary batch input and output files from model metadata.
+    Handles both nested and flat representations of file_assigns and file_ops.
+    Rules:
+      - Primary input: file opened for input (is_input=True), not INDEXED/RELATIVE,
+        not written internally by another step, not in work/temp directories.
+      - Primary output: file opened for output (is_output=True), not INDEXED/RELATIVE,
+        not consumed internally as input by another step, not in work/temp directories.
+    """
+    file_assigns = (model or {}).get("file_assigns") or {}
+    file_ops = (model or {}).get("file_ops") or {}
+    
+    registry = {}
+    
+    def _posix(p):
+        return (p or "").replace("\\", "/")
+
+    def _register(logical_name, assign_path, organization, src):
+        if not logical_name and not assign_path:
+            return
+        key = (assign_path or logical_name).replace("\\", "/").lower()
+        if key not in registry:
+            registry[key] = {
+                "logical_name": logical_name,
+                "assign_path": assign_path,
+                "organization": organization,
+                "base_name": os.path.basename(assign_path) if assign_path else logical_name,
+                "is_input": False,
+                "is_output": False,
+                "srcs": []
+            }
+        entry = registry[key]
+        if organization and not entry["organization"]:
+            entry["organization"] = organization
+        if logical_name and not entry["logical_name"]:
+            entry["logical_name"] = logical_name
+        if assign_path and not entry["assign_path"]:
+            entry["assign_path"] = assign_path
+        if src:
+            entry["srcs"].append(src)
+
+    def _update_ops(logical_name, is_in, is_out):
+        matched = False
+        ln_clean = logical_name.upper()
+        for entry in registry.values():
+            if entry["logical_name"].upper() == ln_clean or entry["base_name"].upper() == ln_clean:
+                if is_in: entry["is_input"] = True
+                if is_out: entry["is_output"] = True
+                matched = True
+        if not matched:
+            key = logical_name.lower()
+            registry[key] = {
+                "logical_name": logical_name,
+                "assign_path": logical_name,
+                "organization": "",
+                "base_name": logical_name,
+                "is_input": is_in,
+                "is_output": is_out,
+                "srcs": []
+            }
+
+    # 1. Ingest file_assigns
+    if isinstance(file_assigns, dict):
+        for src_or_ln, val in file_assigns.items():
+            if isinstance(val, list):
+                src = src_or_ln
+                for a in val:
+                    if isinstance(a, dict):
+                        ln = a.get("logical_name") or ""
+                        ap = a.get("assign_path") or ""
+                        org = a.get("organization") or ""
+                        _register(ln, ap, org, src)
+            elif isinstance(val, dict):
+                ln = src_or_ln
+                ap = val.get("assign_path") or ""
+                org = val.get("organization") or ""
+                _register(ln, ap, org, None)
+            elif isinstance(val, str):
+                ln = src_or_ln
+                ap = val
+                _register(ln, ap, "", None)
+    elif isinstance(file_assigns, list):
+        for a in file_assigns:
+            if isinstance(a, dict):
+                ln = a.get("logical_name") or ""
+                ap = a.get("assign_path") or ""
+                org = a.get("organization") or ""
+                _register(ln, ap, org, None)
+
+    # 2. Ingest file_ops
+    if isinstance(file_ops, dict):
+        for src_or_ln, ops_or_mode in file_ops.items():
+            if isinstance(ops_or_mode, dict):
+                src = src_or_ln
+                for ln, info in ops_or_mode.items():
+                    if isinstance(info, dict):
+                        is_in = bool(info.get("is_input"))
+                        is_out = bool(info.get("is_output"))
+                        open_modes = [m.upper() for m in info.get("open_modes", [])]
+                        if "INPUT" in open_modes: is_in = True
+                        if "I-O" in open_modes: is_in = True; is_out = True
+                        if "OUTPUT" in open_modes or "EXTEND" in open_modes: is_out = True
+                        _update_ops(ln, is_in, is_out)
+                    elif isinstance(info, str):
+                        m = info.upper()
+                        _update_ops(ln, m in ("INPUT", "I-O"), m in ("OUTPUT", "EXTEND", "I-O"))
+            elif isinstance(ops_or_mode, str):
+                ln = src_or_ln
+                m = ops_or_mode.upper()
+                _update_ops(ln, m in ("INPUT", "I-O"), m in ("OUTPUT", "EXTEND", "I-O"))
+
+    # Fallback heuristic if no explicit operations recorded
+    for entry in registry.values():
+        if not entry["is_input"] and not entry["is_output"]:
+            p_upper = entry["assign_path"].upper()
+            ln_upper = entry["logical_name"].upper()
+            if "IN" in p_upper.split("/") or "INPUT" in ln_upper or "IN" in ln_upper:
+                entry["is_input"] = True
+            if "OUT" in p_upper.split("/") or "OUTPUT" in ln_upper or "OUT" in ln_upper or "REPT" in ln_upper:
+                entry["is_output"] = True
+
+    # 3. Filter candidates
+    candidates_in = []
+    candidates_out = []
+    for entry in registry.values():
+        org = str(entry["organization"]).upper()
+        parts = [p.lower() for p in _posix(entry["assign_path"]).split("/")]
+        is_indexed = org in ("INDEXED", "RELATIVE")
+        is_work = "work" in parts or "tmp" in parts or "temp" in parts
+        if entry["is_input"] and not is_indexed and not is_work:
+            candidates_in.append(entry)
+        if entry["is_output"] and not is_indexed and not is_work:
+            candidates_out.append(entry)
+
+    def _rank_in(e):
+        score = 0
+        if not e["is_output"]:
+            score += 100
+        parts = [p.lower() for p in _posix(e["assign_path"]).split("/")]
+        if any(p in ("in", "input", "inputs", "source", "source_data", "datasets") for p in parts):
+            score += 50
+        if "IN" in e["logical_name"].upper():
+            score += 20
+        return score
+
+    def _rank_out(e):
+        score = 0
+        if not e["is_input"]:
+            score += 100
+        parts = [p.lower() for p in _posix(e["assign_path"]).split("/")]
+        fn = parts[-1] if parts else ""
+        if any(w in fn for w in ("report", "rept", "rpt", "summary", "eod")):
+            score += 50
+        if fn.endswith((".txt", ".rpt", ".csv")):
+            score += 30
+        if "REPT" in e["logical_name"].upper() or "REPORT" in e["logical_name"].upper():
+            score += 20
+        if any(p in ("out", "output", "outputs", "reports") for p in parts):
+            score += 10
+        return score
+
+    candidates_in.sort(key=_rank_in, reverse=True)
+    candidates_out.sort(key=_rank_out, reverse=True)
+
+    return {
+        "all_files": registry,
+        "primary_input": candidates_in[0] if candidates_in else None,
+        "primary_output": candidates_out[0] if candidates_out else None,
+        "candidate_inputs": candidates_in,
+        "candidate_outputs": candidates_out,
+        "inputs": [e["logical_name"] for e in candidates_in],
+        "outputs": [e["logical_name"] for e in candidates_out]
+    }
+
 
 class EnterpriseApplicationGenerator:
+    def resolve_primary_io_files(self) -> dict:
+        return resolve_primary_io_files(self.model)
+
     def __init__(self, repo_path: str, model: dict, native_class_name: str, has_db_evidence: bool = False, has_rest_evidence: bool = False):
         self.repo_path = os.path.abspath(repo_path) if repo_path else ""
         self.model = model
@@ -201,26 +378,60 @@ class EnterpriseApplicationGenerator:
             f.write("\n".join(lines))
 
     def _write_spring_batch_config(self, java_base: str):
-        # Collect input/output logical names from file_assigns so we can wire
-        # --app.batch.input / --app.report.output into JclExecutionContext
-        # before calling the COBOL entry program.  Without this wiring the
-        # generated program falls back to a bare relative filename that does
-        # not exist in the Spring Boot working directory.
+        io_info = self.resolve_primary_io_files()
         file_assigns = self.model.get("file_assigns") or {}
         file_ops    = self.model.get("file_ops")    or {}
         input_logical_names  = []  # list of (logical_name, assign_path)
         output_logical_names = []  # list of (logical_name, assign_path)
+
+        def _resolve_assign_path(logical: str, src_key: str = None) -> str:
+            if src_key and isinstance(file_assigns, dict):
+                src_entry = file_assigns.get(src_key)
+                if isinstance(src_entry, list):
+                    for a in src_entry:
+                        if isinstance(a, dict) and a.get("logical_name") == logical:
+                            return a.get("assign_path", "")
+            if isinstance(file_assigns, dict):
+                if logical in file_assigns:
+                    v = file_assigns[logical]
+                    if isinstance(v, str):
+                        return v
+                    elif isinstance(v, dict):
+                        return v.get("assign_path", "")
+                for _, v in file_assigns.items():
+                    if isinstance(v, list):
+                        for a in v:
+                            if isinstance(a, dict) and a.get("logical_name") == logical:
+                                return a.get("assign_path", "")
+            elif isinstance(file_assigns, list):
+                for a in file_assigns:
+                    if isinstance(a, dict) and a.get("logical_name") == logical:
+                        return a.get("assign_path", "")
+            return ""
+
         for src, ops in file_ops.items():
-            assigns = file_assigns.get(src, [])
-            for logical_name, info in ops.items():
-                for a in assigns:
-                    if a.get("logical_name") == logical_name:
-                        ap = a.get("assign_path", "")
-                        if info.get("is_input"):
-                            input_logical_names.append((logical_name, ap))
-                        elif info.get("is_output"):
-                            output_logical_names.append((logical_name, ap))
-                        break
+            if isinstance(ops, dict):
+                for logical_name, info in ops.items():
+                    ap = _resolve_assign_path(logical_name, src)
+                    is_in = False
+                    is_out = False
+                    if isinstance(info, dict):
+                        is_in = bool(info.get("is_input"))
+                        is_out = bool(info.get("is_output"))
+                    elif isinstance(info, str):
+                        is_in = info.upper() in ("INPUT", "I-O")
+                        is_out = info.upper() in ("OUTPUT", "EXTEND", "I-O")
+                    if is_in:
+                        input_logical_names.append((logical_name, ap))
+                    elif is_out:
+                        output_logical_names.append((logical_name, ap))
+            elif isinstance(ops, str):
+                logical_name = src
+                ap = _resolve_assign_path(logical_name)
+                if ops.upper() in ("INPUT", "I-O"):
+                    input_logical_names.append((logical_name, ap))
+                elif ops.upper() in ("OUTPUT", "EXTEND", "I-O"):
+                    output_logical_names.append((logical_name, ap))
 
         lines = []
         lines.append("package com.systema.modernized.batch;")
@@ -261,22 +472,40 @@ class EnterpriseApplicationGenerator:
         lines.append("                .tasklet((contribution, chunkContext) -> {")
         lines.append("                    com.systema.modernized.SpringContextHelper.jdbcTemplate = jdbcTemplate;")
         lines.append("                    com.systema.modernized.SpringContextHelper.transactionManager = transactionManager;")
-        # Wire input file path into JclExecutionContext for every input DD
-        if input_logical_names:
-            lines.append("                    // Wire batch input path into JCL DD assignments so the")
-            lines.append("                    // generated COBOL program resolves files correctly.")
+        # Wire input file path into JclExecutionContext for primary input DD
+        primary_in = io_info.get("primary_input")
+        if primary_in:
+            lines.append("                    // Wire batch input path into JCL DD assignments for primary batch input.")
+            lines.append("                    if (batchInputPath != null && !batchInputPath.isEmpty()) {")
+            ln = primary_in["logical_name"]
+            base = primary_in.get("base_name") or ""
+            lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{ln}", batchInputPath);')
+            if base and base.upper() != ln.upper():
+                lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{base}", batchInputPath);')
+            lines.append("                    }")
+        elif input_logical_names:
             lines.append("                    if (batchInputPath != null && !batchInputPath.isEmpty()) {")
             for ln, ap in input_logical_names:
                 lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{ln}", batchInputPath);')
                 if ap:
-                    # Also register the raw assign_path basename as an alternate key
                     import os as _os
                     base = _os.path.basename(ap)
                     if base and base.upper() != ln.upper():
                         lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{base}", batchInputPath);')
             lines.append("                    }")
-        # Wire output file path into JclExecutionContext for every output DD
-        if output_logical_names:
+
+        # Wire output file path into JclExecutionContext for primary report DD
+        primary_out = io_info.get("primary_output")
+        if primary_out:
+            lines.append("                    // Wire batch output path into JCL DD assignments for primary report output.")
+            lines.append("                    if (batchOutputPath != null && !batchOutputPath.isEmpty()) {")
+            ln = primary_out["logical_name"]
+            base = primary_out.get("base_name") or ""
+            lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{ln}", batchOutputPath);')
+            if base and base.upper() != ln.upper():
+                lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{base}", batchOutputPath);')
+            lines.append("                    }")
+        elif output_logical_names:
             lines.append("                    if (batchOutputPath != null && !batchOutputPath.isEmpty()) {")
             for ln, ap in output_logical_names:
                 lines.append(f'                        com.systema.modernized.JclExecutionContext.setDdAssignment("{ln}", batchOutputPath);')

@@ -226,8 +226,9 @@ class NativeExpressionTranslator:
                     else:
                         return f"{var_name}.substring(({start_expr}) - 1)"
 
-            for v in self.var_types.keys():
-                idx = re.sub(r'(?<![A-Za-z0-9_-])' + re.escape(v) + r'(?![A-Za-z0-9_-])', to_java_var(v), idx)
+            for v, v_type in self.var_types.items():
+                j_rep = f"{to_java_var(v)}.intValue()" if v_type == "BigDecimal" else to_java_var(v)
+                idx = re.sub(r'(?<![A-Za-z0-9_-])' + re.escape(v) + r'(?![A-Za-z0-9_-])', j_rep, idx)
 
             if self.is_child:
                 for v in self.parent_global_vars.keys():
@@ -518,7 +519,7 @@ class NativeExpressionTranslator:
         return parse_expr()
 
 class NativeStatementTranslator:
-    def __init__(self, var_types: dict, file_assigns: list = None, record_to_fd: dict = None, all_generators: dict = None, current_generator = None, level88_map: dict = None, constants_map: dict = None, is_child: bool = False, parent_global_vars: dict = None):
+    def __init__(self, var_types: dict, file_assigns: list = None, record_to_fd: dict = None, all_generators: dict = None, current_generator = None, level88_map: dict = None, constants_map: dict = None, is_child: bool = False, parent_global_vars: dict = None, var_values: dict = None):
         self.var_types = var_types
         self.file_assigns = file_assigns or []
         self.record_to_fd = record_to_fd or {}
@@ -529,6 +530,7 @@ class NativeStatementTranslator:
         self.redefines_layout = getattr(current_generator, "redefines_layout", {}) if current_generator else {}
         self.is_child = is_child
         self.parent_global_vars = parent_global_vars or {}
+        self.var_values = var_values if var_values is not None else (getattr(current_generator, "default_var_values", {}) if current_generator else {})
 
         redefs = self.redefines_layout
         odos = getattr(current_generator, "occurs_depending_on", {}) if current_generator else {}
@@ -600,8 +602,9 @@ class NativeStatementTranslator:
             idx = match.group(2).strip()
 
             if self.current_generator:
-                for v in self.current_generator.var_types.keys():
-                    idx = re.sub(r'(?<![A-Za-z0-9_-])' + re.escape(v) + r'(?![A-Za-z0-9_-])', to_java_var(v), idx)
+                for v, v_type in self.current_generator.var_types.items():
+                    j_rep = f"{to_java_var(v)}.intValue()" if v_type == "BigDecimal" else to_java_var(v)
+                    idx = re.sub(r'(?<![A-Za-z0-9_-])' + re.escape(v) + r'(?![A-Za-z0-9_-])', j_rep, idx)
 
             if self.current_generator:
                 for v in self.current_generator.redefines_layout.keys():
@@ -3013,7 +3016,7 @@ class NativeStatementTranslator:
         if idx_type == "BigDecimal":
             by_expr = f"new BigDecimal(\"{by_val}\")" if re.match(r'^\d+(\.\d+)?$', str(by_val)) else to_java_var(str(by_val))
             from_expr = f"new BigDecimal(\"{from_val}\")" if re.match(r'^\d+(\.\d+)?$', str(from_val)) else to_java_var(str(from_val))
-            return f"for ({java_idx} = {from_expr}; !({cond_trans}) && !programExited; {java_idx} = {java_idx}.add({by_expr})) {{"
+            return f"for ({java_idx}.assign({from_expr}); !({cond_trans}) && !programExited; {java_idx}.assign({java_idx}.getValue().add({by_expr}))) {{"
         else:
             return f"for ({java_idx} = {from_val}; !({cond_trans}) && !programExited; {java_idx} += {by_val}) {{"
 
@@ -3400,15 +3403,16 @@ class NativeFileIOGenerator:
 
             return f"new com.systema.modernized.runtime.CobolNumericSpec({signed_str}, {digits}, {scale}, {usage_val}, {sign_pos_val}, {sign_sep})"
 
+        is_binary_seq = (organization.upper() not in ("INDEXED", "RELATIVE", "LINE SEQUENTIAL")) and not (has_reports and not is_input)
         offsets = []
         curr = 0
         for f_name, pic in record_fields:
             f_upper = f_name.upper()
             _, length, _, _ = NativeTypeMapper.parse_pic(pic)
             usage = var_usages.get(f_upper, "DISPLAY") or "DISPLAY"
-            if usage.upper() in ("COMP-3", "PACKED-DECIMAL"):
+            if is_binary_seq and usage.upper() in ("COMP-3", "PACKED-DECIMAL"):
                 length = length // 2 + 1
-            elif var_sign_separates.get(f_upper, False):
+            elif is_binary_seq and var_sign_separates.get(f_upper, False):
                 length = length + 1
             offsets.append((f_name, curr, curr + length))
             curr += length

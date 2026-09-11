@@ -54,6 +54,7 @@ def _run_with_watchdog(
     timeout_seconds: int,
     max_output_bytes: int,
     env: dict = None,
+    cwd: str = None,
 ) -> tuple:
     """Run a subprocess with stdin from a file and a dual watchdog (time + bytes).
 
@@ -73,6 +74,7 @@ def _run_with_watchdog(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=env,
+                cwd=cwd,
                 start_new_session=(sys.platform != "win32"),
             )
         except Exception as exc:
@@ -257,11 +259,12 @@ def run_command_with_watchdog(
     timeout_seconds: int,
     max_output_bytes: int,
     stdin_path: str = None,
+    env: dict = None,
 ) -> tuple[int, str, str, float, str]:
     """Run a containerized command with timeout and output-size watchdogs.
 
     Used to wrap non-interactive/batch runs with the exact same watchdog
-    protection as interactive runs.
+    protection as interactive runs. If image is None, runs natively on the host.
     """
     import tempfile
 
@@ -272,10 +275,20 @@ def run_command_with_watchdog(
             stdin_path = tf.name
         delete_stdin = True
 
-    cmd = _docker_cmd(image, mounts, workdir, inner_cmd)
+    if image:
+        cmd = _docker_cmd(image, mounts, workdir, inner_cmd)
+        run_env = env
+        run_cwd = None
+    else:
+        cmd = ["sh", "-c", inner_cmd] if sys.platform != "win32" else ["cmd", "/c", inner_cmd]
+        run_env = os.environ.copy()
+        if env:
+            run_env.update(env)
+        run_cwd = workdir
+
     try:
         rc, stdout, stderr, duration, term_status = _run_with_watchdog(
-            cmd, stdin_path, timeout_seconds, max_output_bytes
+            cmd, stdin_path, timeout_seconds, max_output_bytes, env=run_env, cwd=run_cwd
         )
     finally:
         if delete_stdin:
@@ -306,10 +319,10 @@ def run_cobol_with_scenario(
     The scenario stdin file is always created fresh (or restored if missing).
 
     Args:
-        exe_name:   Relative path inside the container's /repo mount.
+        exe_name:   Relative path inside the container's /repo mount or host repo_dir.
                     Defaults to a name derived from the scenario entrypoint.
     """
-    image = gnucobol_image or _DEFAULT_GNUCOBOL
+    image = gnucobol_image
     exec_cfg = cfg.get("execution", {})
     timeout = scenario.timeout_seconds
     max_out = scenario.max_output_bytes
@@ -326,19 +339,29 @@ def run_cobol_with_scenario(
     artifacts_dir = os.path.join(out_dir, "execution", scenario.scenario_id)
     os.makedirs(artifacts_dir, exist_ok=True)
 
-    # The stdin file is inside artifacts_dir; mount it into the container
-    stdin_guest = f"/execution_input/interactive_input.txt"
-    inner_cmd = f"cd /repo && export COB_LIBRARY_PATH=. && ./{exe_name} < {stdin_guest}"
+    if image:
+        # The stdin file is inside artifacts_dir; mount it into the container
+        stdin_guest = f"/execution_input/interactive_input.txt"
+        inner_cmd = f"cd /repo && export COB_LIBRARY_PATH=. && ./{exe_name} < {stdin_guest}"
 
-    cmd = _docker_cmd(
-        image,
-        [(repo_dir, "/repo"), (artifacts_dir, "/execution_input")],
-        "/repo",
-        inner_cmd,
-    )
+        cmd = _docker_cmd(
+            image,
+            [(repo_dir, "/repo"), (artifacts_dir, "/execution_input")],
+            "/repo",
+            inner_cmd,
+        )
+        run_env = None
+        run_cwd = None
+    else:
+        # Native host execution
+        inner_cmd = f"./{exe_name} < {stdin_path_host}"
+        cmd = [f"./{exe_name}"] if sys.platform != "win32" else [f"{exe_name}"]
+        run_env = os.environ.copy()
+        run_env["COB_LIBRARY_PATH"] = "."
+        run_cwd = repo_dir
 
     rc, stdout, stderr, duration, term_status = _run_with_watchdog(
-        cmd, stdin_path_host, timeout, max_out,
+        cmd, stdin_path_host, timeout, max_out, env=run_env, cwd=run_cwd
     )
 
     result = ExecutionResult(

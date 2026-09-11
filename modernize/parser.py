@@ -2232,7 +2232,7 @@ class CobolParser:
             self.match("KEYWORD", "RECORD") # Optional
             into_val = None
             if self.match("KEYWORD", "INTO"):
-                into_val = self.consume_subscripted_identifier().value
+                into_val = self.consume_subscripted_identifier()
 
             at_end_action = None
             if self.match("KEYWORD", "AT") or self.match("KEYWORD", "END"):
@@ -2244,11 +2244,11 @@ class CobolParser:
                     self.consume("KEYWORD", "MOVE")
                     src = self.consume_val().value
                     self.consume("KEYWORD", "TO")
-                    tgt = self.consume_subscripted_identifier().value
+                    tgt = self.consume_subscripted_identifier()
                     at_end_action = f"MOVE {src} TO {tgt}"
                 elif self.check("KEYWORD", "SET"):
                     self.consume("KEYWORD", "SET")
-                    tgt = self.consume_subscripted_identifier().value
+                    tgt = self.consume_subscripted_identifier()
                     self.consume("KEYWORD", "TO")
                     src = self.consume_val().value
                     at_end_action = f"SET {tgt} TO {src}"

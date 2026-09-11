@@ -115,6 +115,11 @@ public class CobolNumeric {
         return assign(BigDecimal.valueOf(val), roundingMode, policy);
     }
 
+    public CobolNumeric add(BigDecimal other) {
+        assign(this.value.add(other));
+        return this;
+    }
+
     private BigDecimal normalizeValue(BigDecimal val) {
         if (!spec.signed && val.signum() < 0) {
             val = val.abs();
@@ -130,22 +135,20 @@ public class CobolNumeric {
 
     private BigDecimal truncateToPic(BigDecimal v) {
         BigDecimal t = v;
-        if (t.scale() > spec.scale) {
-            t = t.setScale(spec.scale, RoundingMode.DOWN);
-        }
-        int intDigits = spec.digits - spec.scale;
-        if (intDigits < 0) intDigits = 0;
-        if (intDigits > 0) {
-            BigInteger intPart = t.unscaledValue().divide(BigInteger.TEN.pow(t.scale()));
-            BigInteger maxInt = BigInteger.TEN.pow(intDigits);
-            if (intPart.abs().compareTo(maxInt) >= 0) {
-                BigInteger trunc = intPart.abs().remainder(maxInt);
-                intPart = intPart.signum() < 0 ? trunc.negate() : trunc;
-                t = new BigDecimal(intPart).setScale(spec.scale, RoundingMode.DOWN);
-            }
-        }
         if (t.scale() != spec.scale) {
             t = t.setScale(spec.scale, RoundingMode.DOWN);
+        }
+        BigInteger unscaled = t.unscaledValue();
+        BigInteger maxMod = BigInteger.TEN.pow(spec.digits);
+        if (unscaled.abs().compareTo(maxMod) >= 0) {
+            BigInteger truncUnscaled = unscaled.abs().remainder(maxMod);
+            if (spec.signed && unscaled.signum() < 0) {
+                truncUnscaled = truncUnscaled.negate();
+            }
+            t = new BigDecimal(truncUnscaled, spec.scale);
+        }
+        if (!spec.signed && t.signum() < 0) {
+            t = t.abs();
         }
         return t;
     }
