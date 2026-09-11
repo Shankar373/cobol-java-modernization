@@ -2016,16 +2016,23 @@ def transpile(repo_dir, sources, copybook_dirs, fmt):
     # Mount both the real repo (for generated/ output) and the normalized dir
     norm_rel = posix(os.path.relpath(norm_dir, repo_dir))
     cmd = (
-        f"cd /repo/{norm_rel} && rm -rf generated && mkdir -p generated ; "
-        f"cobj {' '.join(flags)} {incs} -o generated -j generated {srcs} ; "
+        f"rm -rf /tmp/cobj_gen && mkdir -p /tmp/cobj_gen ; "
+        f"cd /repo/{norm_rel} ; "
+        f"cobj {' '.join(flags)} {incs} -o /tmp/cobj_gen -j /tmp/cobj_gen {srcs} ; "
         f"rc=$? ; "
-        f"cp -rf generated/* /repo/generated/ 2>/dev/null || true ; "
+        f"cp -rf /tmp/cobj_gen/* /repo/generated/ 2>/dev/null || true ; "
         f"exit $rc"
     )
     # Ensure repo generated/ exists AND is empty: a stale <PROG>.java from a
     # previous run must never count as a successful transpilation.
-    shutil.rmtree(os.path.join(repo_dir, "generated"), ignore_errors=True)
-    os.makedirs(os.path.join(repo_dir, "generated"), exist_ok=True)
+    gen_dir = os.path.join(repo_dir, "generated")
+    shutil.rmtree(gen_dir, ignore_errors=True)
+    os.makedirs(gen_dir, exist_ok=True)
+    for p in (gen_dir, norm_dir):
+        try:
+            os.chmod(p, 0o777)
+        except Exception:
+            pass
     r = docker_run(DEFAULT_COBJ_IMAGE, [(repo_dir, "/repo")], "/repo", cmd)
 
     def _java_exists(src):
@@ -2063,11 +2070,11 @@ def transpile(repo_dir, sources, copybook_dirs, fmt):
                 continue
             base = os.path.splitext(os.path.basename(src))[0]
             fallback_cmds.append(
-                f"rm -rf _tmp_{base} && mkdir -p _tmp_{base} && "
-                f"cobj {' '.join(flags)} {incs} -o _tmp_{base} -j _tmp_{base} {norm_src} ; "
-                f"cp -f _tmp_{base}/*.java /repo/generated/ 2>/dev/null || true ; "
-                f"cp -f _tmp_{base}/*.class /repo/generated/ 2>/dev/null || true ; "
-                f"rm -rf _tmp_{base}"
+                f"rm -rf /tmp/_tmp_{base} && mkdir -p /tmp/_tmp_{base} && "
+                f"cobj {' '.join(flags)} {incs} -o /tmp/_tmp_{base} -j /tmp/_tmp_{base} {norm_src} ; "
+                f"cp -f /tmp/_tmp_{base}/*.java /repo/generated/ 2>/dev/null || true ; "
+                f"cp -f /tmp/_tmp_{base}/*.class /repo/generated/ 2>/dev/null || true ; "
+                f"rm -rf /tmp/_tmp_{base}"
             )
         if fallback_cmds:
             full_cmd = f"cd /repo/{norm_rel} && ( " + " ; ".join(fallback_cmds) + " )"
