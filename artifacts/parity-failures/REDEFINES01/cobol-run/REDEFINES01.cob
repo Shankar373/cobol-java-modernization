@@ -1,0 +1,31 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REDEFINES01.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT OUT-FILE ASSIGN TO "WS-FILE-OUT"
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  OUT-FILE.
+       01  OUT-REC PIC X(10).
+       WORKING-STORAGE SECTION.
+       01  WS-FS PIC XX.
+       01  WS-BUF-X PIC X(10).
+       01  WS-BUF-9 REDEFINES WS-BUF-X PIC 9(10).
+       01  WS-DISPLAY PIC X(20).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE 'HELLO1234' TO WS-BUF-X
+           DISPLAY 'WS-BUF-9 as numeric: ' WS-BUF-9
+           MOVE WS-BUF-9 TO WS-DISPLAY
+           DISPLAY 'WS-DISPLAY (buf redefines view): ' WS-DISPLAY
+           MOVE '9999999999' TO WS-BUF-9
+           DISPLAY 'After MOVE 9999999999 to WS-BUF-9:'
+           DISPLAY 'WS-BUF-X: ' WS-BUF-X
+           DISPLAY 'WS-BUF-9: ' WS-BUF-9
+           MOVE WS-BUF-X TO OUT-REC
+           OPEN OUTPUT OUT-FILE
+           WRITE OUT-REC
+           CLOSE OUT-FILE
+           STOP RUN.

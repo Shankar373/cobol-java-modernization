@@ -108,7 +108,8 @@ class BmsParser:
                 params_str = parts[2] if len(parts) > 2 else ""
 
             if macro_type == "DFHMSD":
-                mapset.name = label
+                if label:
+                    mapset.name = label
             elif macro_type == "DFHMDI":
                 size = self._parse_size(params_str)
                 current_map = BmsMap(label, size)

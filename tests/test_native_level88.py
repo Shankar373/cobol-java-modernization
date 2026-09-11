@@ -42,4 +42,4 @@ def test_level88_boolean_methods_generation():
     assert gen.level88_map["STATUS-OPEN"] == ("WS-STATUS", ["O", "OP"])
     
     class_src = gen.generate_class_source()
-    assert "public boolean isStatusOpen() { return Objects.equals(ws_status, \"O\") || Objects.equals(ws_status, \"OP\"); }" in class_src
+    assert "public boolean isStatusOpen() { return com.systema.modernized.CobolFormatHelper.cobolEquals(ws_status, \"O\") || com.systema.modernized.CobolFormatHelper.cobolEquals(ws_status, \"OP\"); }" in class_src

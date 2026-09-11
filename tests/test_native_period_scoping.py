@@ -169,5 +169,6 @@ def test_verify_compiles_and_braces():
     open_count = java_src.count("{")
     close_count = java_src.count("}")
     assert open_count == close_count, "Brace count mismatch in generated Java!"
-    assert "if (a.equals(b)) {" in java_src
-    assert "if (c.equals(d)) {" in java_src
+    assert "cobolEquals(a, b)" in java_src
+    assert "cobolEquals(c, d)" in java_src
+

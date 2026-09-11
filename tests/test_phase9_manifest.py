@@ -175,3 +175,241 @@ class TestManifestInPackage:
         assert actual["execution_id"] == expected["execution_id"]
         assert actual["final_verdict"] == expected["final_verdict"]
         assert actual["schema_version"] == expected["schema_version"]
+
+
+# ---------------------------------------------------------------------------
+# PKG-001 regression tests
+# Defect: stale runtime-produced files (*.out, *.log, *.tmp) at the
+# modernized/ project root were being included in the package ZIP.
+# Fix: stage_package() now skips files at the modernized/ root whose
+#      extension is in {".out", ".log", ".tmp"}.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def pipeline_for_pkg001(tmp_path):
+    """Minimal pipeline setup for PKG-001 packaging tests."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    out = tmp_path / "out"
+    out.mkdir()
+    p = cm.Pipeline(str(repo), str(out), pull=False)
+    # Minimal state
+    p.state["data"]["ingest_hashes"] = {}
+    p.state["data"]["discover"] = {
+        "programs": [],
+        "format": "free",
+        "entry": None,
+        "copybook_dirs": [],
+        "copy_deps": {},
+        "missing_copybooks": [],
+        "call_graph": {},
+        "file_assigns": {},
+    }
+    p.save_state()
+
+    # Create the modernized/ project directory (represents generated Spring Boot app)
+    modernized = out / "modernized"
+    modernized.mkdir()
+    (modernized / "pom.xml").write_text(
+        "<project><modelVersion>4.0.0</modelVersion>"
+        "<groupId>com.example</groupId><artifactId>test</artifactId>"
+        "<version>1.0.0</version></project>",
+        encoding="utf-8",
+    )
+    src = modernized / "src" / "main" / "java" / "com" / "example"
+    src.mkdir(parents=True)
+    (src / "App.java").write_text("public class App {}", encoding="utf-8")
+
+    # Create the generated/ directory (transpiled files)
+    generated = out / "generated"
+    generated.mkdir()
+    (generated / "DUMMY.java").write_text("public class DUMMY {}", encoding="utf-8")
+
+    # Create legacy/ directory with expected/ outputs (MUST be preserved)
+    legacy = repo
+    expected = legacy / "expected"
+    expected.mkdir()
+    (expected / "customer.out").write_bytes(
+        b"000001ALICE               0000110000A\n"
+        b"000002BOB                 00050000I\n"
+        b"000003CHARLIE             0000825000A\n"
+    )
+    (legacy / "customer.in").write_bytes(
+        b"000001ALICE               00100000A\n"
+        b"000002BOB                 00050000I\n"
+        b"000003CHARLIE             00075000A\n"
+    )
+    return p, out, modernized
+
+
+class TestPKG001StaleArtifactExclusion:
+    """
+    Regression tests for PKG-001.
+
+    Prove that stage_package() excludes stale runtime-produced files
+    (*.out, *.log, *.tmp) at the modernized/ project root, while preserving
+    legitimate reference/baseline files in legacy/expected/.
+    """
+
+    def _run_package(self, p, out, modernized, extra_files=None):
+        """Helper: optionally place extra files, run stage_package, return ZIP names."""
+        if extra_files:
+            for fname, content in extra_files.items():
+                path = modernized / fname
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if isinstance(content, bytes):
+                    path.write_bytes(content)
+                else:
+                    path.write_text(content, encoding="utf-8")
+        ok, detail, _ = p.stage_package()
+        assert ok, f"stage_package() failed: {detail}"
+        pkg_zip = out / "modernized-package.zip"
+        assert pkg_zip.exists()
+        with zipfile.ZipFile(str(pkg_zip)) as zf:
+            return set(zf.namelist())
+
+    def test_stale_customer_out_excluded(self, pipeline_for_pkg001):
+        """modernized/customer.out (stale Gate 2 output) must NOT appear in ZIP."""
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(
+            p, out, modernized,
+            extra_files={"customer.out": b"stale runtime output\n"},
+        )
+        stale = [n for n in names if n == "modernized/customer.out"]
+        assert not stale, (
+            f"PKG-001 regression: stale customer.out found in ZIP: {stale}"
+        )
+
+    def test_stale_log_at_root_excluded(self, pipeline_for_pkg001):
+        """modernized/foo.log (e.g. spring boot startup log) must NOT appear in ZIP."""
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(
+            p, out, modernized,
+            extra_files={"application.log": b"Spring Boot startup log\n"},
+        )
+        stale = [n for n in names if n.startswith("modernized/") and n.endswith(".log")
+                 and "/" not in n[len("modernized/"):]]
+        assert not stale, (
+            f"PKG-001 regression: stale .log at modernized/ root found in ZIP: {stale}"
+        )
+
+    def test_stale_tmp_at_root_excluded(self, pipeline_for_pkg001):
+        """modernized/foo.tmp (temp file) must NOT appear in ZIP."""
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(
+            p, out, modernized,
+            extra_files={"build.tmp": b"temp build artifact\n"},
+        )
+        stale = [n for n in names if n.startswith("modernized/") and n.endswith(".tmp")
+                 and "/" not in n[len("modernized/"):]]
+        assert not stale, (
+            f"PKG-001 regression: stale .tmp at modernized/ root found in ZIP: {stale}"
+        )
+
+    def test_multiple_stale_types_excluded(self, pipeline_for_pkg001):
+        """All three stale types (.out, .log, .tmp) placed at modernized/ root: all excluded."""
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(
+            p, out, modernized,
+            extra_files={
+                "customer.out": b"stale\n",
+                "run.log": b"log\n",
+                "work.tmp": b"tmp\n",
+            },
+        )
+        stale = [
+            n for n in names
+            if n.startswith("modernized/")
+            and n.split("/", 1)[-1] in ("customer.out", "run.log", "work.tmp")
+        ]
+        assert not stale, (
+            f"PKG-001 regression: stale files found in ZIP: {stale}"
+        )
+
+    def test_legacy_expected_customer_out_preserved(self, pipeline_for_pkg001):
+        """legacy/expected/customer.out (reference baseline) MUST be preserved in ZIP."""
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(p, out, modernized)
+        assert "legacy/expected/customer.out" in names, (
+            f"Reference baseline legacy/expected/customer.out missing from ZIP. "
+            f"Available legacy/ entries: {[n for n in names if n.startswith('legacy/')]}"
+        )
+
+    def test_out_file_in_subdirectory_preserved(self, pipeline_for_pkg001):
+        """
+        A .out file in a *subdirectory* of modernized/ (e.g. data/out/report.out)
+        must NOT be excluded — the filter only targets the project root.
+        """
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(
+            p, out, modernized,
+            extra_files={
+                "customer.out": b"stale at root\n",          # must be excluded
+                "data/out/report.out": b"legit output\n",     # must be preserved
+            },
+        )
+        # Root-level stale file must be gone
+        assert "modernized/customer.out" not in names, (
+            "modernized/customer.out (root) should be excluded"
+        )
+        # Subdirectory .out must survive
+        assert "modernized/data/out/report.out" in names, (
+            "modernized/data/out/report.out (subdirectory) must be preserved"
+        )
+
+    def test_pom_xml_preserved(self, pipeline_for_pkg001):
+        """pom.xml must always be in the ZIP (required for clean build)."""
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(
+            p, out, modernized,
+            extra_files={"customer.out": b"stale\n"},
+        )
+        assert "modernized/pom.xml" in names, "pom.xml must be present in ZIP"
+
+    def test_java_sources_preserved(self, pipeline_for_pkg001):
+        """Java source files must always be in the ZIP."""
+        p, out, modernized = pipeline_for_pkg001
+        names = self._run_package(
+            p, out, modernized,
+            extra_files={"customer.out": b"stale\n"},
+        )
+        java_files = [n for n in names if n.endswith(".java") and "modernized/" in n]
+        assert java_files, "No .java files found in ZIP modernized/ section"
+
+
+class TestReadmeInPackage:
+    """Verify that stage_package() generates a README.md inside the ZIP."""
+
+    def test_readme_present_in_zip(self, pipeline_for_pkg001):
+        """stage_package() must include modernized/README.md in the ZIP."""
+        p, out, _ = pipeline_for_pkg001
+        ok, _, _ = p.stage_package()
+        assert ok
+        pkg_zip = out / "modernized-package.zip"
+        with zipfile.ZipFile(str(pkg_zip)) as zf:
+            names = zf.namelist()
+        assert "modernized/README.md" in names, (
+            f"modernized/README.md not found in ZIP. Names: {names}"
+        )
+
+    def test_readme_contains_build_instruction(self, pipeline_for_pkg001):
+        """README must mention the Maven build command."""
+        p, out, _ = pipeline_for_pkg001
+        p.stage_package()
+        pkg_zip = out / "modernized-package.zip"
+        with zipfile.ZipFile(str(pkg_zip)) as zf:
+            content = zf.read("modernized/README.md").decode("utf-8")
+        assert "mvn" in content.lower() or "maven" in content.lower(), (
+            "README must mention Maven build instructions"
+        )
+
+    def test_readme_mentions_source_distribution(self, pipeline_for_pkg001):
+        """README must state that this is a source distribution (no pre-built JAR)."""
+        p, out, _ = pipeline_for_pkg001
+        p.stage_package()
+        pkg_zip = out / "modernized-package.zip"
+        with zipfile.ZipFile(str(pkg_zip)) as zf:
+            content = zf.read("modernized/README.md").decode("utf-8")
+        assert "source" in content.lower(), (
+            "README must describe the source-distribution nature of the package"
+        )

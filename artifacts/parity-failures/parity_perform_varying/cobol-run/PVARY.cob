@@ -1,0 +1,13 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PVARY.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-I   PIC 9(4) VALUE 0.
+       01 WS-SUM PIC 9(6) VALUE 0.
+       PROCEDURE DIVISION.
+           PERFORM ADD-LOOP
+               VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 5.
+           DISPLAY WS-SUM.
+           GOBACK.
+       ADD-LOOP.
+           ADD WS-I TO WS-SUM.

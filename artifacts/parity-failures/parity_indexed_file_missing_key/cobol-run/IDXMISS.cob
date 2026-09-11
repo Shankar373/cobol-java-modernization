@@ -1,0 +1,31 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IDXMISS.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IDX-FILE ASSIGN TO "IDX.DAT"
+           ORGANIZATION IS INDEXED
+           ACCESS IS RANDOM
+           RECORD KEY IS REC-KEY
+           FILE STATUS IS WS-STATUS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD IDX-FILE.
+       01 IDX-REC.
+          05 REC-KEY PIC X(5).
+          05 REC-VAL PIC X(20).
+       WORKING-STORAGE SECTION.
+       01 WS-STATUS PIC XX.
+       PROCEDURE DIVISION.
+           OPEN OUTPUT IDX-FILE.
+           MOVE "KEY01" TO REC-KEY.
+           MOVE "VALUE ONE" TO REC-VAL.
+           WRITE IDX-REC.
+           CLOSE IDX-FILE.
+
+           OPEN INPUT IDX-FILE.
+           MOVE "NOKEY" TO REC-KEY.
+           READ IDX-FILE.
+           DISPLAY WS-STATUS.
+           CLOSE IDX-FILE.
+           GOBACK.

@@ -88,7 +88,7 @@ def test_translate_spaces_condition():
     var_types = {"TX-AMOUNT-TEXT": "String"}
     trans = NativeStatementTranslator(var_types)
     cond = trans._translate_condition("TX-AMOUNT-TEXT NOT = SPACES")
-    assert cond == "!tx_amount_text.equals(\"\")"
+    assert cond == '!com.systema.modernized.CobolFormatHelper.cobolEquals(tx_amount_text, "")'
 
 
 def test_translate_function_mod():

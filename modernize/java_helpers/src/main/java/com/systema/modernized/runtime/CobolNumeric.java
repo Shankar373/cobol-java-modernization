@@ -259,25 +259,35 @@ public class CobolNumeric {
                 } else {
                     return digitsStr + sign;
                 }
-            } else {
-                // No separate sign byte.
-                // DISPLAY-usage fields (PIC S9(n)) render with an explicit +/- sign
-                // (GnuCOBOL -fsign=ASCII behaviour).
-                // COMP / COMP-3 / COMP-5 binary/packed fields suppress the '+' for
-                // positive values — the sign lives in the binary encoding, not the
-                // display representation.
-                if (spec.usage == CobolUsage.DISPLAY) {
-                    String sign = currentVal.signum() < 0 ? "-" : "+";
-                    return sign + digitsStr;
+            } else if (spec.usage == CobolUsage.COMP || spec.usage == CobolUsage.COMP_5) {
+                // COMP/COMP-5 (binary): DISPLAY shows plain digits for positive,
+                // '-' prefix for negative. No '+' prefix for positive values.
+                // GnuCOBOL verification: DISPLAY PIC S9(8) COMP VALUE 1500 → "00001500"
+                if (currentVal.signum() < 0) {
+                    return "-" + digitsStr;
                 } else {
-                    // COMP / COMP_3 / COMP_5
-                    return currentVal.signum() < 0 ? "-" + digitsStr : digitsStr;
+                    return digitsStr;
                 }
+            } else if (spec.usage == CobolUsage.COMP_3) {
+                // COMP-3 (packed decimal): DISPLAY shows no '+' for positive values.
+                // GnuCOBOL verification: DISPLAY of S9(5) COMP-3 positive → plain digits.
+                if (currentVal.signum() < 0) {
+                    return "-" + digitsStr;
+                } else {
+                    return digitsStr;
+                }
+            } else {
+                // DISPLAY usage, no SIGN SEPARATE:
+                // GnuCOBOL -fsign=ASCII: signed DISPLAY S9 items embed sign in last digit byte.
+                // The Java display representation mirrors this: '+' for >= 0, '-' for < 0.
+                String sign = currentVal.signum() < 0 ? "-" : "+";
+                return sign + digitsStr;
             }
         } else {
             return digitsStr;
         }
     }
+
 
     private BigDecimal unpackComp3(byte[] buffer, int offset, int length) {
         StringBuilder sb = new StringBuilder();

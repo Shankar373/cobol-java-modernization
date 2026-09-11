@@ -1,0 +1,12 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. HISCALE.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP.
+          05 A PIC 9(2)V9(20).
+       PROCEDURE DIVISION.
+           INITIALIZE A.
+           MOVE 0 TO A.
+           DIVIDE 1 BY 3 GIVING A.
+           DISPLAY WS-GROUP.
+           GOBACK.

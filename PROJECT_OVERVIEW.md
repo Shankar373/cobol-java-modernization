@@ -50,7 +50,7 @@ legacy mainframe COBOL programs into clean, runtime-independent Java (no emulati
 
 - New contributors: read Sections 1-5 and 8.
 - Reviewers/auditors: focus on Sections 5-7 and 9.
-- Maintainers: keep this file in sync with `docs/transformation-coverage.md` and the milestone docs.
+- Maintainers: keep this file in sync with [`docs/audit/CAPABILITY_MATRIX.md`](docs/audit/CAPABILITY_MATRIX.md) and [`docs/DOCUMENTATION_INDEX.md`](docs/DOCUMENTATION_INDEX.md).
 
 ---
 
@@ -209,7 +209,7 @@ Key work completed:
 
 ## 6. Verification Tiers
 
-See [`docs/transformation-coverage.md`](docs/transformation-coverage.md) for the full
+See [`docs/audit/CAPABILITY_MATRIX.md`](docs/audit/CAPABILITY_MATRIX.md) for the full
 construct-level matrix with parser locations, generator locations, and test file links.
 
 **Tier definitions:**
@@ -370,14 +370,12 @@ Open `http://localhost:8787` in your browser.
 
 | Document | Location | What it covers |
 |----------|----------|----------------|
-| This file | `PROJECT_OVERVIEW.md` | Single source of truth |
-| Transformation coverage matrix | [`docs/transformation-coverage.md`](docs/transformation-coverage.md) | Per-construct tiers, pipeline locations, evidence links |
-| Coverage (machine-readable) | [`docs/transformation-coverage.json`](docs/transformation-coverage.json) | JSON schema for tooling |
-| Architecture (two-track model) | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Track A vs Track B compiler diagram |
-| Pipeline stages detail | [`docs/PIPELINE.md`](docs/PIPELINE.md) | 13-stage orchestrator |
-| Testing guide | [`docs/TESTING.md`](docs/TESTING.md) | Test file inventory, writing parity tests |
-| Known platform limitations | [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) | CICS/DB2/JCL emulation limits |
-| Security policy | [`docs/SECURITY.md`](docs/SECURITY.md) | Responsible disclosure |
-| GnuCOBOL compiler fingerprint | [`tests/utils/gnucobol_fingerprint.txt`](tests/utils/gnucobol_fingerprint.txt) | Full `cobc --info` output |
-| Parity fixture spec | [`tests/fixtures_spec.json`](tests/fixtures_spec.json) | All Milestone B differential fixtures |
-| Parity harness | [`tests/utils/parity_harness.py`](tests/utils/parity_harness.py) | Docker execution and byte comparison engine |
+| Documentation Index | [`docs/DOCUMENTATION_INDEX.md`](docs/DOCUMENTATION_INDEX.md) | Complete index of all active specifications and audit registers |
+| Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Pipeline, AST parser, IR, and native generator architecture |
+| Pipeline Stages | [`docs/PIPELINE.md`](docs/PIPELINE.md) | 13-stage modernization lifecycle specification |
+| Capability Matrix | [`docs/audit/CAPABILITY_MATRIX.md`](docs/audit/CAPABILITY_MATRIX.md) | Per-construct capability matrix and reference runtime support |
+| Limitations Register | [`docs/audit/LIMITATIONS_REGISTER.md`](docs/audit/LIMITATIONS_REGISTER.md) | Authoritative register of proven, simulated, and unsupported constructs |
+| Final Certification Report | [`docs/certification/FINAL_CERTIFICATION_REPORT.md`](docs/certification/FINAL_CERTIFICATION_REPORT.md) | Master platform certification report (`VERIFIED_FOR_DEFINED_SCOPE`) |
+| Mentor Acceptance Scope | [`docs/certification/MENTOR_ACCEPTANCE_SCOPE.md`](docs/certification/MENTOR_ACCEPTANCE_SCOPE.md) | Mentor workflow specification (`VERIFIED_FOR_TESTED_SCOPE`) |
+| Testing Guide | [`docs/TESTING.md`](docs/TESTING.md) | Test tier architecture and verification execution |
+| Security Policy | [`docs/SECURITY.md`](docs/SECURITY.md) | Workspace sandboxing and security guidelines |

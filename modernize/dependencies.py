@@ -202,8 +202,14 @@ class DependencyAnalysisEngine:
                     for line_idx, line in enumerate(fh, 1):
                         cleaned = line.split("*>")[0].strip() # Strip line comments
                         words = cleaned.upper().split()
-                        if "COPY" in words:
-                            copy_idx = words.index("COPY")
+                        # COPY is a statement verb. In fixed format the line may
+                        # carry a 1-6 digit sequence number first. Match COPY only
+                        # as the statement start, not a mid-statement identifier.
+                        stmt_start = 0
+                        if words and words[0].isdigit() and len(words) > 1:
+                            stmt_start = 1
+                        if len(words) > stmt_start and words[stmt_start] == "COPY":
+                            copy_idx = stmt_start
                             if copy_idx + 1 < len(words):
                                 copy_part = words[copy_idx + 1]
                                 # Clean periods

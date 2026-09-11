@@ -45,7 +45,7 @@ def test_evaluate_string_subject():
     }
     
     assert trans.translate_statement(node_eval) is None
-    assert trans.translate_statement(node_when_a) == 'if (Objects.equals(ws_status, "A")) {'
+    assert trans.translate_statement(node_when_a) == 'if (com.systema.modernized.CobolFormatHelper.cobolEquals(ws_status, "A")) {'
     assert trans.translate_statement(node_when_other) == '} else {'
     assert trans.translate_statement(node_end) == '}'
 

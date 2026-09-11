@@ -1,37 +1,37 @@
-IDENTIFICATION DIVISION.
+       IDENTIFICATION DIVISION.
        PROGRAM-ID. OCCURS01.
-       
        ENVIRONMENT DIVISION.
-       CONFIGURATION SECTION.
-       SPECIAL-NAMES.
-           .                                                        
-       
        DATA DIVISION.
        WORKING-STORAGE SECTION.
-       01 WS-DAY-OF-WEEK PIC 9(1).
-       01 WS-DAYS-ARRAY OCCURS 5 TIMES PIC 9(2).
-           10 WS-DAY-NAMES PIC X(10) OCCURS 5 TIMES VALUE
-               "SUN" "MON" "TUE" "WED" "THU" "FRI" "SAT".
+       01 WS-DAYS.
+           05 WS-DAY-NUM OCCURS 5 TIMES PIC 9(2).
+           05 WS-DAY-NAME OCCURS 5 TIMES PIC X(10).
+       01 WS-ODO-TABLE.
+           05 WS-ODO-SLOT OCCURS 1 TO 5 TIMES
+               DEPENDING ON WS-ODO-COUNT PIC 9(2).
+       01 WS-ODO-COUNT PIC 9(1) VALUE 0.
        01 WS-INDEX PIC 9(2) VALUE 1.
-       01 WS-DISPLAY-ARRAY PIC 9(2) VALUE 0.
        01 WS-SUM PIC 9(3) VALUE 0.
-       
        PROCEDURE DIVISION.
        MAIN-SECTION.
-           * Initialize and loop over the OCCURS array
+           MOVE 'SUN' TO WS-DAY-NAME(1)
+           MOVE 'MON' TO WS-DAY-NAME(2)
+           MOVE 'TUE' TO WS-DAY-NAME(3)
+           MOVE 'WED' TO WS-DAY-NAME(4)
+           MOVE 'THU' TO WS-DAY-NAME(5)
            PERFORM VARYING WS-INDEX FROM 1 BY 1 UNTIL WS-INDEX > 5
-               MOVE WS-INDEX TO WS-DAYS-ARRAY(WS-INDEX)
-               MOVE WS-DAY-NAMES(WS-INDEX) TO WS-DISPLAY
-               DISPLAY 'Day ' WS-INDEX ': ' WS-DAY-NAMES(WS-INDEX) ' is day number ' WS-DAYS-ARRAY(WS-INDEX)
-               ADD WS-DAYS-ARRAY(WS-INDEX) TO WS-SUM
+               MOVE WS-INDEX TO WS-DAY-NUM(WS-INDEX)
+               DISPLAY 'Day ' WS-INDEX ': ' WS-DAY-NAME(WS-INDEX)
+                   ' is day number ' WS-DAY-NUM(WS-INDEX)
+               ADD WS-DAY-NUM(WS-INDEX) TO WS-SUM
            END-PERFORM
-           
            DISPLAY '---'
            DISPLAY 'Sum of all days: ' WS-SUM
-           
-           * Display the array via the alternative view
-           DISPLAY '---Array via WS-DISPLAY-ARRAY---'
-           MOVE WS-DAYS-ARRAY TO WS-DISPLAY-ARRAY
-           DISPLAY 'WS-DISPLAY-ARRAY value: ' WS-DISPLAY-ARRAY
-           
+           MOVE 3 TO WS-ODO-COUNT
+           PERFORM VARYING WS-INDEX FROM 1 BY 1
+               UNTIL WS-INDEX > WS-ODO-COUNT
+               MOVE WS-INDEX TO WS-ODO-SLOT(WS-INDEX)
+               DISPLAY 'ODO slot ' WS-INDEX ' = ' WS-ODO-SLOT(WS-INDEX)
+           END-PERFORM
+           DISPLAY 'ODO count: ' WS-ODO-COUNT
            STOP RUN.

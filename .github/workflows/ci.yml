@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, main, "integration/**"]
   pull_request:
   schedule:
     # Nightly full lane (Docker-dependent suites).

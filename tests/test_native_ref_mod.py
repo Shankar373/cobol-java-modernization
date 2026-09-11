@@ -34,23 +34,24 @@ def test_expression_translator_ref_mod():
     assert translator._translate_subscripts("FIELD(START:LENGTH)") == "field.substring((start) - 1, (start) - 1 + (length))"
 
 def test_condition_translator_ref_mod():
-    # Test condition translation maps to .equals() in Java
+    # Test condition translation maps to CobolFormatHelper.cobolEquals() in Java
     translator = NativeStatementTranslator(
         var_types={"AUDIT-LINE": "String", "FIELD": "String"}
     )
     
-    # Verify string comparison mapping to equals for substring/slice calls
+    # Verify string comparison mapping to cobolEquals for substring/slice calls
     cond1 = translator._translate_condition("AUDIT-LINE (25:13) = 'MANUAL_REVIEW'")
-    assert cond1 == "audit_line.substring(24, 37).equals(\"MANUAL_REVIEW\")"
+    assert "cobolEquals(audit_line.substring(24, 37), \"MANUAL_REVIEW\")" in cond1
     
     cond2 = translator._translate_condition("AUDIT-LINE (25:13) <> 'MANUAL_REVIEW'")
-    assert cond2 == "!audit_line.substring(24, 37).equals(\"MANUAL_REVIEW\")"
+    assert "!com.systema.modernized.CobolFormatHelper.cobolEquals(audit_line.substring(24, 37), \"MANUAL_REVIEW\")" == cond2
 
 def test_level78_constants():
     translator = NativeStatementTranslator(
         var_types={"WS-RESULT": "String"},
         constants_map={"CC-VALID": "V", "CC-REVIEW": "M"}
     )
-    # Test condition constant mapping
-    assert translator._translate_condition("WS-RESULT = CC-VALID") == "ws_result.equals(\"V\")"
-    assert translator._translate_condition("WS-RESULT = CC-REVIEW") == "ws_result.equals(\"M\")"
+    # Test condition constant mapping with space-padding equality
+    assert "cobolEquals(ws_result, \"V\")" in translator._translate_condition("WS-RESULT = CC-VALID")
+    assert "cobolEquals(ws_result, \"M\")" in translator._translate_condition("WS-RESULT = CC-REVIEW")
+

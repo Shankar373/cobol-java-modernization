@@ -136,7 +136,7 @@ def test_db2_delete_e2e():
     run_db2_pipeline_e2e("DB2DELETE01", expected)
 
 def test_db2_cursor_e2e():
-    expected = "OPEN SQLCODE: 000000000\nFETCHED: 000000101 TEST CUSTOMER       \nFETCHED: 000000102 ANOTHER CUST        \nCLOSE SQLCODE: 000000000\n"
+    expected = "OPEN SQLCODE: 000000000\nFETCHED: +000000101 TEST CUSTOMER       \nFETCHED: +000000102 ANOTHER CUST        \nCLOSE SQLCODE: 000000000\n"
     run_db2_pipeline_e2e("DB2CURSOR01", expected)
 
 def test_db2_transaction_e2e():

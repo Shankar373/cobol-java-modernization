@@ -92,36 +92,88 @@ public class CobolFormatHelper {
             return stars.toString();
         }
 
-        // Traverse integer pattern right-to-left to place digits
+        // Traverse integer pattern right-to-left to place digits.
+        // Track whether all digit slots came from the intPart string (vs padding).
+        // For Z-mask: if intPart is all-zero (value == 0), COBOL suppresses even
+        // the units digit — ALL Z positions produce spaces. We detect this after
+        // the pass and replace Z-placed '0' chars with spaces.
         StringBuilder intResult = new StringBuilder();
         int intPtr = intPart.length() - 1;
+        // Track indices (in intResult, before reverse) that are Z-placed real digits
+        // so we can suppress them if value is zero.
+        boolean valueIsZero = absNum.compareTo(BigDecimal.ZERO) == 0;
+        // For Z-mask suppression we also need to know which chars came from Z slots.
+        // We rebuild using a parallel list to track position types.
+        java.util.List<Character> resultChars = new java.util.ArrayList<>();
+        java.util.List<Boolean> zPlaced = new java.util.ArrayList<>();   // true = Z placeholder placed a real digit
+        java.util.List<Boolean> commaPlaced = new java.util.ArrayList<>();
+
         for (int i = intPattern.length() - 1; i >= 0; i--) {
             char pChar = intPattern.charAt(i);
             if (pChar == '9' || pChar == 'Z' || pChar == '*' || pChar == '$' || pChar == '+' || pChar == '-') {
                 if (intPtr >= 0) {
-                    intResult.append(intPart.charAt(intPtr--));
+                    char digit = intPart.charAt(intPtr--);
+                    resultChars.add(digit);
+                    zPlaced.add(pChar == 'Z');  // only Z positions can be suppressed
+                    commaPlaced.add(false);
                 } else {
-                    // Suppression or padding
+                    // No more source digits — apply suppression/padding rule
                     if (pChar == '9') {
-                        intResult.append('0');
+                        resultChars.add('0');
                     } else if (pChar == '*') {
-                        intResult.append('*');
+                        resultChars.add('*');
                     } else {
-                        intResult.append(' '); // Space for Z, $, +, -
+                        resultChars.add(' '); // Z, $, +, - → space when no digit
                     }
+                    zPlaced.add(false);
+                    commaPlaced.add(false);
                 }
             } else if (pChar == ',') {
-                if (intPtr >= 0 || (intResult.length() > 0 && intResult.charAt(intResult.length() - 1) != ' ' && intResult.charAt(intResult.length() - 1) != '*')) {
-                    intResult.append(',');
-                } else {
-                    intResult.append(asteriskFill ? '*' : ' ');
-                }
+                resultChars.add(',');
+                zPlaced.add(false);
+                commaPlaced.add(true);
             } else {
-                intResult.append(pChar);
+                resultChars.add(pChar);
+                zPlaced.add(false);
+                commaPlaced.add(false);
             }
         }
-        intResult.reverse();
-        String formattedInt = intResult.toString();
+
+        // Reverse to get left-to-right order
+        java.util.Collections.reverse(resultChars);
+        java.util.Collections.reverse(zPlaced);
+        java.util.Collections.reverse(commaPlaced);
+
+        // Z zero-suppression: scan left to right.
+        // A Z digit is suppressed (→ ' ') if all digits to its left have been suppressed.
+        // This handles both leading zeros AND the all-zero case (value=0).
+        boolean allZeroSoFar = true;
+        for (int i = 0; i < resultChars.size(); i++) {
+            if (zPlaced.get(i)) {
+                // This is a Z slot that received a real digit from intPart
+                char c = resultChars.get(i);
+                if (allZeroSoFar && c == '0') {
+                    // Leading/all-zero suppression: replace with space
+                    resultChars.set(i, ' ');
+                } else {
+                    allZeroSoFar = false; // a non-zero digit breaks the suppression chain
+                }
+            } else if (commaPlaced.get(i)) {
+                // Comma: suppress if still in suppression run
+                if (allZeroSoFar) {
+                    resultChars.set(i, asteriskFill ? '*' : ' ');
+                }
+            } else {
+                char c = resultChars.get(i);
+                if (c != ' ' && c != '*') {
+                    allZeroSoFar = false;
+                }
+            }
+        }
+
+        StringBuilder intResultFinal = new StringBuilder();
+        for (char c : resultChars) intResultFinal.append(c);
+        String formattedInt = intResultFinal.toString();
 
         // Post-processing for floating currency / sign
         char[] chars = formattedInt.toCharArray();
@@ -305,6 +357,28 @@ public class CobolFormatHelper {
         int idx = val.indexOf(delimiter);
         if (idx == -1) return val;
         return val.substring(0, idx);
+    }
+
+    /**
+     * Compare two COBOL alphanumeric strings according to standard COBOL relational semantics:
+     * If operands are unequal in length, the shorter is compared as if padded on the right
+     * with spaces to the length of the longer operand.
+     */
+    public static boolean cobolEquals(String a, String b) {
+        if (a == null && b == null) return true;
+        if (a == null) a = "";
+        if (b == null) b = "";
+        int lenA = a.length();
+        int lenB = b.length();
+        int maxLen = Math.max(lenA, lenB);
+        for (int i = 0; i < maxLen; i++) {
+            char ca = (i < lenA) ? a.charAt(i) : ' ';
+            char cb = (i < lenB) ? b.charAt(i) : ' ';
+            if (ca != cb) {
+                return false;
+            }
+        }
+        return true;
     }
 }
 

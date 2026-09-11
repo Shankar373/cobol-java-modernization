@@ -31,7 +31,7 @@ def parse_picture_clause(pic_str: str):
     signed = pic.startswith("S") or "+" in pic or "-" in pic or "CR" in pic or "DB" in pic
     if pic.startswith("S"):
         pic = pic[1:]
-    
+
     expanded = []
     i = 0
     while i < len(pic):
@@ -48,11 +48,11 @@ def parse_picture_clause(pic_str: str):
                 continue
         expanded.append(char)
         i += 1
-    
+
     expanded_str = "".join(expanded)
-    
+
     is_edited = any(c in expanded_str for c in ("$", "Z", "*", ",", "CR", "DB")) or (expanded_str.count("+") > 1) or (expanded_str.count("-") > 1)
-    
+
     digit_chars = "9Z*"
     if "V" in expanded_str:
         parts = expanded_str.split("V")
@@ -65,12 +65,12 @@ def parse_picture_clause(pic_str: str):
     else:
         digits = sum(1 for c in expanded_str if c in digit_chars)
         scale = 0
-        
+
     for sym in ("$", "+", "-"):
         c = expanded_str.count(sym)
         if c > 1:
             digits += (c - 1)
-            
+
     return signed, digits, scale, is_edited
 
 
@@ -92,7 +92,7 @@ COBOL_KEYWORDS = {
 
 
 STATEMENT_START_VERBS = {
-    "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "PERFORM", "CALL", "READ", "WRITE", 
+    "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "PERFORM", "CALL", "READ", "WRITE",
     "REWRITE", "OPEN", "CLOSE", "STOP", "GOBACK", "IF", "ELSE", "END-IF", "THEN", "END-ADD", "END-SUBTRACT", "END-MULTIPLY", "END-DIVIDE", "END-COMPUTE",
     "EVALUATE", "WHEN", "END-EVALUATE", "STRING", "END-READ",
     "DISPLAY", "INITIALIZE", "EXIT", "END-PERFORM", "GO", "CONTINUE", "NEXT",
@@ -128,7 +128,7 @@ class CobolParser:
                 node.properties["sentence_id"] = self.sentence_id
             if self.current_program and "program" not in node.properties:
                 node.properties["program"] = self.current_program
-            
+
             # Capability Matrix feature_id mapping
             if node.kind == "STATEMENT":
                 stype = node.properties.get("statement_type", "").upper()
@@ -249,7 +249,7 @@ class CobolParser:
             tok = self.peek()
             self.current += 1
             return tok
-        
+
         offending = self.peek()
         diag = ParserDiagnostic(
             message=message,
@@ -267,7 +267,7 @@ class CobolParser:
         if tok.type in ("IDENTIFIER", "LITERAL_STRING", "LITERAL_NUMBER", "KEYWORD"):
             self.current += 1
             return tok
-        
+
         diag = ParserDiagnostic(
             message=message,
             file=self.file_path,
@@ -300,7 +300,7 @@ class CobolParser:
         class SubscriptValue:
             def __init__(self, value: str):
                 self.value = value
-        
+
         tok = self.peek()
         if tok.type == "KEYWORD" and tok.value.upper() == "FUNCTION":
             self.current += 1  # Consume FUNCTION
@@ -363,7 +363,7 @@ class CobolParser:
         if self.match("KEYWORD", "IDENTIFICATION") or self.match("KEYWORD", "ID"):
             self.consume("KEYWORD", "DIVISION", "Expected DIVISION keyword")
             self.consume("PUNCTUATION", ".", "Expected period after DIVISION")
-        
+
         node = SemanticIRNode(
             node_id=self.next_node_id(),
             kind="DIVISION",
@@ -386,10 +386,10 @@ class CobolParser:
                 prog_name_tok = self.consume("LITERAL_STRING", None, "Expected program name identifier")
             self.consume("PUNCTUATION", ".", "Expected period after program name")
             prog_name = prog_name_tok.value.strip('"').strip("'")
-            
+
             self.active_programs.append(prog_name)
             self.current_program = prog_name
-            
+
             p_node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="PROGRAM",
@@ -427,7 +427,7 @@ class CobolParser:
                 name = self.peek(-1).value
                 self.consume("KEYWORD", "SECTION", "Expected SECTION")
                 self.consume("PUNCTUATION", ".", "Expected period")
-                
+
                 sec_node = SemanticIRNode(
                     node_id=self.next_node_id(),
                     kind="SECTION",
@@ -470,15 +470,15 @@ class CobolParser:
         start_tok = self.peek()
         self.consume("KEYWORD", "SELECT")
         file_name = self.consume("IDENTIFIER", None, "Expected file-name after SELECT").value
-        
+
         assign_name = None
         status_var = None
         org_type = "SEQUENTIAL"
         access_mode = "SEQUENTIAL"
         record_key = None
-        
+
         alternate_keys = []
-        
+
         while not self.is_at_end() and not self.check("PUNCTUATION", "."):
             if self.match("KEYWORD", "ASSIGN"):
                 self.match("KEYWORD", "TO")
@@ -499,6 +499,10 @@ class CobolParser:
                     org_type = "LINE SEQUENTIAL"
                 elif self.match("KEYWORD", "SEQUENTIAL") or self.match("IDENTIFIER", "SEQUENTIAL"):
                     org_type = "SEQUENTIAL"
+                elif self.match("KEYWORD", "RECORD") or self.match("IDENTIFIER", "RECORD"):
+                    # ORGANIZATION IS RECORD SEQUENTIAL — RECORD is an optional qualifier
+                    self.match("KEYWORD", "SEQUENTIAL") or self.match("IDENTIFIER", "SEQUENTIAL")
+                    org_type = "SEQUENTIAL"
             elif self.match("KEYWORD", "ACCESS"):
                 if self.check("KEYWORD", "MODE") or (self.check("IDENTIFIER") and self.peek().value.upper() == "MODE"):
                     self.current += 1
@@ -510,9 +514,17 @@ class CobolParser:
                 elif self.match("KEYWORD", "DYNAMIC") or self.match("IDENTIFIER", "DYNAMIC"):
                     access_mode = "DYNAMIC"
             elif self.match("KEYWORD", "RECORD"):
-                self.consume("KEYWORD", "KEY")
-                self.match_is_keyword()
-                record_key = self.consume("IDENTIFIER", None, "Expected record key identifier").value
+                # Guard: bare RECORD SEQUENTIAL without ORGANIZATION prefix → treat as SEQUENTIAL org
+                if self.check("KEYWORD", "SEQUENTIAL") or self.check("IDENTIFIER", "SEQUENTIAL"):
+                    self.current += 1  # consume SEQUENTIAL
+                    org_type = "SEQUENTIAL"
+                else:
+                    # RECORD [IS] KEY <identifier>
+                    self.match("KEYWORD", "IS") or self.match("IDENTIFIER", "IS")
+                    if self.check("KEYWORD", "KEY") or self.check("IDENTIFIER", "KEY"):
+                        self.current += 1
+                        self.match_is_keyword()
+                        record_key = self.consume("IDENTIFIER", None, "Expected record key identifier").value
             elif self.match("KEYWORD", "ALTERNATE") or self.match("IDENTIFIER", "ALTERNATE"):
                 if self.match("KEYWORD", "RECORD"):
                     self.match("KEYWORD", "KEY")
@@ -544,9 +556,9 @@ class CobolParser:
                 status_var = self.consume("IDENTIFIER", None, "Expected file status variable").value
             else:
                 self.current += 1
-                
+
         self.consume("PUNCTUATION", ".", "Expected period after SELECT statement")
-        
+
         node = SemanticIRNode(
             node_id=self.next_node_id(),
             kind="FILE_CONTROL",
@@ -596,7 +608,7 @@ class CobolParser:
                 sec_name = sec_tok.value
                 self.consume("KEYWORD", "SECTION", "Expected SECTION")
                 self.consume("PUNCTUATION", ".", "Expected period")
-                
+
                 self.in_file_section = (sec_name.upper() == "FILE")
                 self.current_rd = None
                 sec_node = SemanticIRNode(
@@ -623,7 +635,7 @@ class CobolParser:
                 while not self.is_at_end() and not self.match("PUNCTUATION", "."):
                     self.current += 1
                 continue
-                
+
             if self.match("KEYWORD", "RD"):
                 rd_name_tok = self.consume("IDENTIFIER", None, "Expected RD name")
                 self.current_rd = rd_name_tok.value.upper()
@@ -642,24 +654,24 @@ class CobolParser:
                 while not self.is_at_end() and not self.match("PUNCTUATION", "."):
                     self.current += 1
                 continue
-                
+
             if self.check("LITERAL_NUMBER"):
                 lvl_tok = self.peek()
                 lvl = int(lvl_tok.value)
-                
+
                 # Accept any valid COBOL level number (01-49, 66, 77, 78, 88)
                 if lvl < 1 or (lvl > 49 and lvl not in (66, 77, 78, 88)):
                     self.current += 1
                     continue
-                
+
                 self.current += 1
-                
+
                 name_tok = self.peek()
                 is_nameless = False
                 if getattr(self, "current_rd", None) is not None:
                     if name_tok.value.upper() in ("TYPE", "LINE", "COLUMN", "SOURCE", "SUM"):
                         is_nameless = True
-                
+
                 if (self.check("IDENTIFIER") or self.check("KEYWORD")) and not is_nameless:
                     self.current += 1
                     name = name_tok.value
@@ -671,13 +683,13 @@ class CobolParser:
                         name = f"FILLER_RW_{self.filler_rw_counter}"
                     else:
                         name = "FILLER"
-                
+
                 if name.upper() == "FILLER":
                     if not hasattr(self, "filler_counter"):
                         self.filler_counter = 0
                     self.filler_counter += 1
                     name = f"FILLER_{self.filler_counter}"
-                
+
                 props = {
                     "name": name,
                     "level": lvl,
@@ -697,45 +709,45 @@ class CobolParser:
                     "is_group": True,
                     "condition_values": []
                 }
-                
+
                 while not self.is_at_end() and not self.check("PUNCTUATION", "."):
                     if self.match("KEYWORD", "REDEFINES"):
                         ref_tok = self.consume("IDENTIFIER", None, "Expected identifier after REDEFINES")
                         props["redefines"] = ref_tok.value
-                    
+
                     elif self.match("KEYWORD", "PIC") or self.match("KEYWORD", "PICTURE"):
                         self.match("KEYWORD", "IS")
-                        
+
                         pic_parts = []
                         while not self.is_at_end() and not self.check("KEYWORD") and not self.check("PUNCTUATION", "."):
                             pic_parts.append(self.peek().value)
                             self.current += 1
-                        
+
                         pic_str = "".join(pic_parts)
                         props["picture"] = pic_str
                         props["is_group"] = False
-                        
+
                         signed, digits, scale, is_edited = parse_picture_clause(pic_str)
                         props["signed"] = signed
                         props["digits"] = digits
                         props["scale"] = scale
                         props["is_edited"] = is_edited
-                        
+
                     elif self.match("KEYWORD", "GLOBAL"):
                         props["is_global"] = True
-                        
+
                     elif self.match("KEYWORD", "USAGE"):
                         self.match("KEYWORD", "IS")
                         usage_tok = self.peek()
                         self.current += 1
                         props["usage"] = usage_tok.value.upper()
-                        
+
                     elif self.match("KEYWORD", "POINTER"):
                         props["usage"] = "POINTER"
-                        
+
                     elif self.match("KEYWORD", "COMP") or self.match("KEYWORD", "COMP-3") or self.match("KEYWORD", "BINARY") or self.match("KEYWORD", "DISPLAY"):
                         props["usage"] = self.peek(-1).value.upper()
-                        
+
                     elif self.match("KEYWORD", "SIGN"):
                         self.match("KEYWORD", "IS")
                         pos = "TRAILING"
@@ -749,7 +761,7 @@ class CobolParser:
                             separate = True
                         props["sign_position"] = pos
                         props["sign_separate"] = separate
-                        
+
                     elif self.match("KEYWORD", "VALUE") or self.match("KEYWORD", "VALUES"):
                         self.match("KEYWORD", "IS")
                         val_tok = self.peek()
@@ -759,10 +771,10 @@ class CobolParser:
                             val_str += self.peek().value
                             self.current += 1
                         props["value"] = val_str
-                        
+
                         if lvl == 88:
                             props["condition_values"].append(val_tok.value)
-                            
+
                     elif self.match("KEYWORD", "TYPE") or self.match("IDENTIFIER", "TYPE"):
                         self.match("KEYWORD", "IS") or self.match("IDENTIFIER", "IS")
                         type_parts = []
@@ -770,7 +782,7 @@ class CobolParser:
                             type_parts.append(self.peek().value.upper())
                             self.current += 1
                         props["report_type"] = " ".join(type_parts)
-                        
+
                     elif self.match("KEYWORD", "LINE") or self.match("IDENTIFIER", "LINE"):
                         self.match("KEYWORD", "NUMBER") or self.match("IDENTIFIER", "NUMBER")
                         self.match("KEYWORD", "IS") or self.match("IDENTIFIER", "IS")
@@ -781,45 +793,45 @@ class CobolParser:
                             props["line_number"] = "NEXT PAGE"
                         else:
                             props["line_number"] = self.consume("LITERAL_NUMBER").value
-                            
+
                     elif self.match("KEYWORD", "COLUMN") or self.match("IDENTIFIER", "COLUMN"):
                         self.match("KEYWORD", "NUMBER") or self.match("IDENTIFIER", "NUMBER")
                         self.match("KEYWORD", "IS") or self.match("IDENTIFIER", "IS")
                         props["column_number"] = self.consume("LITERAL_NUMBER").value
-                        
+
                     elif self.match("KEYWORD", "SOURCE") or self.match("IDENTIFIER", "SOURCE"):
                         self.match("KEYWORD", "IS") or self.match("IDENTIFIER", "IS")
                         props["source_expr"] = self.consume_subscripted_identifier("Expected source identifier")
-                        
+
                     elif self.match("KEYWORD", "SUM") or self.match("IDENTIFIER", "SUM"):
                         props["sum_expr"] = self.consume("IDENTIFIER").value
 
                     elif self.match("KEYWORD", "OCCURS"):
                         first_tok = self.consume("LITERAL_NUMBER", None, "Expected count after OCCURS")
                         first_val = int(first_tok.value)
-                        
+
                         min_val = first_val
                         max_val = first_val
-                        
+
                         if self.match("KEYWORD", "TO"):
                             max_tok = self.consume("LITERAL_NUMBER", None, "Expected maximum count after TO")
                             max_val = int(max_tok.value)
-                            
+
                         self.match("KEYWORD", "TIMES")
-                        
+
                         props["occurs"] = max_val
                         props["occurs_min"] = min_val
                         props["occurs_max"] = max_val
-                        
+
                         if self.match("KEYWORD", "DEPENDING"):
                             self.match("KEYWORD", "ON")
                             dep_tok = self.consume("IDENTIFIER", None, "Expected identifier after DEPENDING ON")
                             props["depending_on"] = dep_tok.value
                     else:
                         self.current += 1
-                
+
                 self.consume("PUNCTUATION", ".", "Expected period after data item definition")
-                
+
                 node = SemanticIRNode(
                     node_id=self.next_node_id(),
                     kind="DATA_ITEM",
@@ -846,7 +858,7 @@ class CobolParser:
                 if tok.type in ("IDENTIFIER", "KEYWORD"):
                     using_args.append(tok.value.upper())
                 self.current += 1
-        
+
         self.consume("PUNCTUATION", ".", "Expected period")
 
         node = SemanticIRNode(
@@ -867,11 +879,11 @@ class CobolParser:
                 break
             if self.check("KEYWORD", "END") and self.peek(1) and self.peek(1).value.upper() == "PROGRAM":
                 break
-            
+
             is_header = False
             is_section = False
             name_tok = self.peek()
-            
+
             if self.check("IDENTIFIER"):
                 if self.peek(1).type == "PUNCTUATION" and self.peek(1).value == ".":
                     is_header = True
@@ -879,7 +891,7 @@ class CobolParser:
                 elif self.peek(1).type == "KEYWORD" and self.peek(1).value.upper() == "SECTION" and self.peek(2).type == "PUNCTUATION" and self.peek(2).value == ".":
                     is_header = True
                     is_section = True
-                    
+
             if is_header:
                 self.close_implicit_scopes(name_tok)
                 self.current += 1 # Consume name_tok
@@ -889,7 +901,7 @@ class CobolParser:
                 else:
                     self.current += 1 # Consume "."
                     kind = "PARAGRAPH"
-                
+
                 p_node = SemanticIRNode(
                     node_id=self.next_node_id(),
                     kind=kind,
@@ -950,7 +962,33 @@ class CobolParser:
                 self.sentence_id += 1
         except ParserDiagnostic as e:
             self.diagnostics.append(e)
-            while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.check("KEYWORD", "MOVE") and not self.check("KEYWORD", "IF") and not self.check("KEYWORD", "PERFORM"):
+            # Fail-closed: record the malformed/unsupported statement in the IR
+            # instead of letting it vanish. Downstream stages (and the generated
+            # Java via "// Unsupported statement:") can then see and report it.
+            bad_tok = self.peek(-1) if self.current > 0 else self.peek()
+            bad_node = SemanticIRNode(
+                node_id=self.next_node_id(),
+                kind="STATEMENT",
+                properties={
+                    "statement_type": "UNKNOWN",
+                    "offending_token": getattr(e, "token_value", "") or (bad_tok.value if bad_tok else "")
+                },
+                source_file=self.file_path,
+                source_line=bad_tok.line if bad_tok else 0,
+                source_column=bad_tok.column if bad_tok else 0,
+                start_offset=bad_tok.start_offset if bad_tok else 0,
+                end_offset=bad_tok.end_offset if bad_tok else 0,
+                status="UNSUPPORTED"
+            )
+            self.ir.add_node(bad_node)
+            # Skip ONLY to the next statement boundary or sentence end.
+            # Previously this loop skipped until a period OR MOVE/IF/PERFORM,
+            # which silently discarded arbitrary valid sibling statements (e.g.
+            # CREATE/INSERT/DISPLAY after an unsupported DROP inside the same
+            # period-free sentence) — dropping them from the IR entirely.
+            while not self.is_at_end() and not self.check("PUNCTUATION", "."):
+                if is_tok_statement_start(self.peek()):
+                    break
                 self.current += 1
             if self.match("PUNCTUATION", "."):
                 self.close_implicit_scopes(self.peek(-1))
@@ -958,7 +996,7 @@ class CobolParser:
 
     def _parse_statement_internal(self):
         start_tok = self.peek()
-        
+
         if self.match("KEYWORD", "MOVE"):
             is_corr = False
             if self.match("KEYWORD", "CORRESPONDING") or self.match("IDENTIFIER", "CORRESPONDING") or self.match("KEYWORD", "CORR") or self.match("IDENTIFIER", "CORR"):
@@ -975,7 +1013,7 @@ class CobolParser:
                 tgt_val = self.consume_subscripted_identifier("Expected target identifier")
                 targets = [tgt_val]
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -992,14 +1030,14 @@ class CobolParser:
                 status="PARSED"
             )
             self.ir.add_node(node)
-            
+
         elif self.match("KEYWORD", "COMPUTE"):
             tgt_val = self.consume_subscripted_identifier("Expected target identifier")
             rounded = False
             if self.match("KEYWORD", "ROUNDED"):
                 rounded = True
             self.consume("PUNCTUATION", "=", "Expected '=' in COMPUTE")
-            
+
             expr_parts = []
             while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.check("KEYWORD"):
                 tok = self.peek()
@@ -1008,10 +1046,10 @@ class CobolParser:
                     self.current += 1
                 else:
                     break
-            
+
             on_size_error_nodes = []
             not_on_size_error_nodes = []
-            
+
             while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.sentence_ended:
                 if self.match("KEYWORD", "ON") or self.check("KEYWORD", "SIZE"):
                     if not self.match("KEYWORD", "SIZE"):
@@ -1033,7 +1071,7 @@ class CobolParser:
                     break
 
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1061,7 +1099,7 @@ class CobolParser:
                 if self.match("KEYWORD", "CORRESPONDING") or self.match("IDENTIFIER", "CORRESPONDING") or self.match("KEYWORD", "CORR") or self.match("IDENTIFIER", "CORR"):
                     is_corr = True
             val_tok = self.consume_val_or_subscript("Expected value to perform calculation")
-            
+
             mid_kw = "TO"
             if op == "SUBTRACT":
                 mid_kw = "FROM"
@@ -1072,12 +1110,26 @@ class CobolParser:
                     mid_kw = "INTO"
                 else:
                     mid_kw = "BY"
-                
-            self.consume("KEYWORD", mid_kw, f"Expected {mid_kw} keyword")
-            
+
+            # For ADD, the mid keyword can be TO (for ADD a TO b) or omitted (for ADD a b GIVING c)
+            if op == "ADD":
+                # For ADD, check if next token is TO or another value/identifier
+                if self.check("KEYWORD", "TO"):
+                    self.consume("KEYWORD", "TO", "Expected TO keyword")
+                # No mid keyword for ADD a b GIVING c - mid_kw stays None
+            elif op == "SUBTRACT":
+                self.consume("KEYWORD", "FROM", "Expected FROM keyword")
+            elif op == "MULTIPLY":
+                self.consume("KEYWORD", "BY", "Expected BY keyword")
+            elif op == "DIVIDE":
+                if self.check("KEYWORD", "INTO"):
+                    self.consume("KEYWORD", "INTO", "Expected INTO keyword")
+                else:
+                    self.consume("KEYWORD", "BY", "Expected BY keyword")
+
             to_idents = []
             end_verb = f"END-{op}"
-            
+
             while True:
                 if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "GIVING") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended or is_tok_statement_start(self.peek()):
                     break
@@ -1089,21 +1141,21 @@ class CobolParser:
                 to_idents.append({"name": ident, "rounded": rounded})
                 if not self.check("IDENTIFIER") and not self.check("KEYWORD") and not self.check("NUMBER") and not self.check("LITERAL_NUMBER"):
                     break
-            
+
             if not to_idents:
                 raise self.error(self.peek(), "Expected target/value identifier")
-            
+
             giving_targets = []
             remainder_tgt = None
             if self.match("KEYWORD", "GIVING"):
                 while True:
                     if self.is_at_end() or self.check("PUNCTUATION", ".") or self.check("KEYWORD", "ON") or self.check("KEYWORD", "SIZE") or self.check("KEYWORD", "NOT") or self.check("KEYWORD", end_verb) or self.sentence_ended or is_tok_statement_start(self.peek()):
                         break
-                    
+
                     if self.match("KEYWORD", "REMAINDER"):
                         remainder_tgt = self.consume_subscripted_identifier("Expected remainder target identifier")
                         break
-                        
+
                     ident = self.consume_subscripted_identifier("Expected target identifier after GIVING")
                     rounded = False
                     if self.match("KEYWORD", "ROUNDED"):
@@ -1113,10 +1165,10 @@ class CobolParser:
                         break
                 if not giving_targets and not remainder_tgt:
                     raise self.error(self.peek(), "Expected target identifier after GIVING")
-                
+
             on_size_error_nodes = []
             not_on_size_error_nodes = []
-            
+
             while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.sentence_ended:
                 if self.match("KEYWORD", "ON") or self.check("KEYWORD", "SIZE"):
                     if not self.match("KEYWORD", "SIZE"):
@@ -1136,9 +1188,9 @@ class CobolParser:
                     break
                 else:
                     break
-                    
+
             self.match_statement_period()
-            
+
             props = {
                 "statement_type": f"{op}_CORRESPONDING" if is_corr else op,
                 "value": val_tok.value,
@@ -1152,10 +1204,10 @@ class CobolParser:
             else:
                 props["giving"] = False
                 props["targets"] = to_idents
-                
+
             if remainder_tgt:
                 props["remainder"] = remainder_tgt
-                
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1180,10 +1232,10 @@ class CobolParser:
                     cond_parts.append(f'"{tok.value}"')
                 else:
                     cond_parts.append(tok.value)
-            
+
             self.match("KEYWORD", "THEN")
             self.block_stack.append("IF")
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1222,7 +1274,7 @@ class CobolParser:
                     is_times = True
                     times_idx = offset
                     break
-            
+
             if is_times:
                 if times_idx == 1:
                     count_tok = self.consume_val_or_subscript("Expected repeat count in PERFORM TIMES")
@@ -1269,7 +1321,7 @@ class CobolParser:
                         cond_parts.append(f'"{tok.value}"')
                     else:
                         cond_parts.append(tok.value)
-                
+
                 after_clauses = []
                 while self.match("KEYWORD", "AFTER") or self.match("IDENTIFIER", "AFTER"):
                     after_idx = self.consume_subscripted_identifier("Expected index variable after AFTER")
@@ -1294,7 +1346,7 @@ class CobolParser:
                         "by_value": after_by.value,
                         "condition": " ".join(after_cond_parts)
                     })
-                
+
                 props = {
                     "statement_type": "PERFORM_VARYING",
                     "index": idx_val,
@@ -1320,10 +1372,10 @@ class CobolParser:
             else:
                 tgt_tok = self.consume("IDENTIFIER", None, "Expected paragraph name after PERFORM")
                 props = {"statement_type": "PERFORM", "target": tgt_tok.value}
-                if self.match("KEYWORD", "THRU"):
-                    thru_tok = self.consume("IDENTIFIER", None, "Expected THRU paragraph name")
+                if self.match("KEYWORD", "THRU") or self.match("KEYWORD", "THROUGH") or self.match("IDENTIFIER", "THRU") or self.match("IDENTIFIER", "THROUGH"):
+                    thru_tok = self.consume("IDENTIFIER", None, "Expected THRU/THROUGH paragraph name")
                     props["thru"] = thru_tok.value
- 
+
                 if self.match("KEYWORD", "VARYING"):
                     # PERFORM paragraph VARYING idx FROM start BY step UNTIL cond
                     idx_val = self.consume_subscripted_identifier("Expected index variable after VARYING")
@@ -1342,7 +1394,7 @@ class CobolParser:
                             cond_parts.append('"' + tok.value + '"')
                         else:
                             cond_parts.append(tok.value)
-                    
+
                     after_clauses = []
                     while self.match("KEYWORD", "AFTER") or self.match("IDENTIFIER", "AFTER"):
                         after_idx = self.consume_subscripted_identifier("Expected index variable after AFTER")
@@ -1367,7 +1419,7 @@ class CobolParser:
                             "by_value": after_by.value,
                             "condition": " ".join(after_cond_parts)
                         })
-                    
+
                     props["statement_type"] = "PERFORM_VARYING_OUT"
                     props["index"] = idx_val
                     props["from_value"] = from_tok.value
@@ -1389,7 +1441,7 @@ class CobolParser:
                     props["condition"] = " ".join(cond_parts)
 
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1422,9 +1474,9 @@ class CobolParser:
                     operands.append({"type": "variable", "value": val})
                 else:
                     self.current += 1
-            
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1458,18 +1510,36 @@ class CobolParser:
                     "delimited_by": delim_val,
                     "delimited_by_type": delim_type
                 })
-            
+
             self.consume("KEYWORD", "INTO", "Expected INTO keyword in STRING")
             tgt_tok = self.consume("IDENTIFIER", None, "Expected target identifier in STRING")
+
+            # Optional: WITH POINTER <identifier>
+            pointer_var = None
+            if self.match("KEYWORD", "WITH") or self.check("KEYWORD", "POINTER"):
+                if not self.match("KEYWORD", "POINTER"):
+                    self.match("KEYWORD", "POINTER")
+                ptr_tok = self.consume("IDENTIFIER", None, "Expected POINTER variable in STRING")
+                pointer_var = ptr_tok.value
+
+            # Optional: ON OVERFLOW / END-STRING
+            if self.check("KEYWORD", "ON"):
+                self.match("KEYWORD", "ON")
+                self.match("KEYWORD", "OVERFLOW")
+            self.match("KEYWORD", "NOT")
+            self.match("KEYWORD", "ON")
+            self.match("KEYWORD", "OVERFLOW")
+            self.match("KEYWORD", "END-STRING")
             self.match("PUNCTUATION", ".")
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
                 properties={
                     "statement_type": "STRING",
                     "parts": parts,
-                    "target": tgt_tok.value
+                    "target": tgt_tok.value,
+                    "pointer": pointer_var,
                 },
                 source_file=self.file_path,
                 source_line=start_tok.line,
@@ -1482,13 +1552,13 @@ class CobolParser:
 
         elif self.match("KEYWORD", "UNSTRING"):
             source_tok = self.consume_val("Expected source identifier or literal in UNSTRING")
-            
+
             delimited_by = None
             if self.match("KEYWORD", "DELIMITED"):
                 self.match("KEYWORD", "BY")
                 delim_tok = self.consume_val("Expected delimiter in UNSTRING")
                 delimited_by = delim_tok.value
-                
+
             self.consume("KEYWORD", "INTO", "Expected INTO keyword in UNSTRING")
             targets = []
             while not self.is_at_end() and not self.check("PUNCTUATION", "."):
@@ -1501,12 +1571,12 @@ class CobolParser:
                     continue
                 tgt_tok = self.consume("IDENTIFIER", None, "Expected target identifier in UNSTRING")
                 targets.append(tgt_tok.value)
-                
+
             pointer_var = None
             tally_var = None
             on_overflow_nodes = []
             not_on_overflow_nodes = []
-            
+
             while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.sentence_ended:
                 if self.match("KEYWORD", "WITH") or self.check("KEYWORD", "POINTER"):
                     if not self.match("KEYWORD", "POINTER"):
@@ -1536,9 +1606,9 @@ class CobolParser:
                     break
                 else:
                     break
-                    
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1563,7 +1633,7 @@ class CobolParser:
 
         elif self.match("KEYWORD", "INSPECT"):
             target_tok = self.consume("IDENTIFIER", None, "Expected target identifier in INSPECT")
-            
+
             inspect_type = None
             tally_var = None
             tally_type = None
@@ -1571,12 +1641,12 @@ class CobolParser:
             replacements = []
             converting_from = None
             converting_to = None
-            
+
             if self.match("KEYWORD", "TALLYING"):
                 inspect_type = "TALLYING"
                 tally_var = self.consume("IDENTIFIER", None, "Expected tally variable").value
                 self.consume("KEYWORD", "FOR", "Expected FOR in INSPECT TALLYING")
-                
+
                 if self.match("KEYWORD", "CHARACTERS"):
                     tally_type = "CHARACTERS"
                 elif self.match("KEYWORD", "ALL"):
@@ -1589,17 +1659,17 @@ class CobolParser:
                     tally_search = search_tok.value
                 else:
                     raise ParserDiagnostic("Expected CHARACTERS, ALL, or LEADING in INSPECT TALLYING", self.file_path, self.peek().line, self.peek().column, self.peek().value, "")
-                    
+
             elif self.match("KEYWORD", "REPLACING"):
                 inspect_type = "REPLACING"
                 while not self.is_at_end() and not self.check("PUNCTUATION", "."):
                     peek_tok = self.peek()
                     if peek_tok.type != "KEYWORD" or peek_tok.value.upper() not in ("CHARACTERS", "ALL", "LEADING", "FIRST"):
                         break
-                        
+
                     rep_type = None
                     search_val = None
-                    
+
                     if self.match("KEYWORD", "CHARACTERS"):
                         rep_type = "CHARACTERS"
                         self.consume("KEYWORD", "BY", "Expected BY after CHARACTERS")
@@ -1626,7 +1696,7 @@ class CobolParser:
                         "search": search_val,
                         "replace": rep_val
                     })
-                    
+
             elif self.match("KEYWORD", "CONVERTING"):
                 inspect_type = "CONVERTING"
                 from_tok = self.consume_val("Expected source characters in CONVERTING")
@@ -1636,9 +1706,9 @@ class CobolParser:
                 converting_to = to_tok.value
             else:
                 raise ParserDiagnostic("Expected TALLYING, REPLACING, or CONVERTING in INSPECT", self.file_path, self.peek().line, self.peek().column, self.peek().value, "")
-                
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1664,7 +1734,7 @@ class CobolParser:
 
         elif self.match("KEYWORD", "CALL"):
             tgt_tok = self.consume_val("Expected subprogram target name")
-            
+
             args = []
             args_info = []
             if self.match("KEYWORD", "USING"):
@@ -1686,21 +1756,21 @@ class CobolParser:
                             continue
                         else:
                             raise ParserDiagnostic("Expected REFERENCE, CONTENT, or VALUE after BY", self.file_path, self.peek().line, self.peek().column, self.peek().value, "")
-                    
+
                     tok = self.consume_val("Expected USING argument name")
                     args.append(tok.value)
                     args_info.append({
                         "value": tok.value,
                         "mode": current_mode
                     })
-            
+
             returning_val = None
             if self.match("KEYWORD", "RETURNING") or self.match("KEYWORD", "GIVING"):
                 ret_tok = self.consume_val("Expected returning identifier")
                 returning_val = ret_tok.value
-            
+
             self.match("PUNCTUATION", ".")
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -1723,7 +1793,7 @@ class CobolParser:
         elif self.match("KEYWORD", "READ") or self.match("KEYWORD", "WRITE") or self.match("KEYWORD", "REWRITE") or self.match("KEYWORD", "DELETE") or self.match("KEYWORD", "START"):
             op = self.peek(-1).value.upper()
             file_tok = self.consume("IDENTIFIER", None, f"Expected file identifier after {op}")
-            
+
             from_source = None
             into_target = None
             at_end_nodes = []
@@ -1733,7 +1803,7 @@ class CobolParser:
             key_operator = None
             key_name = None
             is_next = False
-            
+
             if op in ("WRITE", "REWRITE") and self.match("KEYWORD", "FROM"):
                 from_tok = self.consume_val("Expected source identifier/literal after FROM")
                 # Preserve literal-ness: string literals are re-quoted so the
@@ -1781,385 +1851,39 @@ class CobolParser:
                         key_operator = ">="
                     else:
                         raise ParserDiagnostic("Expected relation operator in START KEY clause", self.file_path, self.peek().line, self.peek().column, self.peek().value, "START statement")
-                    
+
                     key_tok = self.consume("IDENTIFIER", None, "Expected key variable identifier in START statement")
                     key_name = key_tok.value
-                    
+
             # Parse clauses for all READ/WRITE/REWRITE/DELETE/START
-            in_at_end = False
-            in_not_at_end = False
-            in_invalid_key = False
-            in_not_invalid_key = False
-            
-            while not self.is_at_end():
-                if self.check("KEYWORD", "AT") and not self.is_at_end():
-                    self.current += 1
-                    if self.match("KEYWORD", "END"):
-                        in_at_end = True
-                        in_not_at_end = False
-                        in_invalid_key = False
-                        in_not_invalid_key = False
-                        continue
-                    self.current -= 1
-                    break
-                elif self.check("KEYWORD", "INVALID") and not self.is_at_end():
-                    self.current += 1
-                    if self.match("KEYWORD", "KEY"):
-                        in_invalid_key = True
-                        in_not_invalid_key = False
-                        in_at_end = False
-                        in_not_at_end = False
-                        continue
-                    self.current -= 1
-                    break
-                elif self.check("KEYWORD", "NOT") and not self.is_at_end():
-                    self.current += 1
-                    if self.check("KEYWORD", "AT"):
-                        self.current += 1
-                        if self.match("KEYWORD", "END"):
-                            in_not_at_end = True
-                            in_at_end = False
-                            in_invalid_key = False
-                            in_not_invalid_key = False
-                            continue
-                        self.current -= 1
-                    elif self.check("KEYWORD", "INVALID"):
-                        self.current += 1
-                        if self.match("KEYWORD", "KEY"):
-                            in_not_invalid_key = True
-                            in_invalid_key = False
-                            in_at_end = False
-                            in_not_at_end = False
-                            continue
-                        self.current -= 1
-                    self.current -= 1
-                    break
-                elif self.check("KEYWORD", f"END-{op}"):
-                    self.current += 1
-                    break
-                elif in_at_end or in_not_at_end or in_invalid_key or in_not_invalid_key:
-                    tok = self.peek()
-                    if is_tok_statement_start(tok) and tok.value.upper() not in ("AT", "NOT", f"END-{op}", "INVALID"):
-                        stmt_node = None
-                        if self.match("KEYWORD", "MOVE"):
-                            src_tok = self.consume_val("Expected source in MOVE")
-                            self.consume("KEYWORD", "TO", "Expected TO")
-                            in_targets = []
-                            while self.check("IDENTIFIER"):
-                                in_targets.append(self.peek().value)
-                                self.current += 1
-                            if not in_targets:
-                                in_t = self.consume("IDENTIFIER", None, "Expected target")
-                                in_targets = [in_t.value]
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "MOVE", "source": src_tok.value, "targets": in_targets},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "WRITE") or self.match("KEYWORD", "REWRITE"):
-                            w_op = self.peek(-1).value.upper()
-                            file_tok2 = self.consume("IDENTIFIER", None, f"Expected file/record after {w_op}")
-                            from_src = None
-                            if self.match("KEYWORD", "FROM"):
-                                from_tok2 = self.consume_val("Expected source after FROM")
-                                from_src = from_tok2.value
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": w_op, "target": file_tok2.value, "from_source": from_src, "into_target": None, "at_end_nodes": [], "not_at_end_nodes": []},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "PERFORM"):
-                            tgt_tok = self.consume("IDENTIFIER", None, "Expected paragraph name after PERFORM")
-                            props = {"statement_type": "PERFORM", "target": tgt_tok.value}
-                            if self.match("KEYWORD", "THRU"):
-                                thru_tok = self.consume("IDENTIFIER", None, "Expected THRU paragraph name")
-                                props["thru"] = thru_tok.value
-                            if self.match("KEYWORD", "UNTIL"):
-                                cond_parts = []
-                                while not self.is_at_end() and not self.check("PUNCTUATION", "."):
-                                    tok = self.peek()
-                                    if is_tok_statement_start(tok):
-                                        break
-                                    self.current += 1
-                                    if tok.type == "LITERAL_STRING":
-                                        cond_parts.append(f'"{tok.value}"')
-                                    else:
-                                        cond_parts.append(tok.value)
-                                props["statement_type"] = "PERFORM_UNTIL_OUT"
-                                props["condition"] = " ".join(cond_parts)
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties=props,
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "DISPLAY"):
-                            operands = []
-                            while not self.is_at_end() and not self.check("PUNCTUATION", "."):
-                                tok2 = self.peek()
-                                if is_tok_statement_start(tok2) or tok2.value.upper() in ("AT", "NOT", "INVALID", f"END-{op}"):
-                                    break
-                                val_tok = self.consume_val("Expected display operand")
-                                operands.append({
-                                    "type": "literal" if val_tok.type == "LITERAL_STRING" else "variable",
-                                    "value": val_tok.value
-                                })
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "DISPLAY", "operands": operands},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "STOP"):
-                            self.consume("KEYWORD", "RUN")
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "STOP RUN"},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "GOBACK"):
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "GOBACK"},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "CONTINUE"):
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "CONTINUE"},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "ADD"):
-                            # ADD <value> TO <target> [GIVING <target>]
-                            operands = []
-                            while not self.is_at_end() and not self.check("KEYWORD", "TO"):
-                                tk = self.peek()
-                                if is_tok_statement_start(tk):
-                                    break
-                                operands.append(self.consume_val("Expected ADD operand").value)
-                            targets = []
-                            if self.match("KEYWORD", "TO"):
-                                while not self.is_at_end():
-                                    tk2 = self.peek()
-                                    if is_tok_statement_start(tk2) or tk2.value.upper() in ("GIVING",):
-                                        break
-                                    if tk2.type not in ("IDENTIFIER", "NUMBER"):
-                                        break
-                                    targets.append(self.consume_val("Expected ADD target").value)
-                            giving = None
-                            if self.match("KEYWORD", "GIVING"):
-                                giving = self.consume_val("Expected GIVING target").value
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "ADD", "operands": operands, "targets": targets, "giving": giving},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "SUBTRACT"):
-                            # SUBTRACT <value> FROM <target>
-                            operands = []
-                            while not self.is_at_end() and not self.check("KEYWORD", "FROM"):
-                                tk = self.peek()
-                                if is_tok_statement_start(tk):
-                                    break
-                                operands.append(self.consume_val("Expected SUBTRACT operand").value)
-                            targets = []
-                            if self.match("KEYWORD", "FROM"):
-                                while not self.is_at_end():
-                                    tk2 = self.peek()
-                                    if is_tok_statement_start(tk2):
-                                        break
-                                    if tk2.type not in ("IDENTIFIER", "NUMBER"):
-                                        break
-                                    targets.append(self.consume_val("Expected SUBTRACT target").value)
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "SUBTRACT", "operands": operands, "targets": targets},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                        elif self.match("KEYWORD", "IF"):
-                            # Parse IF <condition> <body> END-IF inside an AT-END block.
-                            # Collect condition tokens until we hit a STATEMENT_START_VERB.
-                            cond_toks = []
-                            while not self.is_at_end():
-                                tk2 = self.peek()
-                                if is_tok_statement_start(tk2) and tk2.value.upper() not in ("THEN",):
-                                    break
-                                if tk2.type == "KEYWORD" and tk2.value.upper() in ("END-IF",):
-                                    break
-                                self.current += 1
-                                if tk2.type == "LITERAL_STRING":
-                                    cond_toks.append(f'"{tk2.value}"')
-                                else:
-                                    cond_toks.append(tk2.value)
-                            cond_str = " ".join(cond_toks)
-                            # Emit IF node
-                            stmt_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "IF", "condition": cond_str},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                            if in_at_end:
-                                at_end_nodes.append(stmt_node)
-                            elif in_not_at_end:
-                                not_at_end_nodes.append(stmt_node)
-                            stmt_node = None  # Will be added by the body loop below
-                            # Parse body statements until END-IF
-                            while not self.is_at_end():
-                                bk = self.peek()
-                                if bk.type == "KEYWORD" and bk.value.upper() == "END-IF":
-                                    self.current += 1
-                                    break
-                                body_stmt = None
-                                if self.match("KEYWORD", "ADD"):
-                                    b_ops = []
-                                    while not self.is_at_end() and not self.check("KEYWORD", "TO"):
-                                        bk2 = self.peek()
-                                        if is_tok_statement_start(bk2):
-                                            break
-                                        b_ops.append(self.consume_val("Expected ADD operand").value)
-                                    b_tgts = []
-                                    if self.match("KEYWORD", "TO"):
-                                        while not self.is_at_end():
-                                            bk3 = self.peek()
-                                            if is_tok_statement_start(bk3):
-                                                break
-                                            if bk3.type not in ("IDENTIFIER", "NUMBER"):
-                                                break
-                                            b_tgts.append(self.consume_val("Expected ADD target").value)
-                                    body_stmt = SemanticIRNode(
-                                        node_id=self.next_node_id(),
-                                        kind="STATEMENT",
-                                        properties={"statement_type": "ADD", "operands": b_ops, "targets": b_tgts},
-                                        source_file=self.file_path,
-                                        source_line=bk.line,
-                                        source_column=bk.column,
-                                        start_offset=bk.start_offset,
-                                        end_offset=self.peek().start_offset,
-                                        status="PARSED"
-                                    )
-                                elif self.match("KEYWORD", "MOVE"):
-                                    src_tok2 = self.consume_val("Expected source in MOVE")
-                                    self.consume("KEYWORD", "TO", "Expected TO")
-                                    b_tgts = []
-                                    while self.check("IDENTIFIER"):
-                                        b_tgts.append(self.peek().value)
-                                        self.current += 1
-                                    if not b_tgts:
-                                        b_t = self.consume("IDENTIFIER", None, "Expected target")
-                                        b_tgts = [b_t.value]
-                                    body_stmt = SemanticIRNode(
-                                        node_id=self.next_node_id(),
-                                        kind="STATEMENT",
-                                        properties={"statement_type": "MOVE", "source": src_tok2.value, "targets": b_tgts},
-                                        source_file=self.file_path,
-                                        source_line=bk.line,
-                                        source_column=bk.column,
-                                        start_offset=bk.start_offset,
-                                        end_offset=self.peek().start_offset,
-                                        status="PARSED"
-                                    )
-                                else:
-                                    # Skip unknown token inside IF body
-                                    self.current += 1
-                                if body_stmt:
-                                    if in_at_end:
-                                        at_end_nodes.append(body_stmt)
-                                    elif in_not_at_end:
-                                        not_at_end_nodes.append(body_stmt)
-                            # Emit END-IF node
-                            end_if_node = SemanticIRNode(
-                                node_id=self.next_node_id(),
-                                kind="STATEMENT",
-                                properties={"statement_type": "END-IF"},
-                                source_file=self.file_path,
-                                source_line=tok.line,
-                                source_column=tok.column,
-                                start_offset=tok.start_offset,
-                                end_offset=self.peek().start_offset,
-                                status="PARSED"
-                            )
-                            if in_at_end:
-                                at_end_nodes.append(end_if_node)
-                            elif in_not_at_end:
-                                not_at_end_nodes.append(end_if_node)
-                            continue
-                        
-                        if stmt_node:
-                            if in_at_end:
-                                at_end_nodes.append(stmt_node)
-                            elif in_not_at_end:
-                                not_at_end_nodes.append(stmt_node)
-                            elif in_invalid_key:
-                                invalid_key_nodes.append(stmt_node)
-                            elif in_not_invalid_key:
-                                not_invalid_key_nodes.append(stmt_node)
-                        else:
-                            break
+            end_verb = f"END-{op}"
+            while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not self.sentence_ended:
+                if self.check("KEYWORD", "AT") or (self.check("KEYWORD", "END") and not self.check("KEYWORD", end_verb)):
+                    if self.match("KEYWORD", "AT"):
+                        self.match("KEYWORD", "END")
                     else:
+                        self.match("KEYWORD", "END")
+                    at_end_nodes = self.parse_nested_statements_block(["NOT", end_verb, "AT", "INVALID"])
+                elif self.match("KEYWORD", "NOT"):
+                    if self.match("KEYWORD", "AT"):
+                        self.match("KEYWORD", "END")
+                        not_at_end_nodes = self.parse_nested_statements_block([end_verb, "INVALID", "AT"])
+                    elif self.match("KEYWORD", "INVALID"):
+                        self.match("KEYWORD", "KEY")
+                        not_invalid_key_nodes = self.parse_nested_statements_block([end_verb, "AT"])
+                    else:
+                        self.current -= 1
                         break
+                elif self.match("KEYWORD", "INVALID"):
+                    self.match("KEYWORD", "KEY")
+                    invalid_key_nodes = self.parse_nested_statements_block(["NOT", end_verb, "AT"])
+                elif self.match("KEYWORD", end_verb):
+                    break
                 else:
                     break
-            
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2201,9 +1925,9 @@ class CobolParser:
                 while not self.is_at_end() and not self.check("PUNCTUATION", ".") and not is_tok_statement_start(self.peek()):
                     file_tok = self.consume("IDENTIFIER", None, "Expected file identifier after CLOSE")
                     targets.append(file_tok.value)
-                
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2227,7 +1951,7 @@ class CobolParser:
                 subjects.append(self.consume_val("Expected subject after ALSO").value)
             self.match_statement_period()
             self.block_stack.append("EVALUATE")
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2256,10 +1980,10 @@ class CobolParser:
                     cond_parts.append(f'"{tok.value}"')
                 else:
                     cond_parts.append(tok.value)
-            
+
             cond_str = " ".join(cond_parts)
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2282,7 +2006,7 @@ class CobolParser:
                 self.consume("KEYWORD", "RUN", "Expected RUN after STOP")
                 val = "STOP RUN"
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2301,7 +2025,7 @@ class CobolParser:
             self.consume("KEYWORD", "TO", "Expected TO after GO")
             tgt_tok = self.consume("IDENTIFIER", None, "Expected paragraph/section name after GO TO")
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2362,9 +2086,9 @@ class CobolParser:
                 exit_type = "EXIT_PROGRAM"
             elif self.match("KEYWORD", "SECTION") or self.match("IDENTIFIER", "SECTION"):
                 exit_type = "EXIT SECTION"
-            
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2386,7 +2110,7 @@ class CobolParser:
             if self.block_stack and self.block_stack[-1] == block_type:
                 self.block_stack.pop()
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2415,7 +2139,7 @@ class CobolParser:
         elif self.match("KEYWORD", "SORT") or self.match("KEYWORD", "MERGE"):
             verb = self.peek(-1).value.upper()
             work_file = self.consume("IDENTIFIER", None, "Expected work file name").value
-            
+
             # Keys parsing
             keys = []
             while self.match("KEYWORD", "ON"):
@@ -2426,7 +2150,7 @@ class CobolParser:
                 while self.check("IDENTIFIER"):
                     k_name = self.consume("IDENTIFIER").value
                     keys.append({"name": k_name, "order": order})
-            
+
             # Input clause
             using_files = []
             input_procedure = None
@@ -2440,7 +2164,7 @@ class CobolParser:
                 if self.match("KEYWORD", "THRU") or self.match("KEYWORD", "THROUGH"):
                     thru_para = self.consume("IDENTIFIER").value
                     input_procedure = f"{input_procedure} THRU {thru_para}"
-                    
+
             # Output clause
             giving_files = []
             output_procedure = None
@@ -2454,9 +2178,9 @@ class CobolParser:
                 if self.match("KEYWORD", "THRU") or self.match("KEYWORD", "THROUGH"):
                     thru_para = self.consume("IDENTIFIER").value
                     output_procedure = f"{output_procedure} THRU {thru_para}"
-                    
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2483,9 +2207,9 @@ class CobolParser:
             from_val = None
             if self.match("KEYWORD", "FROM"):
                 from_val = self.consume_val_or_subscript().value
-            
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2509,12 +2233,12 @@ class CobolParser:
             into_val = None
             if self.match("KEYWORD", "INTO"):
                 into_val = self.consume_subscripted_identifier().value
-            
+
             at_end_action = None
             if self.match("KEYWORD", "AT") or self.match("KEYWORD", "END"):
                 if self.peek(-1).value.upper() == "AT":
                     self.consume("KEYWORD", "END")
-                
+
                 # Check for MOVE or SET statements directly inline
                 if self.check("KEYWORD", "MOVE"):
                     self.consume("KEYWORD", "MOVE")
@@ -2528,11 +2252,11 @@ class CobolParser:
                     self.consume("KEYWORD", "TO")
                     src = self.consume_val().value
                     at_end_action = f"SET {tgt} TO {src}"
-            
+
             if self.match("KEYWORD", "END-RETURN"):
                 pass
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2554,19 +2278,19 @@ class CobolParser:
         elif self.match("KEYWORD", "SET"):
             is_address_of_target = False
             target_var = None
-            
+
             if self.match("KEYWORD", "ADDRESS"):
                 self.consume("KEYWORD", "OF")
                 target_var = self.consume("IDENTIFIER", None, "Expected identifier after ADDRESS OF").value
                 is_address_of_target = True
             else:
                 target_var = self.consume_subscripted_identifier("Expected target in SET")
-                
+
             self.consume("KEYWORD", "TO", "Expected TO keyword in SET")
-            
+
             is_address_of_source = False
             source_var = None
-            
+
             if self.match("KEYWORD", "ADDRESS"):
                 self.consume("KEYWORD", "OF")
                 source_var = self.consume("IDENTIFIER", None, "Expected identifier after ADDRESS OF").value
@@ -2577,9 +2301,9 @@ class CobolParser:
                 source_var = "FALSE"
             else:
                 source_var = self.consume_val_or_subscript("Expected source in SET").value
-                
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2617,7 +2341,7 @@ class CobolParser:
                 status="PARSED"
             )
             self.ir.add_node(node)
-            
+
         elif self.match("KEYWORD", "GENERATE"):
             target = self.consume("IDENTIFIER", None, "Expected target after GENERATE").value
             self.match_statement_period()
@@ -2636,7 +2360,7 @@ class CobolParser:
                 status="PARSED"
             )
             self.ir.add_node(node)
-            
+
         elif self.match("KEYWORD", "TERMINATE"):
             target_report = self.consume("IDENTIFIER", None, "Expected report name after TERMINATE").value
             self.match_statement_period()
@@ -2745,16 +2469,16 @@ class CobolParser:
         else:
             tok = self.peek()
             self.current += 1
-            
+
             # Skip until period or statement boundary to prevent cascade UNKNOWNs
             while not self.is_at_end() and not self.check("PUNCTUATION", "."):
                 peek_tok = self.peek()
                 if is_tok_statement_start(peek_tok):
                     break
                 self.current += 1
-            
+
             self.match_statement_period()
-            
+
             node = SemanticIRNode(
                 node_id=self.next_node_id(),
                 kind="STATEMENT",
@@ -2773,7 +2497,7 @@ class CobolParser:
 
     def parse_exec_sql(self, tok):
         sql_text = tok.value
-        
+
         # Dialect warnings for unsupported DB2 constructs
         sql_upper = sql_text.upper()
         unsupported_constructs = []
@@ -2783,7 +2507,7 @@ class CobolParser:
             unsupported_constructs.append("FOR UPDATE OF clause")
         if "FETCH FIRST" in sql_upper and "ONLY" in sql_upper:
             unsupported_constructs.append("FETCH FIRST N ROWS ONLY clause")
-            
+
         for construct in unsupported_constructs:
             diag = ParserDiagnostic(
                 message=f"DB2_UNSUPPORTED_CONSTRUCT: {construct} is not supported natively in H2/standard JDBC mapping",
@@ -2794,13 +2518,13 @@ class CobolParser:
                 context="SQL Dialect Validation"
             )
             self.diagnostics.append(diag)
-            
+
         sql_tokens = tokenize_sql(sql_text)
         try:
             sql_props = parse_sql_tokens(sql_tokens)
         except Exception as e:
             raise ParserDiagnostic(f"Malformed EXEC SQL statement: {e}", self.file_path, tok.line, tok.column, tok.value, "")
-        
+
         # Resolve host variables
         host_vars = extract_host_variables(sql_props)
         for hv in host_vars:
@@ -2809,14 +2533,14 @@ class CobolParser:
                 if node.kind in ("VARIABLE", "DATA_ITEM") and node.properties.get("name", "").upper() == hv:
                     var_found = True
                     break
-            
+
             # Allow SQLCA variables (e.g. SQLCODE, SQLSTATE, SQLERRMC)
             if hv in ("SQLCODE", "SQLSTATE", "SQLERRMC"):
                 var_found = True
-                
+
             if not var_found:
                 raise ParserDiagnostic(f"SQL_HOST_VARIABLE_NOT_FOUND: Host variable {hv} not declared in WORKING-STORAGE or LINKAGE", self.file_path, tok.line, tok.column, tok.value, "")
-        
+
         node = SemanticIRNode(
             node_id=self.next_node_id(),
             kind="STATEMENT",
@@ -2842,35 +2566,35 @@ class CobolParser:
             cics_props = parse_cics_tokens(cics_tokens)
         except Exception as e:
             raise ParserDiagnostic(f"Malformed EXEC CICS statement: {e}", self.file_path, tok.line, tok.column, tok.value, "")
-        
+
         # Verify CICS supported command constraints
         cics_type = cics_props.get("cics_type", "EMPTY").upper()
         if cics_type not in ("SEND", "RECEIVE", "LINK", "XCTL", "RETURN"):
             raise ParserDiagnostic("CICS_UNSUPPORTED_COMMAND: Unsupported CICS command", self.file_path, tok.line, tok.column, tok.value, "")
-            
+
         if cics_type in ("LINK", "XCTL") and not cics_props.get("program"):
             raise ParserDiagnostic("CICS_INVALID_PROGRAM: Program target is missing or invalid", self.file_path, tok.line, tok.column, tok.value, "")
-            
+
         # Resolve variables in cics_props against the Working-Storage/Linkage semantic model
         cics_vars = []
         for key in ("from", "into", "commarea"):
             if key in cics_props:
                 cics_vars.append(cics_props[key])
-                
+
         for cv in cics_vars:
             var_found = False
             for node in self.ir.nodes.values():
                 if node.kind in ("VARIABLE", "DATA_ITEM") and node.properties.get("name", "").upper() == cv.upper():
                     var_found = True
                     break
-            
+
             # Allow CICS special registers
             if cv.upper() in ("EIBRESP", "EIBRESP2", "EIBTRNID", "EIBAID"):
                 var_found = True
-                
+
             if not var_found:
                 raise ParserDiagnostic(f"CICS_HOST_VARIABLE_NOT_FOUND: Host variable {cv} not declared in WORKING-STORAGE or LINKAGE", self.file_path, tok.line, tok.column, tok.value, "")
-                
+
         # Resolve variable size if length is explicitly provided
         if "commarea" in cics_props and "length" in cics_props:
             cv = cics_props["commarea"]
@@ -2888,12 +2612,12 @@ class CobolParser:
                             m = re.match(r'[A-Z]\((\d+)\)', pic, re.IGNORECASE)
                             if m:
                                 size = int(m.group(1))
-                        
+
                         if size != length_limit:
                             raise ParserDiagnostic(f"CICS_COMMAREA_MISMATCH: COMMAREA variable {cv} size {size} does not match specified length {length_limit}", self.file_path, tok.line, tok.column, tok.value, "")
             except ValueError:
                 pass
-                
+
         node = SemanticIRNode(
             node_id=self.next_node_id(),
             kind="STATEMENT",
@@ -2930,17 +2654,17 @@ def parse_sql_where(tokens, i):
                 predicates.append({"logical": t_upper})
                 i += 1
                 continue
-            
+
             if i >= len(tokens):
                 break
             col = tokens[i]
             i += 1
             if i >= len(tokens):
                 raise ValueError("Unexpected end of WHERE clause")
-            
+
             op = tokens[i].upper()
             i += 1
-            
+
             if op == "IS":
                 if i < len(tokens) and tokens[i].upper() == "NOT":
                     i += 1
@@ -2956,7 +2680,7 @@ def parse_sql_where(tokens, i):
                     continue
                 else:
                     raise ValueError("Expected NOT or NULL after IS")
-            
+
             if op == "BETWEEN":
                 if i >= len(tokens):
                     raise ValueError("Expected value after BETWEEN")
@@ -2972,7 +2696,7 @@ def parse_sql_where(tokens, i):
                     continue
                 else:
                     raise ValueError("Expected AND in BETWEEN clause")
-            
+
             if op == "IN":
                 if i < len(tokens) and tokens[i] == "(":
                     i += 1
@@ -2987,25 +2711,25 @@ def parse_sql_where(tokens, i):
                     continue
                 else:
                     raise ValueError("Expected ( after IN")
-            
+
             if i >= len(tokens):
                 raise ValueError(f"Expected value after operator {op}")
             val = tokens[i]
             i += 1
             predicates.append({"column": col, "op": op, "value": val})
-            
+
     return predicates, i
 
 def parse_sql_tokens(tokens):
     if not tokens:
         return {"sql_type": "EMPTY"}
-    
+
     first = tokens[0].upper()
     if first == "COMMIT":
         return {"sql_type": "COMMIT"}
     elif first == "ROLLBACK":
         return {"sql_type": "ROLLBACK"}
-        
+
     elif first == "DECLARE":
         cursor_name = tokens[1]
         if tokens[2].upper() != "CURSOR" or tokens[3].upper() != "FOR":
@@ -3017,19 +2741,19 @@ def parse_sql_tokens(tokens):
             "cursor_name": cursor_name,
             "cursor_query": subquery_props
         }
-        
+
     elif first == "OPEN":
         return {
             "sql_type": "OPEN",
             "cursor_name": tokens[1]
         }
-        
+
     elif first == "CLOSE":
         return {
             "sql_type": "CLOSE",
             "cursor_name": tokens[1]
         }
-        
+
     elif first == "FETCH":
         cursor_name = tokens[1]
         into_vars = []
@@ -3062,7 +2786,7 @@ def parse_sql_tokens(tokens):
             "into_variables": into_vars,
             "into_indicators": into_inds
         }
-        
+
     elif first == "SELECT":
         i = 1
         cols = []
@@ -3071,7 +2795,7 @@ def parse_sql_tokens(tokens):
             if t != ",":
                 cols.append(t)
             i += 1
-            
+
         into_vars = []
         into_inds = []
         if i < len(tokens) and tokens[i].upper() == "INTO":
@@ -3096,28 +2820,28 @@ def parse_sql_tokens(tokens):
                 into_vars.append(var_name)
                 into_inds.append(ind_name)
                 i += 1
-                
+
         if i >= len(tokens) or tokens[i].upper() != "FROM":
             raise ValueError("Expected FROM keyword in SELECT")
         i += 1
-        
+
         from_tokens = []
         while i < len(tokens) and tokens[i].upper() != "WHERE":
             from_tokens.append(tokens[i])
             i += 1
-            
+
         alias_map = {}
         tables = []
         def is_alias_candidate(tok):
             t_u = tok.upper()
             return t_u not in ("INNER", "LEFT", "RIGHT", "JOIN", "ON", "WHERE", "AND", "OR", ",", ".", "=", "<", ">", "<=", ">=", "<>", "!=")
-            
+
         if from_tokens:
             first_table = from_tokens[0].upper()
             tables.append(first_table)
             if len(from_tokens) > 1 and is_alias_candidate(from_tokens[1]):
                 alias_map[from_tokens[1].upper()] = first_table
-            
+
             k = 1
             while k < len(from_tokens):
                 t_upper = from_tokens[k].upper()
@@ -3131,9 +2855,9 @@ def parse_sql_tokens(tokens):
                         k += 2
                 else:
                     k += 1
-                    
+
         predicates, i = parse_sql_where(tokens, i)
-                
+
         return {
             "sql_type": "SELECT",
             "columns": cols,
@@ -3144,7 +2868,7 @@ def parse_sql_tokens(tokens):
             "alias_map": alias_map,
             "predicates": predicates
         }
-        
+
     elif first == "INSERT":
         if tokens[1].upper() != "INTO":
             raise ValueError("Expected INTO after INSERT")
@@ -3158,7 +2882,7 @@ def parse_sql_tokens(tokens):
                     cols.append(tokens[i])
                 i += 1
             i += 1
-            
+
         if tokens[i].upper() != "VALUES":
             raise ValueError("Expected VALUES in INSERT")
         i += 1
@@ -3172,14 +2896,14 @@ def parse_sql_tokens(tokens):
                         val = val[1:]
                     vals.append(val)
                 i += 1
-                
+
         return {
             "sql_type": "INSERT",
             "table": table,
             "columns": cols,
             "values": vals
         }
-        
+
     elif first == "UPDATE":
         table = tokens[1]
         if tokens[2].upper() != "SET":
@@ -3197,16 +2921,16 @@ def parse_sql_tokens(tokens):
             i += 3
             if i < len(tokens) and tokens[i] == ",":
                 i += 1
-                
+
         predicates, i = parse_sql_where(tokens, i)
-                
+
         return {
             "sql_type": "UPDATE",
             "table": table,
             "sets": sets,
             "predicates": predicates
         }
-        
+
     elif first == "DELETE":
         if tokens[1].upper() != "FROM":
             raise ValueError("Expected FROM in DELETE")
@@ -3218,7 +2942,7 @@ def parse_sql_tokens(tokens):
             "table": table,
             "predicates": predicates
         }
-        
+
     else:
         raise ValueError(f"Unsupported SQL statement type: {first}")
 
@@ -3254,7 +2978,7 @@ def extract_host_variables(props):
             vars.append(val)
     if "cursor_query" in props:
         vars.extend(extract_host_variables(props["cursor_query"]))
-    
+
     res = []
     for v in vars:
         if v and not v.startswith("'") and not v.startswith('"') and not v.replace(".", "").isdigit():
@@ -3272,20 +2996,20 @@ def tokenize_cics(cics_text):
 def parse_cics_tokens(tokens):
     if not tokens:
         return {"cics_type": "EMPTY"}
-    
+
     # Locate first command token (CICS command name, skip EXEC CICS prefix if present)
     start_idx = 0
     if tokens[0].upper() == "EXEC":
         start_idx = 1
         if len(tokens) > 1 and tokens[1].upper() == "CICS":
             start_idx = 2
-            
+
     if start_idx >= len(tokens):
         return {"cics_type": "EMPTY"}
-        
+
     first = tokens[start_idx].upper()
     props = {"cics_type": first}
-    
+
     i = start_idx + 1
     while i < len(tokens):
         key = tokens[i].upper()
@@ -3304,12 +3028,12 @@ def parse_cics_tokens(tokens):
                         break
                 val_tokens.append(t)
                 j += 1
-            
+
             val = "".join(val_tokens).strip("'\"")
             props[key.lower()] = val
             i = j + 1
         else:
             props[key.lower()] = True
             i += 1
-            
+
     return props

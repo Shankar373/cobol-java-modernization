@@ -41,10 +41,10 @@ def test_adversarial_validation_complete():
     assert "item_val[i] = new com.systema.modernized.runtime.CobolNumeric(new com.systema.modernized.runtime.CobolNumericSpec(false, 4, 2, com.systema.modernized.runtime.CobolUsage.DISPLAY, com.systema.modernized.runtime.CobolSignPosition.TRAILING, false));" in java_src
     
     # 3. Verify Level-88 helper method
-    assert "public boolean isStatusOpen() { return Objects.equals(ws_status, \"O\"); }" in java_src
+    assert "public boolean isStatusOpen() { return com.systema.modernized.CobolFormatHelper.cobolEquals(ws_status, \"O\"); }" in java_src
     
     # 4. Verify EVALUATE translation
-    assert "if (Objects.equals(ws_status, \"O\")) {" in java_src
+    assert "if (com.systema.modernized.CobolFormatHelper.cobolEquals(ws_status, \"O\")) {" in java_src
     
     # 5. Verify IF Level-88 translation
     assert "if (isStatusOpen()) {" in java_src

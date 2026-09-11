@@ -1,0 +1,11 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ZEROFILL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-GROUP.
+          05 A PIC 9(5).
+       PROCEDURE DIVISION.
+           INITIALIZE A.
+           MOVE 42 TO A.
+           DISPLAY WS-GROUP.
+           GOBACK.

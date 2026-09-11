@@ -239,10 +239,10 @@ def preprocess_ocesql_source(cobol_code: str) -> str:
     in_working_storage = False
     has_declare_section = False
     has_sqlca_copy = False
-    
+
     for line in lines:
         upper_line = line.upper()
-        
+
         # Detect working storage section
         if "WORKING-STORAGE SECTION" in upper_line:
             in_working_storage = True
@@ -256,7 +256,7 @@ def preprocess_ocesql_source(cobol_code: str) -> str:
                 new_lines.append("       EXEC SQL END DECLARE SECTION END-EXEC.")
                 has_declare_section = True
             continue
-            
+
         # Strip manual SQLCODE/SQLSTATE if present, replacing with sqlca copybook
         if "SQLCA-VARIABLES" in upper_line or "SQLCA_VARIABLES" in upper_line:
             if not has_sqlca_copy:
@@ -264,14 +264,14 @@ def preprocess_ocesql_source(cobol_code: str) -> str:
                 has_sqlca_copy = True
             in_sqlca_vars = True
             continue
-            
+
         # Also catch standalone SQLCODE / SQLSTATE declarations
         if in_working_storage and ("01 SQLCODE" in upper_line or "01  SQLCODE" in upper_line or "05 SQLCODE" in upper_line or "05  SQLCODE" in upper_line or "01 SQLSTATE" in upper_line or "01  SQLSTATE" in upper_line or "05 SQLSTATE" in upper_line or "05  SQLSTATE" in upper_line):
             if not has_sqlca_copy:
                 new_lines.append('            COPY "sqlca.cbl".')
                 has_sqlca_copy = True
             continue
-            
+
         if in_sqlca_vars:
             if "EXEC SQL" in upper_line:
                 in_sqlca_vars = False
@@ -282,7 +282,7 @@ def preprocess_ocesql_source(cobol_code: str) -> str:
                 in_sqlca_vars = False
             else:
                 continue
-                
+
         # Remove COMP, COMP-5, BINARY usage clauses in host variables
         # Since ocesql precompiler has a strict limitation (only supports DISPLAY/COMP-3)
         if in_working_storage and not ("PROCEDURE DIVISION" in upper_line):
@@ -294,46 +294,57 @@ def preprocess_ocesql_source(cobol_code: str) -> str:
             line = re.sub(r'\bCOMP-5\b', '', line, flags=re.IGNORECASE)
             line = re.sub(r'\bCOMP\b', '', line, flags=re.IGNORECASE)
             line = re.sub(r'\bBINARY\b', '', line, flags=re.IGNORECASE)
-            
+
         new_lines.append(line)
-        
+
         # Inject CONNECT statement at the start of PROCEDURE DIVISION
         if "PROCEDURE DIVISION" in upper_line:
             new_lines.append("            EXEC SQL")
             new_lines.append("                CONNECT :USERNAME IDENTIFIED BY :PASSWD USING :DBNAME")
             new_lines.append("            END-EXEC.")
-            
+
     return "\n".join(new_lines)
 
 def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
+    # Load COBOL source from fixture or repo
+    cobol_code = fixture.cobol_code
+    if not cobol_code and fixture.repo:
+        # Try to load from repo directory (like NativePipeline does)
+        repo_dir = fixture.repo
+        if os.path.isdir(repo_dir):
+            for root, _, files in os.walk(fixture.repo):
+                for f in files:
+                    if f.upper().endswith((".COB", ".CBL")):
+                        src_path = os.path.join(root, f)
+                        with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+                            cobol_code = f.read()
+                            break
+                if not cobol_code:
+                    # Try default location
+                    src_path = os.path.join(fixture.repo, f"{fixture.program_name}.cob")
+                    if os.path.exists(src_path):
+                        with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+                            cobol_code = f.read()
+
+    if not cobol_code:
+        return ExecutionResult(0, b"", b"", termination_status="error", error_message="No COBOL source code found")
+
     # Check if this contains EXEC SQL
-    has_sql = "EXEC SQL" in fixture.cobol_code
-    
-    # Preprocess if SQL is present
-    if has_sql:
-        preprocessed_code = preprocess_ocesql_source(fixture.cobol_code)
-        # Log to target/ocesql_transformed.cob or similar
-        os.makedirs(os.path.join(run_dir, "target"), exist_ok=True)
-        with open(os.path.join(run_dir, "target", "ocesql_transformed.cob"), "wb") as f:
-            f.write(preprocessed_code.encode("utf-8"))
-        src_file = os.path.join(run_dir, "src_preprocessed.cob")
-        with open(src_file, "wb") as f:
-            f.write(preprocessed_code.encode("utf-8"))
-    else:
-        src_file = os.path.join(run_dir, f"{fixture.program_name}.cob")
-        with open(src_file, "wb") as f:
-            f.write(fixture.cobol_code.encode("utf-8"))
+    has_sql = "EXEC SQL" in cobol_code
+
+    # Source file path
+    src_file = os.path.join(run_dir, f"{fixture.program_name}.cob")
+    with open(src_file, "wb") as f:
+        f.write(cobol_code.encode("utf-8"))
 
     if PARITY_RUNTIME == "local":
-        # Local fallback execution
-        compile_cmd = ["cobc", "-x", "-std=default", "-fsign=ASCII", "-o", os.path.join(run_dir, "prog.exe"), src_file]
         rc, out, err, term = run_cmd_bytes(compile_cmd)
         if rc != 0:
             return ExecutionResult(rc, out, err, termination_status="error", error_message=f"GnuCOBOL compilation failed: {err.decode('utf-8', errors='replace')}")
-        
+
         run_cmd = [os.path.join(run_dir, "prog.exe")] + fixture.args
         rc, out, err, term = run_cmd_bytes(run_cmd, stdin_bytes=fixture.stdin_bytes)
-        
+
         # Read output files
         outputs = {}
         hashes = {}
@@ -352,7 +363,7 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
                 sizes[f_name] = 0
         return ExecutionResult(rc, out, err, files=outputs, termination_status=term,
                                file_hashes=hashes, file_sizes=sizes)
-        
+
     else:
         # Docker canonical runtime execution
         if not check_docker_available():
@@ -363,7 +374,7 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
         # Mount run_dir to /run
         run_dir_abs = os.path.abspath(run_dir).replace("\\", "/")
         net_name = "modernization-platform_default"
-        
+
         # Connectivity Smoke Test if SQL is present
         if has_sql:
             cmd_ping = [
@@ -420,14 +431,14 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
             f.write(fixture.stdin_bytes)
 
         inner_run = f"/run/prog.exe < /run/stdin.txt"
-        
+
         # Docker run parameters
         run_cmd_params = [
             "docker", "run", "--rm",
             "-v", f"{run_dir_abs}:/run",
             "-w", "/run"
         ]
-        
+
         # If SQL is present, set network and environment variables
         if has_sql:
             run_cmd_params.extend([
@@ -439,12 +450,12 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
                 "-e", "PGDATABASE=modernization_db",
                 "-e", "COB_PRE_LOAD=/usr/lib/libocesql.so"
             ])
-            
+
         run_cmd_params.extend([
             PARITY_GNUCOBOL_IMAGE,
             "sh", "-c", inner_run
         ])
-        
+
         rc, out, err, term = run_cmd_bytes(run_cmd_params)
 
         # Read output files
@@ -490,7 +501,7 @@ def run_java_transpiled(fixture: ParityFixture, run_dir: str) -> ExecutionResult
     # 2. Write Java source files and runtime helper dependencies to run_dir
     pkg_dir = os.path.join(run_dir, "com", "systema", "modernized", "native_gen")
     os.makedirs(pkg_dir, exist_ok=True)
-    
+
     # Adjust assignments in generated Java to refer to absolute paths in temporary workspace
     adjusted_java_source = java_source
     if hasattr(gen, "file_assigns") and gen.file_assigns:
@@ -524,12 +535,22 @@ def run_java_transpiled(fixture: ParityFixture, run_dir: str) -> ExecutionResult
     if repo_path:
         mock_db_yaml = os.path.join(repo_path, "mock_db.yaml")
         if os.path.exists(mock_db_yaml):
-            import shutil
-            from modernize.mock_sql_service import generate_mock_sql_assets
-            generate_mock_sql_assets(mock_db_yaml, run_dir, run_dir)
-            src_mss = os.path.join(run_dir, "src", "main", "java", "com", "systema", "modernized", "MockSqlService.java")
-            if os.path.exists(src_mss):
-                shutil.copy2(src_mss, os.path.join(jcl_context_dir, "MockSqlService.java"))
+            # NOTE: The production MockSqlService.java (Spring + H2 flavored)
+            # cannot compile on the parity classpath (no Spring jars, and the
+            # parity SpringContextHelper uses a MockJdbcTemplate without
+            # transactionManager/getDataSource). The parity harness therefore
+            # substitutes a no-op stub with the same public API so generated
+            # programs that call MockSqlService.initialize() still compile.
+            # VERIFICATION LIMIT: on the Java side of parity, SQL execution is
+            # mock-level; only stdout/file/exit-code parity is compared, not
+            # real database state.
+            with open(os.path.join(jcl_context_dir, "MockSqlService.java"), "w", encoding="utf-8") as f:
+                f.write("""package com.systema.modernized;
+public class MockSqlService {
+    // Parity-harness stub: no real datasource is provisioned on the Java side.
+    public static void initialize() {}
+}
+""")
 
     # Write JclExecutionContext, CobolFormatHelper, CicsProgramRegistry, SpringContextHelper
     with open(os.path.join(jcl_context_dir, "JclExecutionContext.java"), "w", encoding="utf-8") as f:
@@ -561,17 +582,105 @@ public class CicsProgramRegistry {
     with open(os.path.join(jcl_context_dir, "SpringContextHelper.java"), "w", encoding="utf-8") as f:
         f.write("""package com.systema.modernized;
 public class SpringContextHelper {
-    public static class MockResultSet {
-        public String getString(String c) { return null; }
-        public String getString(int idx) { return null; }
-    }
-    public interface MockRowMapper<T> { T mapRow(MockResultSet rs, int r) throws Exception; }
-    public static class MockJdbcTemplate {
-        public void execute(String sql) {}
-        public int update(String sql, Object... args) { return 0; }
-    }
-    public static MockJdbcTemplate jdbcTemplate = null;
+    // Parity-harness mock-level JDBC plumbing: database interactions on the
+    // Java side do NOT execute real SQL. VERIFICATION LIMIT: only
+    // stdout/file/exit-code parity is compared for SQL fixtures here.
+    public static org.springframework.jdbc.core.JdbcTemplate jdbcTemplate = null;
+    public static org.springframework.jdbc.datasource.DataSourceTransactionManager transactionManager = null;
 }""")
+
+    # Minimal org.springframework.* compile stubs for the parity classpath.
+    # These are mock-level: they let generated SQL programs compile and run
+    # without Spring jars, but they execute no real database operations.
+    def _wstub(relpath, content):
+        p = os.path.join(run_dir, *relpath.split("/"))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(content)
+
+    _wstub("org/springframework/transaction/TransactionStatus.java",
+"""package org.springframework.transaction;
+public interface TransactionStatus {
+    default boolean isCompleted() { return false; }
+}
+""")
+    _wstub("org/springframework/transaction/TransactionDefinition.java",
+"""package org.springframework.transaction;
+public interface TransactionDefinition {}
+""")
+    _wstub("org/springframework/transaction/support/DefaultTransactionDefinition.java",
+"""package org.springframework.transaction.support;
+public class DefaultTransactionDefinition implements org.springframework.transaction.TransactionDefinition {}
+""")
+    _wstub("org/springframework/jdbc/support/rowset/SqlRowSet.java",
+"""package org.springframework.jdbc.support.rowset;
+public interface SqlRowSet {
+    default boolean next() { return false; }
+    default String getString(String col) { return null; }
+    default String getString(int idx) { return null; }
+    default Object getObject(String col) { return null; }
+    default int getInt(int idx) { return 0; }
+    default int getInt(String col) { return 0; }
+    default long getLong(int idx) { return 0L; }
+    default java.math.BigDecimal getBigDecimal(int idx) { return java.math.BigDecimal.ZERO; }
+    default boolean wasNull() { return false; }
+    default java.sql.ResultSetMetaData getMetaData() { return null; }
+    default void close() {}
+}
+""")
+    _wstub("org/springframework/jdbc/core/JdbcTemplate.java",
+"""package org.springframework.jdbc.core;
+public class JdbcTemplate {
+    public interface RowMapper<T> { T mapRow(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException; }
+    public JdbcTemplate() {}
+    public JdbcTemplate(javax.sql.DataSource ds) {}
+    public void execute(String sql) {}
+    public int update(String sql, Object... args) { return 0; }
+    public <T> java.util.List<T> query(String sql, RowMapper<T> rowMapper, Object... args) { return new java.util.ArrayList<>(); }
+    @SuppressWarnings("unchecked")
+    public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
+        if (requiredType == Integer.class) return (T) Integer.valueOf(0);
+        if (requiredType == Long.class) return (T) Long.valueOf(0L);
+        if (requiredType == String.class) return (T) "";
+        return null;
+    }
+    public org.springframework.jdbc.support.rowset.SqlRowSet queryForRowSet(String sql, Object... args) {
+        return new org.springframework.jdbc.support.rowset.SqlRowSet() {};
+    }
+    public javax.sql.DataSource getDataSource() { return null; }
+}
+""")
+    _wstub("org/springframework/jdbc/datasource/SingleConnectionDataSource.java",
+"""package org.springframework.jdbc.datasource;
+public class SingleConnectionDataSource implements javax.sql.DataSource {
+    public void setSuppressClose(boolean v) {}
+    public void setUrl(String url) {}
+    public void setUsername(String u) {}
+    public void setPassword(String p) {}
+    public void setDriverClassName(String c) {}
+    public java.sql.Connection getConnection() { return null; }
+    public java.sql.Connection getConnection(String u, String p) { return null; }
+    public <T> T unwrap(Class<T> i) { return null; }
+    public boolean isWrapperFor(Class<?> i) { return false; }
+    public java.io.PrintWriter getLogWriter() { return null; }
+    public void setLogWriter(java.io.PrintWriter w) {}
+    public void setLoginTimeout(int s) {}
+    public int getLoginTimeout() { return 0; }
+    public java.util.logging.Logger getParentLogger() { return null; }
+}
+""")
+    _wstub("org/springframework/jdbc/datasource/DataSourceTransactionManager.java",
+"""package org.springframework.jdbc.datasource;
+public class DataSourceTransactionManager {
+    public DataSourceTransactionManager() {}
+    public DataSourceTransactionManager(javax.sql.DataSource ds) {}
+    public org.springframework.transaction.TransactionStatus getTransaction(org.springframework.transaction.TransactionDefinition def) {
+        return new org.springframework.transaction.TransactionStatus() {};
+    }
+    public void commit(org.springframework.transaction.TransactionStatus st) {}
+    public void rollback(org.springframework.transaction.TransactionStatus st) {}
+}
+""")
 
     # Copy stable format and numeric runtime helpers
     helpers_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -702,10 +811,10 @@ def compare_raw_bytes(target: str, cobol_bytes: bytes, java_bytes: bytes) -> Par
     # Hex rendering
     c_slice = cobol_bytes[max(0, offset - 8):min(len(cobol_bytes), offset + 8)]
     j_slice = java_bytes[max(0, offset - 8):min(len(java_bytes), offset + 8)]
-    
+
     cobol_hex = c_slice.hex(" ")
     java_hex = j_slice.hex(" ")
-    
+
     return ParityMismatch(
         target=target,
         offset=offset,
@@ -736,7 +845,7 @@ def run_parity(fixture: ParityFixture) -> ParityComparison:
     temp_root = tempfile.mkdtemp(prefix=f"parity_{fixture.name}_")
     cobol_run_dir = os.path.join(temp_root, "cobol-run")
     java_run_dir = os.path.join(temp_root, "java-run")
-    
+
     os.makedirs(cobol_run_dir, exist_ok=True)
     os.makedirs(java_run_dir, exist_ok=True)
 
@@ -770,7 +879,7 @@ def run_parity(fixture: ParityFixture) -> ParityComparison:
 
     # 4. Compare exit status, stdout, stderr, and declared outputs
     mismatches = []
-    
+
     # Exit code
     if cobol_res.rc != java_res.rc:
         mismatches.append(ParityMismatch(
@@ -786,7 +895,7 @@ def run_parity(fixture: ParityFixture) -> ParityComparison:
     )
     if m_stdout:
         mismatches.append(m_stdout)
-        
+
     # Stderr comparison — normalize before comparing to strip GnuCOBOL boilerplate
     m_stderr = compare_raw_bytes(
         "stderr",

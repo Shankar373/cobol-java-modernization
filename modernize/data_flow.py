@@ -1,7 +1,20 @@
 import json
 import os
+import re
 from .semantic_ir import SemanticIR, SemanticIRNode
 from .control_flow import ControlFlowModel
+
+
+def _var_in_expr(var_name: str, expr: str) -> bool:
+    """True if var_name appears as a whole COBOL identifier in expr.
+
+    COBOL identifiers contain hyphens, so boundaries are any non
+    [A-Za-z0-9-] characters. Prevents false matches like A inside ABC.
+    """
+    if not var_name or not expr:
+        return False
+    pattern = r"(?<![A-Za-z0-9-])" + re.escape(var_name) + r"(?![A-Za-z0-9-])"
+    return re.search(pattern, expr) is not None
 
 class DFNode:
     def __init__(
@@ -223,7 +236,7 @@ class DataFlowModel:
                 
                 # Connect variables referenced in condition to the condition node
                 for var_name in variables:
-                    if var_name in cond_val:
+                    if _var_in_expr(var_name, cond_val):
                         model.add_edge(DFEdge(
                             from_node=f"df_var_{var_name}",
                             to_node=cond_id,
@@ -292,7 +305,7 @@ class DataFlowModel:
 
                 # Identify operands in expression
                 for var_name in variables:
-                    if var_name in expr:
+                    if _var_in_expr(var_name, expr):
                         model.add_edge(DFEdge(
                             from_node=f"df_var_{var_name}",
                             to_node=calc_id,

@@ -1459,8 +1459,24 @@ function renderActiveWorkspace(r) {
   function getCardStatus(val, type) {
     if (type === 'compilation') {
       const gStage = r.stages.find(s => s.label === 'Generate') || {};
-      if (gStage.status === 'done') return { text: 'PASS', cls: 'chip-done', metrics: 'Maven Clean Compile' };
-      if (gStage.status === 'error') return { text: 'FAIL', cls: 'chip-error', metrics: 'Build Fail' };
+      const vStage = r.stages.find(s => s.label === 'Validate') || {};
+      const refactorData = rdata.refactor || {};
+      const generateData = rdata.generate || {};
+      const rc = generateData.compile_rc !== undefined ? generateData.compile_rc : (generateData.build_rc !== undefined ? generateData.build_rc : (refactorData.build_rc !== undefined ? refactorData.build_rc : null));
+      const stubs = generateData.stubs || diagData.unsupported_count || 0;
+      
+      if (gStage.status === 'error' || (rc !== null && rc !== 0)) {
+        return { text: 'FAIL', cls: 'chip-error', metrics: `Build Fail (exit code ${rc !== null ? rc : 1})` };
+      }
+      if (gStage.status === 'done') {
+        if (stubs > 0) {
+          return { text: 'WARNING', cls: 'chip-interrupted', metrics: `Compiled with ${stubs} stubs` };
+        }
+        if (rc === 0 || refactorData.compiled || vStage.status === 'done') {
+          return { text: 'PASS', cls: 'chip-done', metrics: 'Compiler exit code 0' };
+        }
+        return { text: 'PASS WITH WARNINGS', cls: 'chip-interrupted', metrics: 'Transpiled (javac unverified)' };
+      }
       return { text: 'UNVERIFIED', cls: 'chip-ready', metrics: 'Pending' };
     }
     if (type === 'execution') {
@@ -1679,7 +1695,7 @@ function renderActiveWorkspace(r) {
           <div class="sidebar-header">
             <h3>Workspaces / Runs</h3>
           </div>
-          <div class="runs-list" id="runsListSidebar">
+          <div class="runs-list" id="runsListSidebarAlt">
             <!-- Runs populates here -->
           </div>
         </div>
@@ -1918,6 +1934,50 @@ function renderRuns(state) {
 function renderDefaultUploadScreen(state) {
   const container = $('mainContainer');
   
+  const uploadCardHtml = `
+    <div class="upload-card">
+      <h2>Select Modernization Input Source</h2>
+      <p>Provide your legacy assets. You can upload a project ZIP archive, or clone directly from a Git repository.</p>
+      
+      <div class="tab-row">
+        <button class="tab-btn ${inTab === 'zip' ? 'active' : ''}" id="tabUpload" onclick="setInTab('zip')">Upload File / ZIP</button>
+        <button class="tab-btn ${inTab === 'git' ? 'active' : ''}" id="tabClone" onclick="setInTab('git')">Clone Git Repository</button>
+      </div>
+
+      <div id="zipInputBox" style="${inTab !== 'zip' ? 'display:none' : ''}">
+        <div class="dropzone" id="dropZone">
+          <input type="file" id="zipFile" accept=".zip" onchange="onFileSelected(this)">
+          <div class="dropzone-icon">📦</div>
+          <div class="dropzone-text">Drag & drop your ZIP here, or <span>browse</span></div>
+        </div>
+        <div class="selected-file-box" id="fileSelectedBox" style="display:none">
+          <div class="selected-file-info">
+            <span>📦</span>
+            <span id="fileName"></span>
+            <span style="color:var(--muted); font-size:11px;" id="fileSize"></span>
+          </div>
+          <button class="btn-clear" onclick="clearSelectedFile()">Clear</button>
+        </div>
+      </div>
+
+      <div id="gitInputBox" style="${inTab !== 'git' ? 'display:none' : ''}">
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="field">
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Git Repository URL</label>
+            <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+          </div>
+          <div class="field">
+            <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Branch (optional)</label>
+            <input type="text" id="gitBranch" placeholder="main" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
+          </div>
+        </div>
+      </div>
+
+      <div class="action-btn-row">
+        <button class="btn-action" id="analyzeBtn" onclick="ingest()">Analyze Project Source →</button>
+      </div>
+    </div>`;
+
   if (state.runs.length) {
     container.innerHTML = `
       <div class="app-container">
@@ -1933,48 +1993,7 @@ function renderDefaultUploadScreen(state) {
 
         <!-- Center Upload Screen inside content-area -->
         <div class="content-area" style="align-items:center; justify-content:center; flex:1;">
-          <div class="upload-card">
-            <h2>Select Modernization Input Source</h2>
-            <p>Provide your legacy assets. You can upload a project ZIP archive, or clone directly from a Git repository.</p>
-            
-            <div class="tab-row">
-              <button class="tab-btn ${inTab === 'zip' ? 'active' : ''}" id="tabUpload" onclick="setInTab('zip')">Upload File / ZIP</button>
-              <button class="tab-btn ${inTab === 'git' ? 'active' : ''}" id="tabClone" onclick="setInTab('git')">Clone Git Repository</button>
-            </div>
-
-            <div id="zipInputBox" style="${inTab !== 'zip' ? 'display:none' : ''}">
-              <div class="dropzone" id="dropZone">
-                <input type="file" id="zipFile" accept=".zip" onchange="onFileSelected(this)">
-                <div class="dropzone-icon">📦</div>
-                <div class="dropzone-text">Drag & drop your ZIP here, or <span>browse</span></div>
-              </div>
-              <div class="selected-file-box" id="fileSelectedBox" style="display:none">
-                <div class="selected-file-info">
-                  <span>📦</span>
-                  <span id="fileName"></span>
-                  <span style="color:var(--muted); font-size:11px;" id="fileSize"></span>
-                </div>
-                <button class="btn-clear" onclick="clearSelectedFile()">Clear</button>
-              </div>
-            </div>
-
-            <div id="gitInputBox" style="${inTab !== 'git' ? 'display:none' : ''}">
-              <div style="display:flex; flex-direction:column; gap:12px;">
-                <div class="field">
-                  <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Git Repository URL</label>
-                  <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
-                </div>
-                <div class="field">
-                  <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Branch (optional)</label>
-                  <input type="text" id="gitBranch" placeholder="main" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
-                </div>
-              </div>
-            </div>
-
-            <div class="action-btn-row">
-              <button class="btn-action" id="analyzeBtn" onclick="ingest()">Analyze Project Source →</button>
-            </div>
-          </div>
+          ${uploadCardHtml}
         </div>
       </div>`;
     
@@ -1982,48 +2001,7 @@ function renderDefaultUploadScreen(state) {
   } else {
     container.innerHTML = `
       <div class="center-container">
-        <div class="upload-card">
-          <h2>Select Modernization Input Source</h2>
-          <p>Provide your legacy assets. You can upload a project ZIP archive, or clone directly from a Git repository.</p>
-          
-          <div class="tab-row">
-            <button class="tab-btn ${inTab === 'zip' ? 'active' : ''}" id="tabUpload" onclick="setInTab('zip')">Upload File / ZIP</button>
-            <button class="tab-btn ${inTab === 'git' ? 'active' : ''}" id="tabClone" onclick="setInTab('git')">Clone Git Repository</button>
-          </div>
-
-          <div id="zipInputBox" style="${inTab !== 'zip' ? 'display:none' : ''}">
-            <div class="dropzone" id="dropZone">
-              <input type="file" id="zipFile" accept=".zip" onchange="onFileSelected(this)">
-              <div class="dropzone-icon">📦</div>
-              <div class="dropzone-text">Drag & drop your ZIP here, or <span>browse</span></div>
-            </div>
-            <div class="selected-file-box" id="fileSelectedBox" style="display:none">
-              <div class="selected-file-info">
-                <span>📦</span>
-                <span id="fileName"></span>
-                <span style="color:var(--muted); font-size:11px;" id="fileSize"></span>
-              </div>
-              <button class="btn-clear" onclick="clearSelectedFile()">Clear</button>
-            </div>
-          </div>
-
-          <div id="gitInputBox" style="${inTab !== 'git' ? 'display:none' : ''}">
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              <div class="field">
-                <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Git Repository URL</label>
-                <input type="text" id="gitUrl" placeholder="https://github.com/org/repo.git" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
-              </div>
-              <div class="field">
-                <label style="display:block; font-size:11px; color:var(--muted); margin-bottom:4px;">Branch (optional)</label>
-                <input type="text" id="gitBranch" placeholder="main" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-size:13px; outline:none;">
-              </div>
-            </div>
-          </div>
-
-          <div class="action-btn-row">
-            <button class="btn-action" id="analyzeBtn" onclick="ingest()">Analyze Project Source →</button>
-          </div>
-        </div>
+        ${uploadCardHtml}
       </div>`;
   }
 }
