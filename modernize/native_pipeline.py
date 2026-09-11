@@ -100,6 +100,11 @@ class NativePipeline:
                 pipe = Pipeline(self.repo, self.out, cfg=cfg, pull=False)
                 pipe.stage_discover()
                 pipe.stage_analyze()
+                if pipe.data("analyze") and pipe.data("analyze").get("file_assigns"):
+                    self._pipe_file_assigns = []
+                    for assigns in pipe.data("analyze").get("file_assigns", {}).values():
+                        if isinstance(assigns, list):
+                            self._pipe_file_assigns.extend(assigns)
                 pipe.stage_baseline()
                 
                 entry_id = (pipe.data("discover").get("entry") or "program").lower().replace("-", "_")
@@ -255,12 +260,28 @@ class NativePipeline:
                         "assign_path": phys
                     })
         
+        # Also incorporate any file_assigns from pipeline analysis if available
+        if getattr(self, "_pipe_file_assigns", None):
+            existing_logicals = {assign["logical_name"].upper() for assign in self.file_assigns if "logical_name" in assign}
+            for fa in self._pipe_file_assigns:
+                if isinstance(fa, dict) and fa.get("logical_name"):
+                    log_u = fa["logical_name"].upper()
+                    if log_u not in existing_logicals:
+                        self.file_assigns.append(dict(fa))
+                        existing_logicals.add(log_u)
+                    else:
+                        for existing in self.file_assigns:
+                            if existing.get("logical_name", "").upper() == log_u:
+                                for k, v in fa.items():
+                                    if k not in existing or not existing[k]:
+                                        existing[k] = v
+
         # Discover select ... assign to ... from sources to make it robust
         select_pat = re.compile(
-            r'(?i)SELECT\s+(?:OPTIONAL\s+)?(\S+?)\s+ASSIGN\s+TO\s+(?:"([^"]+)"|\'([^\']+)\'|(\S+))',
+            r'(?i)\bSELECT\s+(?:OPTIONAL\s+)?(\S+?)\s+ASSIGN\s+(?:TO\s+)?(?:"([^"]+)"|\'([^\']+)\'|(\S+))',
             re.DOTALL
         )
-        existing_logicals = {assign["logical_name"].upper() for assign in self.file_assigns}
+        existing_logicals = {assign["logical_name"].upper() for assign in self.file_assigns if "logical_name" in assign}
         for src in self.sources:
             try:
                 with open(src, "r", encoding="utf-8", errors="replace") as fh:
@@ -269,12 +290,29 @@ class NativePipeline:
                     logical = m.group(1).rstrip(".").upper()
                     path = (m.group(2) or m.group(3) or m.group(4) or "").rstrip(".")
                     path = path.strip("\"'")
+                    rest_idx = m.end()
+                    end_stmt = src_content.find(".", rest_idx)
+                    clause = src_content[rest_idx:end_stmt if end_stmt != -1 else len(src_content)]
+                    org_m = re.search(r'(?i)ORGANIZATION\s+(?:IS\s+)?(INDEXED|RELATIVE|LINE\s+SEQUENTIAL|SEQUENTIAL)', clause)
+                    org = org_m.group(1).upper() if org_m else "SEQUENTIAL"
+                    access_m = re.search(r'(?i)ACCESS\s+(?:MODE\s+)?(?:IS\s+)?(SEQUENTIAL|RANDOM|DYNAMIC)', clause)
+                    access = access_m.group(1).upper() if access_m else "SEQUENTIAL"
+
                     if logical not in existing_logicals:
                         self.file_assigns.append({
                             "logical_name": logical,
-                            "assign_path": path
+                            "assign_path": path,
+                            "organization": org,
+                            "access_mode": access
                         })
                         existing_logicals.add(logical)
+                    else:
+                        for existing in self.file_assigns:
+                            if existing.get("logical_name", "").upper() == logical:
+                                if "organization" not in existing or not existing["organization"]:
+                                    existing["organization"] = org
+                                if "access_mode" not in existing or not existing["access_mode"]:
+                                    existing["access_mode"] = access
             except Exception:
                 pass
         
@@ -981,10 +1019,9 @@ public class CicsTransactionContext {
             log_name = assign["logical_name"]
             phys_path = assign["assign_path"]
             target_phys = os.path.abspath(os.path.join(self.out, "results", "native", phys_path))
-            adjusted_assigns.append({
-                "logical_name": log_name,
-                "assign_path": target_phys.replace("\\", "/")
-            })
+            adj = dict(assign)
+            adj["assign_path"] = target_phys.replace("\\", "/")
+            adjusted_assigns.append(adj)
 
         for s_file, s_ir in self.program_ir.items():
             p_id = os.path.splitext(os.path.basename(s_file))[0].upper()
@@ -1395,6 +1432,11 @@ public class CicsTransactionContext {
                         (a.get("assign_path") == rel or a.get("assign_name") == rel or
                          os.path.basename(a.get("assign_path", "")).upper() == os.path.basename(rel).upper())
                         for a in getattr(self, "file_assigns", [])
+                    ) or any(
+                        ("INDEXED" in open(s, "r", encoding="utf-8", errors="ignore").read().upper() or
+                         "RELATIVE" in open(s, "r", encoding="utf-8", errors="ignore").read().upper()) and
+                        os.path.basename(rel).upper() in open(s, "r", encoding="utf-8", errors="ignore").read().upper()
+                        for s in self.sources
                     )
                     if is_indexed_or_relative:
                         lines = [line.strip(b"\r") for line in n_content.split(b"\n") if line.strip(b"\r")]
