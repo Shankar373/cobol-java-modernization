@@ -155,6 +155,8 @@ class NativePipeline:
                     if os.path.exists(src_od):
                         os.makedirs(dst_od, exist_ok=True)
                         for f in os.listdir(src_od):
+                            if f.lower().endswith((".cob", ".cbl", ".cpy", ".json", ".exe", ".so", ".py", ".md", ".bak")) or f.startswith("."):
+                                continue
                             src_file = os.path.join(src_od, f)
                             if os.path.isfile(src_file):
                                 shutil.copy2(src_file, os.path.join(dst_od, f))
@@ -227,6 +229,8 @@ class NativePipeline:
             
         for root, _, files in os.walk(src_dir):
             for f in files:
+                if f.lower().endswith(("_precompiled.cob", "_precompiled.cbl")):
+                    continue
                 if f.upper().endswith((".COB", ".CBL")):
                     self.sources.append(os.path.join(root, f))
                 elif f.upper().endswith((".CPY", ".COPY")):
@@ -239,6 +243,10 @@ class NativePipeline:
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as fh:
                 cfg = json.load(fh)
+                if cfg.get("sources"):
+                    configured_sources = [os.path.join(self.repo, s) for s in cfg["sources"] if os.path.exists(os.path.join(self.repo, s))]
+                    if configured_sources:
+                        self.sources = configured_sources
                 self.entrypoint = cfg.get("main_program")
                 # Parse file assignments
                 for log_name, phys in cfg.get("file_assignments", {}).items():
@@ -467,8 +475,11 @@ class NativePipeline:
             has_if = "IF" in kinds
             has_read = "READ" in kinds
             has_write = "WRITE" in kinds
+            has_sql = any(k in ("EXEC_SQL", "EXEC SQL") for k in kinds)
             
-            score = sum([has_move, has_arith, has_if, has_read, has_write])
+            score = sum([has_move, has_arith, has_if, has_read, has_write, has_sql])
+            if self.entrypoint and (os.path.splitext(os.path.basename(src))[0].upper() == self.entrypoint.upper()):
+                score += 10
             
             if score > best_score:
                 best_score = score
@@ -1348,7 +1359,7 @@ public class CicsTransactionContext {
         has_baseline_data_files = any(f not in ("stdout.txt", "stderr.txt", "exit_code.txt") for f in baseline_files)
 
         for rel in sorted(baseline_files):
-            if rel in ("stderr.txt", "exit_code.txt"):
+            if rel in ("stderr.txt", "exit_code.txt") or rel.lower().endswith((".exe", ".json", ".cob", ".cbl", ".cpy", ".so")):
                 continue
 
             if rel not in native_files:
@@ -1375,13 +1386,20 @@ public class CicsTransactionContext {
                             is_logical_match = True
                     except Exception:
                         pass
-                if not is_logical_match:
+                if not is_logical_match and rel != "stdout.txt":
                     # Check for logical equivalence in indexed / relative file structures (e.g. Berkeley DB / VB-ISAM container vs flat record file)
                     # In GnuCOBOL, INDEXED files are stored in B-tree pages (8192 bytes) and RELATIVE files have record slot headers.
-                    # If all non-empty records from Java are present in COBOL's binary ISAM payload, consider the records matched.
-                    lines = [line.strip(b"\r") for line in n_content.split(b"\n") if line.strip(b"\r")]
-                    if lines and all(rec in b_content for rec in lines):
-                        is_logical_match = True
+                    # This only applies to files declared with INDEXED or RELATIVE organization.
+                    is_indexed_or_relative = any(
+                        a.get("organization") in ("INDEXED", "RELATIVE") and
+                        (a.get("assign_path") == rel or a.get("assign_name") == rel or
+                         os.path.basename(a.get("assign_path", "")).upper() == os.path.basename(rel).upper())
+                        for a in getattr(self, "file_assigns", [])
+                    )
+                    if is_indexed_or_relative:
+                        lines = [line.strip(b"\r") for line in n_content.split(b"\n") if line.strip(b"\r")]
+                        if lines and all(rec in b_content for rec in lines):
+                            is_logical_match = True
 
                 if not is_logical_match:
                     msg = f"Content difference in {rel}. Baseline len: {len(b_content)}, Native len: {len(n_content)}"
