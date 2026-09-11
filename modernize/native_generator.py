@@ -2576,7 +2576,10 @@ class NativeStatementTranslator:
                         code_val = "100"
                     elif error:
                         code_val = "-1"
-                    updates.append(f"sqlcode = {code_val};")
+                    if self._get_var_type("SQLCODE") == "BigDecimal":
+                        updates.append(f"sqlcode.assign(new java.math.BigDecimal(\"{code_val}\"));")
+                    else:
+                        updates.append(f"sqlcode = {code_val};")
                 if "SQLSTATE" in self.var_types:
                     state_val = '"00000"'
                     if notfound:
@@ -2590,13 +2593,40 @@ class NativeStatementTranslator:
                 """Use Db2ErrorMapper to map the caught exception to SQLCODE/SQLSTATE."""
                 updates = []
                 if "SQLCODE" in self.var_types:
-                    updates.append(f"sqlcode = com.systema.modernized.Db2ErrorMapper.getSqlCode({e_var});")
+                    if self._get_var_type("SQLCODE") == "BigDecimal":
+                        updates.append(f"sqlcode.assign(java.math.BigDecimal.valueOf(com.systema.modernized.Db2ErrorMapper.getSqlCode({e_var})));")
+                    else:
+                        updates.append(f"sqlcode = com.systema.modernized.Db2ErrorMapper.getSqlCode({e_var});")
                 if "SQLSTATE" in self.var_types:
                     updates.append(f"sqlstate = com.systema.modernized.Db2ErrorMapper.getSqlState({e_var});")
                 if not updates:
                     # No SQLCA vars declared — still set a fallback
                     return ""
                 return "\n            ".join(updates)
+
+            def build_java_params(params):
+                java_params = []
+                for p in params:
+                    if p.startswith("INDICATOR:"):
+                        _, main_var, indicator = p.split(":")
+                        main_expr = self.expr_trans.translate(main_var)
+                        ind_expr = self.expr_trans.translate(indicator)
+                        ind_type = self._get_var_type(indicator, "Integer")
+                        if ind_type == "BigDecimal":
+                            cond = f"({ind_expr}.compareTo(java.math.BigDecimal.valueOf(-1)) == 0)"
+                        else:
+                            cond = f"({to_java_var(indicator)} == -1)"
+                        java_params.append(f"({cond}) ? null : {main_expr}")
+                    else:
+                        val_expr = self.expr_trans.translate(p)
+                        var_name = p
+                        if var_name.startswith(":"):
+                            var_name = var_name[1:]
+                        if self._get_var_type(var_name, "String") == "String":
+                            val_expr = f"({val_expr} != null ? {val_expr}.trim() : null)"
+                        java_params.append(val_expr)
+                params_str = ", ".join(java_params)
+                return (", " + params_str) if params_str else ""
 
             if sql_type in ("COMMIT", "ROLLBACK"):
                 lines.append("try {")
@@ -2631,22 +2661,7 @@ class NativeStatementTranslator:
                     return f"// Error: cursor {cname} not declared"
 
                 sql_str, params = build_param_sql(query_props)
-                java_params = []
-                for p in params:
-                    if p.startswith("INDICATOR:"):
-                        _, main_var, indicator = p.split(":")
-                        java_params.append(f"({to_java_var(indicator)} == -1) ? null : {to_java_var(main_var)}")
-                    else:
-                        val_expr = self.expr_trans.translate(p)
-                        var_name = p
-                        if var_name.startswith(":"):
-                            var_name = var_name[1:]
-                        if self._get_var_type(var_name, "String") == "String":
-                            val_expr = f"({val_expr} != null ? {val_expr}.trim() : null)"
-                        java_params.append(val_expr)
-                params_str = ", ".join(java_params)
-                if params_str:
-                    params_str = ", " + params_str
+                params_str = build_java_params(params)
 
                 lines.append("try {")
                 lines.append(f"    cursor_{cname.lower()} = com.systema.modernized.SpringContextHelper.jdbcTemplate.queryForRowSet(\"{sql_str}\"{params_str});")
@@ -2693,18 +2708,29 @@ class NativeStatementTranslator:
 
                     if i < len(into_indicators) and into_indicators[i]:
                         ind_jvar = to_java_var(into_indicators[i])
+                        ind_type = self._get_var_type(into_indicators[i], "Integer")
                         if is_redef:
                             assignments.append(f"set_{tgt_jvar}({getter});")
+                        elif tgt_type == "BigDecimal":
+                            assignments.append(f"{tgt_jvar}.assign({getter} != null ? {getter} : java.math.BigDecimal.ZERO);")
                         else:
                             assignments.append(f"{tgt_jvar} = {getter};")
                         assignments.append(f"if (cursor_{cname.lower()}.wasNull()) {{")
-                        assignments.append(f"    {ind_jvar} = -1;")
+                        if ind_type == "BigDecimal":
+                            assignments.append(f"    {ind_jvar}.assign(new java.math.BigDecimal(\"-1\"));")
+                        else:
+                            assignments.append(f"    {ind_jvar} = -1;")
                         assignments.append(f"}} else {{")
-                        assignments.append(f"    {ind_jvar} = 0;")
+                        if ind_type == "BigDecimal":
+                            assignments.append(f"    {ind_jvar}.assign(java.math.BigDecimal.ZERO);")
+                        else:
+                            assignments.append(f"    {ind_jvar} = 0;")
                         assignments.append(f"}}")
                     else:
                         if is_redef:
                             assignments.append(f"set_{tgt_jvar}({getter});")
+                        elif tgt_type == "BigDecimal":
+                            assignments.append(f"{tgt_jvar}.assign({getter} != null ? {getter} : java.math.BigDecimal.ZERO);")
                         else:
                             assignments.append(f"{tgt_jvar} = {getter};")
 
@@ -2724,22 +2750,7 @@ class NativeStatementTranslator:
 
             elif sql_type == "SELECT":
                 sql_str, params = build_param_sql(props)
-                java_params = []
-                for p in params:
-                    if p.startswith("INDICATOR:"):
-                        _, main_var, indicator = p.split(":")
-                        java_params.append(f"({to_java_var(indicator)} == -1) ? null : {to_java_var(main_var)}")
-                    else:
-                        val_expr = self.expr_trans.translate(p)
-                        var_name = p
-                        if var_name.startswith(":"):
-                            var_name = var_name[1:]
-                        if self._get_var_type(var_name, "String") == "String":
-                            val_expr = f"({val_expr} != null ? {val_expr}.trim() : null)"
-                        java_params.append(val_expr)
-                params_str = ", ".join(java_params)
-                if params_str:
-                    params_str = ", " + params_str
+                params_str = build_java_params(params)
 
                 into_vars = sql_props.get("into_variables", [])
                 into_indicators = sql_props.get("into_indicators", [])
@@ -2770,18 +2781,29 @@ class NativeStatementTranslator:
 
                     if i < len(into_indicators) and into_indicators[i]:
                         ind_jvar = to_java_var(into_indicators[i])
+                        ind_type = self._get_var_type(into_indicators[i], "Integer")
                         if is_redef:
                             assignments.append(f"set_{tgt_jvar}({getter});")
+                        elif tgt_type == "BigDecimal":
+                            assignments.append(f"{tgt_jvar}.assign({getter} != null ? {getter} : java.math.BigDecimal.ZERO);")
                         else:
                             assignments.append(f"{tgt_jvar} = {getter};")
                         assignments.append(f"if (rs.wasNull()) {{")
-                        assignments.append(f"    {ind_jvar} = -1;")
+                        if ind_type == "BigDecimal":
+                            assignments.append(f"    {ind_jvar}.assign(new java.math.BigDecimal(\"-1\"));")
+                        else:
+                            assignments.append(f"    {ind_jvar} = -1;")
                         assignments.append(f"}} else {{")
-                        assignments.append(f"    {ind_jvar} = 0;")
+                        if ind_type == "BigDecimal":
+                            assignments.append(f"    {ind_jvar}.assign(java.math.BigDecimal.ZERO);")
+                        else:
+                            assignments.append(f"    {ind_jvar} = 0;")
                         assignments.append(f"}}")
                     else:
                         if is_redef:
                             assignments.append(f"set_{tgt_jvar}({getter});")
+                        elif tgt_type == "BigDecimal":
+                            assignments.append(f"{tgt_jvar}.assign({getter} != null ? {getter} : java.math.BigDecimal.ZERO);")
                         else:
                             assignments.append(f"{tgt_jvar} = {getter};")
 
@@ -2802,22 +2824,7 @@ class NativeStatementTranslator:
 
             elif sql_type in ("INSERT", "UPDATE", "DELETE"):
                 sql_str, params = build_param_sql(props)
-                java_params = []
-                for p in params:
-                    if p.startswith("INDICATOR:"):
-                        _, main_var, indicator = p.split(":")
-                        java_params.append(f"({to_java_var(indicator)} == -1) ? null : {to_java_var(main_var)}")
-                    else:
-                        val_expr = self.expr_trans.translate(p)
-                        var_name = p
-                        if var_name.startswith(":"):
-                            var_name = var_name[1:]
-                        if self._get_var_type(var_name, "String") == "String":
-                            val_expr = f"({val_expr} != null ? {val_expr}.trim() : null)"
-                        java_params.append(val_expr)
-                params_str = ", ".join(java_params)
-                if params_str:
-                    params_str = ", " + params_str
+                params_str = build_java_params(params)
 
                 lines.append("try {")
                 lines.append(f"    int rows = com.systema.modernized.SpringContextHelper.jdbcTemplate.update(\"{sql_str}\"{params_str});")

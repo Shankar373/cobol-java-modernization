@@ -319,7 +319,8 @@ def _ensure_end_programs(cobol_code: str) -> str:
         next_pos = matches[i + 1].start()
         section = cobol_code[matches[i].end():next_pos]
         end_prog_pattern = re.compile(rf'END\s+PROGRAM\s+{re.escape(prog_name)}\b', re.IGNORECASE)
-        if not end_prog_pattern.search(section):
+        # If END PROGRAM <prog_name> already exists anywhere in cobol_code, don't insert a duplicate
+        if not end_prog_pattern.search(cobol_code):
             id_div_match = re.search(r'^[ \t]*IDENTIFICATION\s+DIVISION\.', section, re.MULTILINE | re.IGNORECASE)
             insert_idx = matches[i].end() + id_div_match.start() if id_div_match else next_pos
             result.append(cobol_code[last_pos:insert_idx])
