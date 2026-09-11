@@ -14,6 +14,7 @@ import zipfile
 import threading
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # defaults
@@ -26,10 +27,18 @@ COPYBOOK_EXTENSIONS = (".cpy", ".CPY", ".copy", ".COPY")
 EXCLUDE_DIRS = {"generated", "target", "bin", ".git", "__pycache__", "node_modules", "normalized", "_preprocessed"}
 TEXT_EXTENSIONS = {".txt", ".out", ".log", ".rpt", ".csv", ".lst"}
 
-# Docker-out-of-Docker environment redirection for tempfiles
+# Calculated repository root and workspace directories
+PROJECT_ROOT = Path(__file__).resolve().parent
+WORKSPACE_DIR = PROJECT_ROOT / "workspace"
+TMP_DIR = WORKSPACE_DIR / "tmp"
+
+# Container environment redirection for tempfiles
 if os.path.exists("/.dockerenv"):
-    os.makedirs("/app/workspace/tmp", exist_ok=True)
-    tempfile.tempdir = "/app/workspace/tmp"
+    try:
+        TMP_DIR.mkdir(parents=True, exist_ok=True)
+        tempfile.tempdir = str(TMP_DIR)
+    except OSError:
+        pass
 
 # Stage name for dynamic CALL targets that cannot be statically resolved
 DYNAMIC_CALL_MARKER = "DYNAMIC_CALL_REQUIRES_REVIEW"
