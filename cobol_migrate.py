@@ -880,9 +880,10 @@ def logical_indexed_compare(baseline_file, result_file, rel_key, repo_dir, dis,
     except Exception as exc:
         return {"verdict": "UNABLE_TO_COMPARE", "reason": f"sqlite decode: {exc}"}
     if _base is None:
-        if not docker_available():
+        has_host_cobol = bool(shutil.which("cobc"))
+        if not has_host_cobol and not docker_available():
             return {"verdict": "UNABLE_TO_COMPARE",
-                    "reason": "Docker unavailable for GnuCOBOL runtime dump"}
+                    "reason": "Neither host cobc nor Docker available for GnuCOBOL runtime dump"}
         if not os.path.isdir(baseline_dir):
             return {"verdict": "UNABLE_TO_COMPARE",
                     "reason": f"baseline directory missing: {baseline_dir}"}
@@ -1095,20 +1096,54 @@ def dump_indexed_records(repo_dir, baseline_dir, image, rel_key, schema):
 
     Compiles a generated dump program against the baseline data directory and
     returns (records, None), or (None, error) on failure.
+    Prefers native host cobc when available (e.g. in Native Validation environments);
+    falls back to Docker container execution otherwise.
     """
     tmp = tempfile.mkdtemp(prefix="cc_logic_dump_")
     try:
-        with open(os.path.join(tmp, "cclogicdmp.cob"), "w",
-                  encoding="utf-8") as fh:
+        prog_path = os.path.join(tmp, "cclogicdmp.cob")
+        with open(prog_path, "w", encoding="utf-8") as fh:
             fh.write(build_logical_dump_program(schema, rel_key))
-        cmd = ("cobc -x -free /code/cclogicdmp.cob -o /code/cclogicdmp "
-               "&& /code/cclogicdmp")
-        r = docker_run(image, [(tmp, "/code"), (baseline_dir, "/repo")],
-                       "/repo", cmd, shell="sh")
-        if r.returncode != 0:
-            tail = (r.stdout or "") + (r.stderr or "")
-            return None, tail.strip()[-400:]
-        return parse_dump_records(r.stdout or "", schema["layout"]), None
+
+        host_err = ""
+        if shutil.which("cobc"):
+            bin_name = "cclogicdmp.exe" if sys.platform.startswith("win") else "cclogicdmp"
+            bin_path = os.path.join(tmp, bin_name)
+            comp = subprocess.run(["cobc", "-x", "-free", prog_path, "-o", bin_path],
+                                  capture_output=True, text=True, cwd=tmp)
+            if comp.returncode == 0:
+                if not sys.platform.startswith("win"):
+                    try:
+                        os.chmod(bin_path, 0o755)
+                    except Exception:
+                        pass
+                run = subprocess.run([bin_path], capture_output=True, text=True, cwd=baseline_dir)
+                if run.returncode == 0:
+                    return parse_dump_records(run.stdout or "", schema["layout"]), None
+                host_err = (run.stdout or "") + (run.stderr or "")
+            else:
+                host_err = (comp.stderr or comp.stdout or "")
+        else:
+            host_err = "host cobc not in PATH"
+
+        # Fallback to Docker container if available
+        if docker_available():
+            resolved_image = image
+            if not docker_image(resolved_image):
+                for fallback in ["gnucobol:3.1.2", "hurriedreformist/gnucobol:3.1-builder"]:
+                    if docker_image(fallback):
+                        resolved_image = fallback
+                        break
+            cmd = ("cobc -x -free /code/cclogicdmp.cob -o /code/cclogicdmp "
+                   "&& /code/cclogicdmp")
+            r = docker_run(resolved_image, [(tmp, "/code"), (baseline_dir, "/repo")],
+                           "/repo", cmd, shell="sh")
+            if r.returncode == 0:
+                return parse_dump_records(r.stdout or "", schema["layout"]), None
+            docker_err = ((r.stdout or "") + (r.stderr or "")).strip()[-400:]
+            return None, f"host cobc: {host_err.strip()[-200:]}; docker: {docker_err}"
+
+        return None, host_err.strip()[-400:]
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
