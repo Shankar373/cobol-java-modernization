@@ -101,11 +101,12 @@ def sh(cmd, timeout=None, **kw):
 
     proc = None
     try:
+        use_text = kw.pop("text", True)
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=use_text,
             **kw
         )
         if pipeline:
@@ -1206,6 +1207,29 @@ def ensure_image(image, pull):
     return sh(["docker", "pull", image], timeout=120).returncode == 0
 
 
+def make_dir_writable(path):
+    if not os.path.exists(path):
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            pass
+    try:
+        os.chmod(path, 0o777)
+        for root, dirs, files in os.walk(path):
+            for d in dirs:
+                try:
+                    os.chmod(os.path.join(root, d), 0o777)
+                except Exception:
+                    pass
+            for f in files:
+                try:
+                    os.chmod(os.path.join(root, f), 0o666)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 def docker_run(image, mounts, workdir, cmd, shell="bash", timeout=None, network="none"):
     ok, err = validate_docker_configuration()
     if not ok:
@@ -1234,6 +1258,7 @@ def docker_run(image, mounts, workdir, cmd, shell="bash", timeout=None, network=
             cmd = " && ".join(symlink_cmds) + (f" && {cd_back}" if cd_back else "") + " && " + cmd
     else:
         for host, guest in mounts:
+            make_dir_writable(host)
             full += ["-v", f"{posix(os.path.abspath(host))}:{guest}"]
             
     if workdir:
@@ -2091,14 +2116,21 @@ def transpile(repo_dir, sources, copybook_dirs, fmt):
 
 
 def preserve_runtime(out_dir):
+    jar = os.path.join(out_dir, "libcobj.jar")
+    # Stream the jar directly from container stdout to avoid bind-mount permission issues
+    r = sh(["docker", "run", "--rm", DEFAULT_COBJ_IMAGE, "cat", COBJ_LIB_JAR], text=False)
+    if r.returncode == 0 and r.stdout:
+        with open(jar, "wb") as f:
+            f.write(r.stdout)
+        return {"path": jar, "size": os.path.getsize(jar), "sha256": sha256_file(jar)}, ""
     exists = docker_run(DEFAULT_COBJ_IMAGE, [], None, f"ls -la {COBJ_LIB_JAR}")
     if exists.returncode != 0:
         return None, exists.stdout + exists.stderr
+    make_dir_writable(out_dir)
     r = docker_run(DEFAULT_COBJ_IMAGE, [(out_dir, "/target")], None,
                    f"cp {COBJ_LIB_JAR} /target/libcobj.jar")
     if r.returncode != 0:
         return None, r.stdout + r.stderr
-    jar = os.path.join(out_dir, "libcobj.jar")
     return {"path": jar, "size": os.path.getsize(jar), "sha256": sha256_file(jar)}, ""
 
 
