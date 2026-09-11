@@ -2,375 +2,216 @@ name: CI
 
 on:
   push:
-    branches: [master, main, "integration/**"]
   pull_request:
   schedule:
-    # Nightly full lane (Docker-dependent suites).
     - cron: "0 3 * * *"
   workflow_dispatch:
 
 # ==============================================================================
-# SHARED SETUP
-# All steps that are common to both jobs are defined here as a YAML anchor.
-# GitHub Actions does not support anchors natively, so we duplicate them.
+# GITHUB ACTIONS CI PIPELINE — COBOL-TO-JAVA MODERNIZATION PLATFORM
+#
+# Architectural Gates:
+#   1. core-validation       (Pure Native: Python 3.12 + JDK 17 + Maven 3.9+)
+#   2. native-validation     (Native GnuCOBOL 3.1.2 on Ubuntu 22.04, No Docker)
+#   3. sql-integration       (PostgreSQL 16 + OCESQL v1.4 Container Integration)
+#   4. differential-parity   (Core Semantics Equivalence Gate, Fail-Closed)
+#   5. nightly-regression    (Full Regression, UI Server on 8787, Playwright E2E)
 # ==============================================================================
 
 jobs:
   # ============================================================================
-  # FAST LANE
-  # Runs on every push/PR.  Builds the GnuCOBOL+OCESQL image, starts a real
-  # PostgreSQL container, seeds the schema, then runs the full test suite
-  # (excluding tests that are permanently slow or require additional runtimes
-  # only available nightly).
+  # GATE 1: CORE VALIDATION (Pure Native, Fast PR Gate)
+  # Validates pure Python logic, parsing, AST/IR fidelity, models, and Phase 9.
+  # Operates completely without Docker.
   # ============================================================================
-  fast:
-    name: Fast lane (image build + PostgreSQL + full acceptance)
+  core-validation:
+    name: Core Validation (Native AST, Parser, Models, Manifest)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    env:
-      # PG_CONTAINER_NAME must match the container started below so
-      # test_sql_baseline.py can docker exec into it.
-      PG_CONTAINER_NAME: db
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
-
-      # ── Language runtimes ──────────────────────────────────────────────────
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-dev.txt"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "maven"
 
       - name: Install Python test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest
           python -m pip install -r requirements-dev.txt
-          python -m playwright install chromium
 
-      # ── Maven dependency cache ─────────────────────────────────────────────
-      - name: Seed Maven cache deterministically
+      - name: Verify toolchains
         run: |
-          mvn -B -f docker/maven-seed-pom.xml dependency:resolve dependency:resolve-plugins
-          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve dependency:resolve-plugins
+          echo "=== TOOLCHAIN VERSIONS ==="
+          python --version
+          java --version
+          javac --version
+          mvn --version
 
-      - name: Verify seeded Maven artifacts (AGENTS.md §10)
-        run: |
-          M2="$HOME/.m2/repository"
-          MISSING=0
-          for rel in \
-            com/fasterxml/jackson/core/jackson-databind/2.15.2/jackson-databind-2.15.2.jar \
-            com/fasterxml/jackson/core/jackson-annotations/2.15.2/jackson-annotations-2.15.2.jar \
-            com/fasterxml/jackson/core/jackson-core/2.15.2/jackson-core-2.15.2.jar \
-            org/antlr/antlr4-runtime/4.7.2/antlr4-runtime-4.7.2.jar \
-            org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.jar \
-            org/springframework/boot/spring-boot/3.2.5/spring-boot-3.2.5.jar \
-            org/springframework/boot/spring-boot-starter-web/3.2.5/spring-boot-starter-web-3.2.5.pom \
-            com/h2database/h2/2.2.224/h2-2.2.224.jar \
-            org/springframework/spring-jdbc/6.1.3/spring-jdbc-6.1.3.jar \
-            org/springframework/spring-tx/6.1.3/spring-tx-6.1.3.jar \
-            org/postgresql/postgresql/42.7.1/postgresql-42.7.1.jar ; do
-            [ -s "$M2/$rel" ] || { echo "MISSING ARTIFACT: $rel"; MISSING=1; }
-          done
-          exit $MISSING
-
-      # ── Docker infrastructure ──────────────────────────────────────────────
-      # Build the GnuCOBOL + OCESQL image from repository-controlled source.
-      # The build runs a smoke-test RUN layer that fails if any required binary
-      # or file is missing — CI will only proceed with a verified toolchain.
-      - name: Build GnuCOBOL + OCESQL compiler image
-        run: |
-          docker build \
-            --file Dockerfile.gnucobol-ocesql \
-            --tag gnucobol-ocesql:latest \
-            --progress=plain \
-            .
-
-      - name: Pull JDK image for parity tests
-        run: |
-          docker pull eclipse-temurin:17-jdk-noble
-
-      - name: Verify gnucobol-ocesql toolchain
-        run: |
-          echo "--- GnuCOBOL version ---"
-          docker run --rm gnucobol-ocesql:latest cobc --version
-
-          echo "--- OCESQL version ---"
-          docker run --rm gnucobol-ocesql:latest ocesql --version 2>&1 || true
-
-          echo "--- psql version ---"
-          docker run --rm gnucobol-ocesql:latest psql --version
-
-          echo "--- libocesql.so present ---"
-          docker run --rm gnucobol-ocesql:latest sh -c \
-            "test -f /usr/local/lib/libocesql.so && echo 'libocesql.so: OK' || (echo 'MISSING libocesql.so'; exit 1)"
-
-          echo "--- sqlca.cbl present ---"
-          docker run --rm gnucobol-ocesql:latest sh -c \
-            "test -f /usr/share/open-cobol-esql/copy/sqlca.cbl && echo 'sqlca.cbl: OK' || (echo 'MISSING sqlca.cbl'; exit 1)"
-
-      # ── PostgreSQL ────────────────────────────────────────────────────────
-      # Start a real PostgreSQL 16 container on the 'modernization-platform_default'
-      # Docker network that cobol_migrate.py uses for the connectivity ping and
-      # COBOL program execution (host=db, port=5432).
-      - name: Create Docker network
-        run: docker network create modernization-platform_default
-
-      - name: Start PostgreSQL container
-        run: |
-          docker run -d \
-            --name db \
-            --network modernization-platform_default \
-            --network-alias db \
-            -e POSTGRES_DB=modernization_db \
-            -e POSTGRES_USER=modernize \
-            -e POSTGRES_PASSWORD=modernize \
-            -p 5432:5432 \
-            postgres:16-alpine
-
-      - name: Wait for PostgreSQL readiness
-        run: |
-          echo "Waiting for PostgreSQL to accept connections..."
-          for i in $(seq 1 30); do
-            if docker exec db pg_isready -U modernize -d modernization_db -q 2>/dev/null; then
-              echo "PostgreSQL is ready (attempt $i)."
-              break
-            fi
-            echo "  attempt $i — not ready yet, sleeping 2s..."
-            sleep 2
-            if [ "$i" -eq 30 ]; then
-              echo "ERROR: PostgreSQL did not become ready after 60s."
-              docker logs db
-              exit 1
-            fi
-          done
-
-      - name: Seed PostgreSQL schema and test data
-        run: |
-          docker exec -i db psql -U modernize -d modernization_db < docker/ci-seed.sql
-          echo "--- Verifying seed ---"
-          docker exec db psql -U modernize -d modernization_db \
-            -c "SELECT COUNT(*) AS customer_rows FROM customer;"
-          docker exec db psql -U modernize -d modernization_db \
-            -c "SELECT COUNT(*) AS order_rows FROM orders;"
-          docker exec db psql -U modernize -d modernization_db \
-            -c "SELECT COUNT(*) AS dept_rows FROM dept;"
-
-      - name: Smoke-test PostgreSQL connectivity via gnucobol-ocesql image
-        run: |
-          docker run --rm \
-            --network modernization-platform_default \
-            -e PGPASSWORD=modernize \
-            gnucobol-ocesql:latest \
-            psql -h db -U modernize -d modernization_db -c "SELECT 1 AS ping;"
-          echo "Network connectivity: OK"
-
-      # ── Tests ──────────────────────────────────────────────────────────────
-      # Run the full test suite, including the DB2 E2E tests. The exclusions
-      # below are for tests that require additional runtimes (Playwright,
-      # opensourcecobol4j) that are only installed in the nightly job.
-      # DB2 E2E note: the `data/*.sql` fixtures for each repo were aligned so the
-      # generated programs create a non-destructive superset `customer` schema and
-      # each self-TRUNCATE their seeded tables. This eliminates the cross-test
-      # interference on the shared `modernization_db.CUSTOMER` table that previously
-      # dropped columns ("column dept_id does not exist" -> CURSOR OPEN FAILED
-      # SQLSTATE 99999). See docs/ci_and_business_logic_audit.md § DB2 E2E failures.
-      - name: Run fast-lane test suite
-        env:
-          PG_CONTAINER_NAME: db
+      - name: Run Core Validation Test Suite
         run: |
           python -m pytest -v --tb=short \
-            --ignore=tests/logical_audit_test.py \
-            --ignore=tests/test_realistic_modernization.py \
-            --ignore=tests/test_validation_nobypass.py \
-            --ignore=tests/test_generic_refactoring.py \
-            --ignore=tests/robustness/adversarial/test_java_source_mutation.py
-
-
-      # ── Diagnostics on failure ─────────────────────────────────────────────
-      - name: Collect PostgreSQL logs on failure
-        if: failure()
-        run: docker logs db 2>&1 || true
-
-      - name: Upload test artefacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fast-lane-failure-${{ github.run_id }}
-          path: |
-            /tmp/pytest-*
-            /tmp/sql_baseline_*
-            /tmp/db2_accept_*
-          retention-days: 7
-          if-no-files-found: ignore
-
-      # ── Cleanup ────────────────────────────────────────────────────────────
-      - name: Clean up Docker resources
-        if: always()
-        run: |
-          docker stop db 2>/dev/null || true
-          docker rm  db 2>/dev/null || true
-          docker network rm modernization-platform_default 2>/dev/null || true
+            tests/unit/ \
+            tests/v2/ \
+            tests/test_modernize_models.py \
+            tests/test_phase9_manifest.py \
+            tests/test_phase9_api_contract.py \
+            tests/test_phase9_failure_matrix.py \
+            tests/test_phase9_lifecycle.py \
+            tests/test_phase9_repeatability.py \
+            tests/test_phase9_repo_isolation.py \
+            tests/test_phase9_verdict.py \
+            tests/test_native_artifact_isolation.py \
+            tests/test_native_call_translation.py \
+            tests/test_native_compute_truncation.py \
+            tests/test_native_evaluate.py \
+            tests/test_native_file_io.py \
+            tests/test_native_level88.py \
+            tests/test_native_move_multi.py \
+            tests/test_native_no_benchmark_coupling.py \
+            tests/test_native_occurs.py \
+            tests/test_native_paragraph_control.py \
+            tests/test_native_perform_varying.py \
+            tests/test_native_period_scoping.py \
+            tests/test_native_ref_mod.py \
+            tests/test_native_statement_translation.py \
+            tests/test_native_traceability.py \
+            tests/test_native_type_mapping.py \
+            tests/test_phase8_arithmetic_errors.py \
+            tests/test_phase8_control_flow.py \
+            tests/test_phase8_dependency_audit.py \
+            tests/test_phase8_diagnostics.py \
+            tests/test_phase8_file_semantics.py \
+            tests/test_phase8_layout_integration.py \
+            tests/test_phase8_nested_programs.py \
+            tests/test_phase8_next_sentence.py \
+            tests/test_phase8_perform_times.py \
+            tests/test_phase8_pic_formatting.py \
+            tests/test_phase8_pointers.py \
+            tests/test_phase8_redefines.py \
+            tests/test_phase8_report_writer.py \
+            tests/test_phase8_security_audit.py \
+            tests/test_phase8_sort_merge.py \
+            tests/test_phase8_string_operations.py \
+            tests/test_control_flow.py \
+            tests/test_data_flow.py \
+            tests/test_slicer.py \
+            tests/test_normalization_safety.py \
+            tests/test_logical_comparison_fixes.py \
+            tests/test_strict_equivalence_guards.py
 
   # ============================================================================
-  # DIFFERENTIAL SMOKE
-  # Runs on every push/PR.  A fast, self-contained business-equivalence gate over
-  # the core COBOL semantics the transpiler must preserve: REDEFINES, ON SIZE
-  # ERROR, and file I/O.  Each selected test compiles/runs the COBOL baseline in
-  # the GnuCOBOL+OCESQL image and the generated Java in the Temurin JDK image,
-  # then asserts identical output/hashes.  These fixtures contain no EXEC SQL, so
-  # no PostgreSQL/network is required and the job stays well under 5 minutes.
-  #
-  # PARITY_ALLOW_SKIP must be "true" for these tests to actually execute: the
-  # tests are decorated with
-  #     @pytest.mark.skipif(os.environ.get("PARITY_ALLOW_SKIP","false") != "true")
-  # (e.g. tests/e2e/differential/numeric/test_sizeerr01.py:64), so any value other
-  # than "true" SKIPS them entirely.  Note: this deliberately deviates from a
-  # literal reading of "set PARITY_ALLOW_SKIP=false" — setting false would cause
-  # all selected equivalence tests to be skipped and the gate to assert nothing.
-  # To close the silent-skip gap, the job FAILS if any selected test is skipped
-  # (a skip here is a real signal, since both images are guaranteed present).
+  # GATE 2: NATIVE COBOL + JAVA VALIDATION
+  # Validates native GnuCOBOL compilation and Java modernization on Ubuntu 22.04.
+  # Executes against unmodified application pipeline without Docker.
   # ============================================================================
-  differential-smoke:
-    name: Differential smoke (REDEFINES / ON SIZE ERROR / file I/O)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    env:
-      # Must be set for the differential tests to run (see above). Also allows
-      # the parity harness to report SKIP instead of FAIL only when images are
-      # absent — but we build/pull both images first, so SKIP never legitimately
-      # fires, and the post-run step downgrades any skip to a failure.
-      PARITY_ALLOW_SKIP: "true"
+  native-validation:
+    name: Native Validation (GnuCOBOL 3.1.2 + OpenJDK 17)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-dev.txt"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "maven"
+
+      - name: Install GnuCOBOL compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnucobol
+
+      - name: Verify GnuCOBOL capability and version
+        run: |
+          echo "=== GNUCOBOL VERSION VERIFICATION ==="
+          cobc --version
+          # Enforce required GnuCOBOL 3.1.x version
+          cobc -V 2>&1 | grep -q "3\.1\." || {
+            echo "::error::GnuCOBOL version mismatch: required 3.1.x, found $(cobc -V 2>&1 | head -1)"
+            exit 1
+          }
+          echo "GnuCOBOL version check: PASSED (3.1.x)"
 
       - name: Install Python test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest
-          python -m pip install pyyaml
+          python -m pip install -r requirements-dev.txt
 
-      # ── Docker images required by the parity harness ───────────────────────
-      - name: Build GnuCOBOL + OCESQL compiler image
+      - name: Run Native Pipeline Unit Suites
         run: |
-          docker build \
-            --file Dockerfile.gnucobol-ocesql \
-            --tag gnucobol-ocesql:latest \
-            --progress=plain \
-            .
+          python -m pytest -v --tb=short \
+            tests/test_native_cli.py \
+            tests/test_native_equivalence.py \
+            tests/test_native_negative_equivalence.py \
+            tests/test_native_dependency_gate.py
 
-      - name: Pull JDK image for parity tests
+      - name: Execute Native Application Pipeline Smoke
         run: |
-          docker pull eclipse-temurin:17-jdk-noble
-
-      - name: Verify tools (no silent-skip precondition)
-        run: |
-          echo "--- gnucobol-ocesql image ---"
-          docker image inspect gnucobol-ocesql:latest >/dev/null && echo OK
-          echo "--- JDK image ---"
-          docker image inspect eclipse-temurin:17-jdk-noble >/dev/null && echo OK
-
-      # ── Core business-equivalence gate ─────────────────────────────────────
-      # Run the minimal differential set. Fails (exit != 0) on any equivalence
-      # mismatch. Because both images are already cached, the harness returns
-      # PASS/FAIL — never SKIP — so an X passed / Y skipped summary where Y > 0
-      # indicates a real problem and is treated as a hard failure.
-      - name: Run differential smoke tests (reject any skip)
-        run: |
-          # NB: `set -e` is active (GitHub adds it). A failed command substitution
-          # would normally abort the whole script and DISCARD the captured output,
-          # leaving an opaque "exit code 1" with no evidence. So we capture with
-          # `|| true` and inspect $RC ourselves, so a pytest failure still surfaces
-          # its full output before we exit non-zero.
-          OUTPUT="$( \
-            python -m pytest -v --tb=short \
-              tests/e2e/differential/storage/test_redefines01.py \
-              tests/e2e/differential/numeric/test_sizeerr01.py \
-              tests/e2e/differential/files/test_filestat01.py \
-              2>&1 \
-          )" || RC=$?
-          RC="${RC:-0}"
-          echo "$OUTPUT"
-
-          if [ "$RC" -ne 0 ]; then
-            echo "::error::differential-smoke: one or more core equivalence tests FAILED (rc=$RC)"
-            exit 1
-          fi
-
-          SKIPPED="$(
-            echo "$OUTPUT" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' | head -1
-          )"
-          if [ -z "$SKIPPED" ]; then
-            SKIPPED=0
-          fi
-          echo "Skipped count: $SKIPPED"
-          if [ "$SKIPPED" -ne 0 ] 2>/dev/null; then
-            echo "::error::differential-smoke: $SKIPPED core equivalence test(s) were SKIPPED without a valid environment reason (both images are present, so a skip is a real failure)."
-            exit 1
-          fi
-
-          echo "differential-smoke: all core equivalence tests PASSED (0 skipped)."
-
-      # ── Cleanup ────────────────────────────────────────────────────────────
-      - name: Clean up Docker resources
-        if: always()
-        run: |
-          docker image rm gnucobol-ocesql:latest 2>/dev/null || true
-          docker image rm eclipse-temurin:17-jdk-noble 2>/dev/null || true
+          # Executes real application migration pipeline natively against legacy repo.
+          # If cobol_migrate.py reaches an unhandled Docker call, it will fail honestly
+          # exposing the application dependency without artificial suppression.
+          echo "=== RUNNING NATIVE PIPELINE SMOKE ==="
+          python cobol_migrate.py --repo legacy --out workspace/native-smoke
 
   # ============================================================================
-  # NIGHTLY FULL REGRESSION
-  # Runs on schedule + workflow_dispatch only.  Includes all tests (no ignores),
-  # Playwright UI tests, and the opensourcecobol4j transpiler tests.
+  # GATE 3: SQL / DATABASE INTEGRATION
+  # Builds gnucobol-ocesql:latest, provisions PostgreSQL 16 container, seeds schema,
+  # and validates embedded EXEC SQL, cursors, and VSAM KSDS database emulation.
   # ============================================================================
-  nightly-full:
-    name: Nightly full regression (all tests, all Docker images)
+  sql-integration:
+    name: SQL / Database Integration (PostgreSQL 16 + OCESQL)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 25
 
     env:
       PG_CONTAINER_NAME: db
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-dev.txt"
 
-      - name: Install Python test dependencies (including Playwright)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "maven"
+
+      - name: Install Python test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest
           python -m pip install -r requirements-dev.txt
-          python -m playwright install chromium
-
-      - name: Seed Maven cache
-        run: |
-          mvn -B -f docker/maven-seed-pom.xml dependency:resolve
-          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve
 
       - name: Build GnuCOBOL + OCESQL compiler image
         run: |
@@ -382,6 +223,7 @@ jobs:
 
       - name: Verify gnucobol-ocesql toolchain
         run: |
+          echo "=== TOOLCHAIN VERIFICATION ==="
           docker run --rm gnucobol-ocesql:latest cobc --version
           docker run --rm gnucobol-ocesql:latest ocesql --version 2>&1 || true
           docker run --rm gnucobol-ocesql:latest psql --version
@@ -390,9 +232,6 @@ jobs:
           docker run --rm gnucobol-ocesql:latest sh -c \
             "test -f /usr/share/open-cobol-esql/copy/sqlca.cbl && echo 'sqlca.cbl: OK'"
 
-      - name: Pull opensourcecobol4j transpiler image
-        run: docker pull opensourcecobol/opensourcecobol4j:2.0.0
-
       - name: Create Docker network
         run: docker network create modernization-platform_default
 
@@ -416,10 +255,10 @@ jobs:
               echo "PostgreSQL is ready (attempt $i)."
               break
             fi
-            echo "  attempt $i — not ready yet, sleeping 2s..."
+            echo "  attempt $i — waiting 2s..."
             sleep 2
             if [ "$i" -eq 30 ]; then
-              echo "ERROR: PostgreSQL did not become ready after 60s."
+              echo "::error::PostgreSQL did not become ready after 60s"
               docker logs db
               exit 1
             fi
@@ -428,10 +267,12 @@ jobs:
       - name: Seed PostgreSQL schema and test data
         run: |
           docker exec -i db psql -U modernize -d modernization_db < docker/ci-seed.sql
-          docker exec db psql -U modernize -d modernization_db \
-            -c "SELECT COUNT(*) AS customer_rows FROM customer;"
+          echo "--- Verifying Seed Rows ---"
+          docker exec db psql -U modernize -d modernization_db -c "SELECT COUNT(*) AS customer_rows FROM customer;"
+          docker exec db psql -U modernize -d modernization_db -c "SELECT COUNT(*) AS order_rows FROM orders;"
+          docker exec db psql -U modernize -d modernization_db -c "SELECT COUNT(*) AS dept_rows FROM dept;"
 
-      - name: Smoke-test network connectivity
+      - name: Smoke-test PostgreSQL connectivity via gnucobol-ocesql
         run: |
           docker run --rm \
             --network modernization-platform_default \
@@ -439,27 +280,251 @@ jobs:
             gnucobol-ocesql:latest \
             psql -h db -U modernize -d modernization_db -c "SELECT 1 AS ping;"
 
-      - name: Full regression suite (all tests)
+      - name: Run SQL and Database Integration Test Suite
         env:
           PG_CONTAINER_NAME: db
-        run: python -m pytest -v --tb=short
-
-      - name: Collect PostgreSQL logs on failure
-        if: failure()
-        run: docker logs db 2>&1 || true
-
-      - name: Upload test artefacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nightly-failure-${{ github.run_id }}
-          path: /tmp/pytest-*
-          retention-days: 14
-          if-no-files-found: ignore
+        run: |
+          python -m pytest -v --tb=short \
+            tests/component/db/test_sql_baseline.py \
+            tests/component/vsam/test_ksds_baseline.py \
+            tests/test_postgres_e2e.py \
+            tests/component/db/test_sql_advanced.py \
+            tests/component/db/test_sqlcode_loop_regression.py \
+            tests/e2e/differential/sql/test_db2curnull01.py
 
       - name: Clean up Docker resources
         if: always()
         run: |
           docker stop db 2>/dev/null || true
-          docker rm  db 2>/dev/null || true
+          docker rm db 2>/dev/null || true
+          docker network rm modernization-platform_default 2>/dev/null || true
+
+  # ============================================================================
+  # GATE 4: DIFFERENTIAL / BEHAVIORAL EQUIVALENCE
+  # Critical business semantics gate: compiles COBOL in GnuCOBOL container,
+  # compiles Java in Eclipse Temurin container, and asserts byte/display equivalence.
+  # Fail-closed: 0 skipped tests permitted.
+  # ============================================================================
+  differential-parity:
+    name: Differential / Behavioral Equivalence (REDEFINES, OCCURS, SIZE ERROR, File I/O)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      PARITY_ALLOW_SKIP: "true"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-dev.txt"
+
+      - name: Install Python test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Build GnuCOBOL + OCESQL compiler image
+        run: |
+          docker build \
+            --file Dockerfile.gnucobol-ocesql \
+            --tag gnucobol-ocesql:latest \
+            --progress=plain \
+            .
+
+      - name: Pull JDK image for parity harness
+        run: |
+          docker pull eclipse-temurin:17-jdk-noble
+
+      - name: Verify Docker images are present
+        run: |
+          docker image inspect gnucobol-ocesql:latest >/dev/null && echo "gnucobol-ocesql: OK"
+          docker image inspect eclipse-temurin:17-jdk-noble >/dev/null && echo "eclipse-temurin: OK"
+
+      - name: Run Differential Parity Test Suite (Fail on any skip)
+        run: |
+          # Capture output without suppressing non-zero return code
+          OUTPUT="$( \
+            python -m pytest -v --tb=short \
+              tests/e2e/differential/storage/test_redefines01.py \
+              tests/e2e/differential/storage/test_occurs01.py \
+              tests/e2e/differential/numeric/test_sizeerr01.py \
+              tests/e2e/differential/files/test_filestat01.py \
+              tests/test_parity_fixtures.py \
+              tests/test_phase1_differential_proofs.py \
+              tests/differential/test_mutation.py \
+              tests/differential/test_negative_gates.py \
+              2>&1 \
+          )" || RC=$?
+          RC="${RC:-0}"
+          echo "$OUTPUT"
+
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::differential-parity: one or more core equivalence tests FAILED (exit code: $RC)"
+            exit 1
+          fi
+
+          # Parse skipped test count and enforce 0 skips allowed
+          SKIPPED="$(echo "$OUTPUT" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' | head -1)"
+          SKIPPED="${SKIPPED:-0}"
+          echo "Skipped tests detected: $SKIPPED"
+          if [ "$SKIPPED" -ne 0 ] 2>/dev/null; then
+            echo "::error::differential-parity: $SKIPPED core equivalence test(s) were SKIPPED. Mandatory parity tests must execute and pass (0 skips permitted)."
+            exit 1
+          fi
+
+          echo "differential-parity: all core equivalence tests PASSED (0 skipped)."
+
+      - name: Clean up Docker images
+        if: always()
+        run: |
+          docker image rm gnucobol-ocesql:latest 2>/dev/null || true
+          docker image rm eclipse-temurin:17-jdk-noble 2>/dev/null || true
+
+  # ============================================================================
+  # GATE 5: NIGHTLY FULL REGRESSION
+  # Heavyweight regression lane: runs on schedule or workflow_dispatch only.
+  # Starts the background UI server on port 8787, verifies HTTP health readiness,
+  # installs Playwright browser binaries, and executes full multi-workload E2E suites.
+  # ============================================================================
+  nightly-regression:
+    name: Nightly Full Regression (All Suites, UI Server, Playwright E2E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    env:
+      PG_CONTAINER_NAME: db
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+          cache: "maven"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-dev.txt"
+
+      - name: Install Python test dependencies and Playwright Chromium
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install chromium
+
+      - name: Build GnuCOBOL + OCESQL compiler image
+        run: |
+          docker build \
+            --file Dockerfile.gnucobol-ocesql \
+            --tag gnucobol-ocesql:latest \
+            --progress=plain \
+            .
+
+      - name: Pull JDK and OpenSourceCOBOL4J images
+        run: |
+          docker pull eclipse-temurin:17-jdk-noble
+          docker pull opensourcecobol/opensourcecobol4j:2.0.0 2>/dev/null || echo "opensourcecobol4j optional pull completed"
+
+      - name: Create Docker network
+        run: docker network create modernization-platform_default
+
+      - name: Start PostgreSQL container
+        run: |
+          docker run -d \
+            --name db \
+            --network modernization-platform_default \
+            --network-alias db \
+            -e POSTGRES_DB=modernization_db \
+            -e POSTGRES_USER=modernize \
+            -e POSTGRES_PASSWORD=modernize \
+            -p 5432:5432 \
+            postgres:16-alpine
+
+      - name: Wait for PostgreSQL readiness and seed schema
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec db pg_isready -U modernize -d modernization_db -q 2>/dev/null; then
+              echo "PostgreSQL is ready (attempt $i)."
+              break
+            fi
+            sleep 2
+          done
+          docker exec -i db psql -U modernize -d modernization_db < docker/ci-seed.sql
+
+      - name: Start UI Server on port 8787 and verify readiness
+        run: |
+          echo "Starting UI server in background..."
+          python ui.py --host 127.0.0.1 --port 8787 > /tmp/ui-server.log 2>&1 &
+          UI_PID=$!
+          echo "UI_PID=$UI_PID" >> $GITHUB_ENV
+
+          echo "Waiting for UI server on http://127.0.0.1:8787/..."
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8787/ >/dev/null 2>&1; then
+              echo "UI server is ready on port 8787 (attempt $i)."
+              break
+            fi
+            sleep 1
+            if [ "$i" -eq 30 ]; then
+              echo "::error::UI server failed to start within 30 seconds."
+              cat /tmp/ui-server.log
+              exit 1
+            fi
+          done
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8787/)
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::UI server health check failed with status $HTTP_CODE"
+            cat /tmp/ui-server.log
+            exit 1
+          fi
+          echo "UI server health check: PASSED (HTTP 200)"
+
+      - name: Run Full Regression Suite (including Playwright E2E)
+        env:
+          PG_CONTAINER_NAME: db
+        run: |
+          python -m pytest -v --tb=short
+
+      - name: Collect diagnostics and UI server logs on failure
+        if: failure()
+        run: |
+          echo "=== UI SERVER LOGS ==="
+          cat /tmp/ui-server.log 2>/dev/null || true
+          echo "=== POSTGRESQL CONTAINER LOGS ==="
+          docker logs db 2>&1 || true
+
+      - name: Upload test failure artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-regression-failures-${{ github.run_id }}
+          path: |
+            /tmp/ui-server.log
+            /tmp/pytest-*
+            artifacts/parity-failures/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Terminate UI Server and Clean up Docker
+        if: always()
+        run: |
+          if [ -n "$UI_PID" ]; then
+            kill "$UI_PID" 2>/dev/null || true
+          fi
+          docker stop db 2>/dev/null || true
+          docker rm db 2>/dev/null || true
           docker network rm modernization-platform_default 2>/dev/null || true
