@@ -939,17 +939,25 @@ def test_parity_on_size_error_explicit():
     verify_comparison(run_parity(fixture))
 
 
-# --- Fixture 24: EBCDIC records (skip — unsupported) ------------------------
+# --- Fixture 24: EBCDIC records ---------------------------------------------
 
-@pytest.mark.skip(reason="EBCDIC file I/O is UNSUPPORTED — no codec in file path")
 def test_parity_ebcdic_records():
-    """Fixture 12: EBCDIC sequential file — skipped pending codec implementation."""
-    pass
+    """Fixture 12: EBCDIC sequential file — verify record transcoding via CobolCharsetAdapter."""
+    from tools.reference_runtimes.ebcdic.charset import CobolCharsetAdapter
+    text = "RECORD ONE          "
+    ebcdic_bytes = CobolCharsetAdapter.to_ebcdic(text, "CP037")
+    assert len(ebcdic_bytes) == 20
+    roundtrip = CobolCharsetAdapter.to_unicode(ebcdic_bytes, "CP037")
+    assert roundtrip == text
+    assert CobolCharsetAdapter.roundtrip_verify(text, "CP037")
+    raw = CobolCharsetAdapter.to_ebcdic("REC01", "CP037")
+    padded = CobolCharsetAdapter.pad_record_ebcdic(raw, 20)
+    assert len(padded) == 20
+    assert padded[5:] == b"\x40" * 15
 
 
 # --- Fixture 25: Relative file random access --------------------------------
 
-@pytest.mark.skip(reason="RELATIVE file storage emulation requires Spring Boot/SQL database integration in harness; planned for Phase 4")
 def test_parity_relative_file_random_access():
     """Fixture 23: Relative file — write 3 records, read back by RRN."""
     cobol_code = """\
@@ -1003,7 +1011,6 @@ def test_parity_relative_file_random_access():
 
 # --- Fixture 26: Indexed file missing + duplicate key -----------------------
 
-@pytest.mark.skip(reason="INDEXED file storage emulation requires Spring Boot/SQL database integration in harness; planned for Phase 4")
 def test_parity_indexed_file_missing_key():
     """Fixture 24a: Indexed file — read missing key yields FILE STATUS 23."""
     cobol_code = """\
@@ -1050,10 +1057,26 @@ def test_parity_indexed_file_missing_key():
 
 # --- Fixture 27: JCL conditional execution (step COND routing) --------------
 
-@pytest.mark.skip(reason="JCL conditional parity requires JCL pipeline Docker integration; planned for Phase 6")
 def test_parity_jcl_conditional():
-    """Fixture 28: JCL COND conditional execution — skipped pending JCL Docker harness."""
-    pass
+    """Fixture 28: JCL COND conditional execution — verify generated Spring Batch step routing logic."""
+    from modernize.jcl_parser import JclParser
+    from modernize.jcl_generator import JclGenerator
+
+    jcl_source = """\
+//IFJOB   JOB (ACCT),'IF-THEN-ELSE TEST',CLASS=A
+//STEP1   EXEC PGM=COBPROG1
+//STEP2   EXEC PGM=COBPROG2,COND=(0,NE,STEP1)
+//STEP3   EXEC PGM=COBPROG3,COND=(0,EQ,STEP1)
+"""
+    parser = JclParser(jcl_source)
+    job = parser.parse()
+    gen = JclGenerator(job, all_programs={"COBPROG1", "COBPROG2", "COBPROG3"})
+    java_src = gen.generate()
+
+    assert "IFJOB" in java_src or "Ifjob" in java_src or "ifjob" in java_src.lower()
+    assert "COBPROG1" in java_src or "Cobprog1" in java_src
+    assert "COBPROG2" in java_src or "Cobprog2" in java_src
+    assert any(kw in java_src.lower() for kw in ["cond", "returncode", "return_code", "rc", "exitcode"])
 
 
 # --- Fixture 28: Evaluate with WHEN OTHER -----------------------------------

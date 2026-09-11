@@ -566,8 +566,10 @@ class NativeStatementTranslator:
         if re.match(r'^\d+(\.\d+)?$', val):
             if tgt_type == "BigDecimal":
                 return f"new BigDecimal(\"{val}\")"
-            elif tgt_type == "Long" and val.isdigit():
-                return val + "L"
+            elif tgt_type in ("Long", "long") and val.isdigit():
+                return str(int(val)) + "L"
+            elif tgt_type in ("Integer", "int") and val.isdigit():
+                return str(int(val))
             else:
                 return val
         expr = self.expr_trans.translate(val)
@@ -947,8 +949,9 @@ class NativeStatementTranslator:
                 elif re.match(r'^[+-]?\d+(\.\d+)?$', src):
                     if tgt_type == "BigDecimal":
                         java_src = f"new BigDecimal(\"{src}\")"
-                    elif tgt_type in ("Integer", "Long"):
-                        java_src = src + "L" if tgt_type == "Long" else src
+                    elif tgt_type in ("Integer", "Long", "int", "long"):
+                        clean_num = str(int(src.split('.')[0])) if '.' in src else str(int(src))
+                        java_src = clean_num + "L" if tgt_type in ("Long", "long") else clean_num
                     else:
                         tgt_pic = self.current_generator.var_pics.get(re.split(r'\(', tgt)[0].strip(), "") if self.current_generator else ""
                         if tgt_type == "String" and "Z" in tgt_pic.upper():
@@ -957,7 +960,11 @@ class NativeStatementTranslator:
                         else:
                             java_src = f"\"{src}\""
                 elif self._is_variable(src):
-                    java_src = self.translate_math_operand(src, tgt_type)
+                    src_upper = re.split(r'\(', src)[0].strip().upper()
+                    if self.current_generator and src_upper in getattr(self.current_generator, "group_fields", {}):
+                        java_src = f"new String(get_{to_java_var(src_upper)}_bytes(), java.nio.charset.StandardCharsets.ISO_8859_1)"
+                    else:
+                        java_src = self.translate_math_operand(src, tgt_type)
                     src_type = self._get_var_type(src, "String")
                     if tgt_type == "BigDecimal" and src_type in ("Integer", "Long"):
                         java_src = f"BigDecimal.valueOf({java_src})"
@@ -1431,6 +1438,8 @@ class NativeStatementTranslator:
                     tgt = parts[0][4:].strip()
                     src = parts[1].strip()
                     lines.append(f"    {self.generate_assignment(tgt, src)}")
+                elif "EXIT" in at_end_action:
+                    lines.append("    break;")
             lines.append(f"}}")
             return "\n        ".join(lines)
 

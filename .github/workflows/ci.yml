@@ -46,6 +46,12 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
+      - name: Seed local Maven repository cache
+        run: |
+          echo "=== SEEDING LOCAL MAVEN REPOSITORY ==="
+          mvn -B -f docker/maven-seed-pom.xml dependency:resolve dependency:resolve-plugins
+          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve
+
       - name: Install Python test dependencies
         run: |
           python -m pip install --upgrade pip
@@ -138,6 +144,12 @@ jobs:
           distribution: "temurin"
           java-version: "17"
 
+      - name: Seed local Maven repository cache
+        run: |
+          echo "=== SEEDING LOCAL MAVEN REPOSITORY ==="
+          mvn -B -f docker/maven-seed-pom.xml dependency:resolve dependency:resolve-plugins
+          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve
+
       - name: Install GnuCOBOL compiler
         run: |
           sudo apt-get update
@@ -204,6 +216,12 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
+
+      - name: Seed local Maven repository cache
+        run: |
+          echo "=== SEEDING LOCAL MAVEN REPOSITORY ==="
+          mvn -B -f docker/maven-seed-pom.xml dependency:resolve dependency:resolve-plugins
+          mvn -B -f docker/maven-proleap-seed-pom.xml dependency:resolve
 
       - name: Install Python test dependencies
         run: |

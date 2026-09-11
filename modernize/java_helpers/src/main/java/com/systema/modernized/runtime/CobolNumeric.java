@@ -235,6 +235,15 @@ public class CobolNumeric {
         String intPart = decIdx != -1 ? plain.substring(0, decIdx) : plain;
         String decPart = decIdx != -1 ? plain.substring(decIdx + 1) : "";
         int intLenRequired = spec.digits - spec.scale;
+        if (spec.usage == CobolUsage.COMP_5) {
+            if (spec.digits <= 4) {
+                intLenRequired = 5 - spec.scale;
+            } else if (spec.digits <= 9) {
+                intLenRequired = 10 - spec.scale;
+            } else if (spec.digits <= 18) {
+                intLenRequired = 20 - spec.scale;
+            }
+        }
         if (intPart.length() < intLenRequired) {
             for (int i = 0; i < intLenRequired - intPart.length(); i++) {
                 body.append('0');
@@ -262,27 +271,9 @@ public class CobolNumeric {
                 } else {
                     return digitsStr + sign;
                 }
-            } else if (spec.usage == CobolUsage.COMP || spec.usage == CobolUsage.COMP_5) {
-                // COMP/COMP-5 (binary): DISPLAY shows plain digits for positive,
-                // '-' prefix for negative. No '+' prefix for positive values.
-                // GnuCOBOL verification: DISPLAY PIC S9(8) COMP VALUE 1500 → "00001500"
-                if (currentVal.signum() < 0) {
-                    return "-" + digitsStr;
-                } else {
-                    return digitsStr;
-                }
-            } else if (spec.usage == CobolUsage.COMP_3) {
-                // COMP-3 (packed decimal): DISPLAY shows no '+' for positive values.
-                // GnuCOBOL verification: DISPLAY of S9(5) COMP-3 positive → plain digits.
-                if (currentVal.signum() < 0) {
-                    return "-" + digitsStr;
-                } else {
-                    return digitsStr;
-                }
             } else {
-                // DISPLAY usage, no SIGN SEPARATE:
-                // GnuCOBOL -fsign=ASCII: signed DISPLAY S9 items embed sign in last digit byte.
-                // The Java display representation mirrors this: '+' for >= 0, '-' for < 0.
+                // In GnuCOBOL (-fsign=ASCII): signed DISPLAY, COMP, COMP-5, and COMP-3
+                // all format with leading '+' for positive (and zero) and '-' for negative.
                 String sign = currentVal.signum() < 0 ? "-" : "+";
                 return sign + digitsStr;
             }

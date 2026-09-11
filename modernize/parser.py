@@ -745,7 +745,7 @@ class CobolParser:
                     elif self.match("KEYWORD", "POINTER"):
                         props["usage"] = "POINTER"
 
-                    elif self.match("KEYWORD", "COMP") or self.match("KEYWORD", "COMP-3") or self.match("KEYWORD", "BINARY") or self.match("KEYWORD", "DISPLAY"):
+                    elif self.match("KEYWORD", "COMP") or self.match("KEYWORD", "COMP-3") or self.match("KEYWORD", "COMP-5") or self.match("KEYWORD", "BINARY") or self.match("KEYWORD", "DISPLAY"):
                         props["usage"] = self.peek(-1).value.upper()
 
                     elif self.match("KEYWORD", "SIGN"):
@@ -2104,7 +2104,7 @@ class CobolParser:
             )
             self.ir.add_node(node)
 
-        elif self.match("KEYWORD", "END-IF") or self.match("KEYWORD", "END-PERFORM") or self.match("KEYWORD", "END-READ") or self.match("KEYWORD", "END-WRITE") or self.match("KEYWORD", "END-EVALUATE"):
+        elif self.match("KEYWORD", "END-IF") or self.match("KEYWORD", "END-PERFORM") or self.match("KEYWORD", "END-READ") or self.match("KEYWORD", "END-WRITE") or self.match("KEYWORD", "END-EVALUATE") or self.match("KEYWORD", "END-RETURN"):
             val = self.peek(-1).value.upper()
             block_type = val[4:]  # IF, PERFORM, EVALUATE, READ, WRITE
             if self.block_stack and self.block_stack[-1] == block_type:
@@ -2142,11 +2142,12 @@ class CobolParser:
 
             # Keys parsing
             keys = []
-            while self.match("KEYWORD", "ON"):
+            while self.match("KEYWORD", "ON") or self.check("KEYWORD", "ASCENDING") or self.check("KEYWORD", "DESCENDING"):
                 order = "ASCENDING"
                 if self.match("KEYWORD", "ASCENDING") or self.match("KEYWORD", "DESCENDING"):
                     order = self.peek(-1).value.upper()
-                self.match("KEYWORD", "KEY") # Optional KEY keyword
+                if self.match("KEYWORD", "KEY") or self.match("KEYWORD", "KEYS"):
+                    pass # Optional KEY/KEYS keyword
                 while self.check("IDENTIFIER"):
                     k_name = self.consume("IDENTIFIER").value
                     keys.append({"name": k_name, "order": order})
@@ -2252,6 +2253,10 @@ class CobolParser:
                     self.consume("KEYWORD", "TO")
                     src = self.consume_val().value
                     at_end_action = f"SET {tgt} TO {src}"
+                elif self.check("KEYWORD", "EXIT"):
+                    self.consume("KEYWORD", "EXIT")
+                    self.match("KEYWORD", "PERFORM")
+                    at_end_action = "EXIT PERFORM"
 
             if self.match("KEYWORD", "END-RETURN"):
                 pass
