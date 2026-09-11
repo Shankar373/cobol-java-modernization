@@ -1234,7 +1234,7 @@ def docker_run(image, mounts, workdir, cmd, shell="bash", timeout=None, network=
             cmd = " && ".join(symlink_cmds) + (f" && {cd_back}" if cd_back else "") + " && " + cmd
     else:
         for host, guest in mounts:
-            full += ["-v", f"{posix(host)}:{guest}"]
+            full += ["-v", f"{posix(os.path.abspath(host))}:{guest}"]
             
     if workdir:
         full += ["-w", workdir]
@@ -3367,6 +3367,8 @@ class Pipeline:
         if not status or not any(status.values()):
             write_json(os.path.join(self.out, "transpile-error.json"),
                        {"rc": tc_rc, "stderr": (err or out)[-4000:]})
+            if err or out:
+                self.log(f"  [ERROR] cobj output:\n{(err or out)[-2000:]}")
             return False, "transpilation produced no Java files", []
 
         for s in d["sources"]:

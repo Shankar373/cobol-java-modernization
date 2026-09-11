@@ -243,7 +243,7 @@ def _docker_cmd(image: str, mounts: list, workdir: str, inner_cmd: str) -> list:
             inner_cmd = " && ".join(symlink_cmds) + (f" && {cd_back}" if cd_back else "") + " && " + inner_cmd
     else:
         for host, guest in mounts:
-            full += ["-v", f"{host}:{guest}"]
+            full += ["-v", f"{os.path.abspath(host)}:{guest}"]
             
     if workdir:
         full += ["-w", workdir]

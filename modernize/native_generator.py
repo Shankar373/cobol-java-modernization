@@ -3016,7 +3016,10 @@ class NativeStatementTranslator:
         if idx_type == "BigDecimal":
             by_expr = f"new BigDecimal(\"{by_val}\")" if re.match(r'^\d+(\.\d+)?$', str(by_val)) else to_java_var(str(by_val))
             from_expr = f"new BigDecimal(\"{from_val}\")" if re.match(r'^\d+(\.\d+)?$', str(from_val)) else to_java_var(str(from_val))
-            return f"for ({java_idx}.assign({from_expr}); !({cond_trans}) && !programExited; {java_idx}.assign({java_idx}.getValue().add({by_expr}))) {{"
+            if self.current_generator:
+                return f"for ({java_idx}.assign({from_expr}); !({cond_trans}) && !programExited; {java_idx}.assign({java_idx}.getValue().add({by_expr}))) {{"
+            else:
+                return f"for ({java_idx} = {from_expr}; !({cond_trans}) && !programExited; {java_idx} = {java_idx}.add({by_expr})) {{"
         else:
             return f"for ({java_idx} = {from_val}; !({cond_trans}) && !programExited; {java_idx} += {by_val}) {{"
 
