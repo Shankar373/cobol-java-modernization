@@ -39,67 +39,47 @@ echo "==> Setup completed successfully."
 echo "==> Running Stage A remote validation..."
 set +e
 
+git pull origin feature/open-source-mainframe-reference-stack || true
+
 WORKSPACE_ROOT="$(pwd)"
 mkdir -p "$WORKSPACE_ROOT/reports"
-VAL_LOG="$WORKSPACE_ROOT/reports/codespace_stage_a_validation.log"
+VAL_LOG="$WORKSPACE_ROOT/reports/codespace_stage_a_validation.txt"
 
 {
-  echo "========================================================"
-  echo "CODESPACE STAGE A REMOTE VALIDATION REPORT"
-  echo "Host: $(hostname)"
-  echo "Date: $(date -u)"
-  echo "========================================================"
-
-  echo ""
-  echo "--- 1. ALLOCATED MACHINE ---"
-  echo ">>> nproc:"
+  echo "===== MACHINE ====="
   nproc
-  echo ">>> free -h:"
   free -h
-  echo ">>> df -h /:"
   df -h /
 
-  echo ""
-  echo "--- 2. TOOLCHAIN VERSIONS ---"
-  echo ">>> python --version:"
+  echo "===== TOOLCHAIN ====="
   python --version
-  echo ">>> java --version:"
   java --version
-  echo ">>> javac --version:"
   javac --version
-  echo ">>> mvn --version:"
   mvn --version
-  echo ">>> cobc --version:"
   cobc --version
-  echo ">>> git --version:"
   git --version
 
-  echo ""
-  echo "--- 3. REGRESSION TESTS ---"
-  echo ">>> python -m pytest -v tests/test_phase9_manifest.py:"
+  echo "===== REMOTE MANIFEST TEST ====="
   python -m pytest -v tests/test_phase9_manifest.py
 
-  echo ""
-  echo "--- 4. SMOKE TRANSFORMATION ---"
-  echo ">>> python cobol_migrate.py --repo legacy --out workspace/codespace-smoke:"
+  echo "===== REAL COBOL->JAVA SMOKE ====="
+  rm -rf workspace/codespace-smoke
   python cobol_migrate.py --repo legacy --out workspace/codespace-smoke
 
-  echo ""
-  echo "--- 5. STORAGE MEASUREMENT ---"
-  echo ">>> df -h:"
-  df -h
-  echo ">>> du -sh workspace/codespace-smoke:"
-  du -sh workspace/codespace-smoke 2>&1
+  echo "===== OUTPUT SIZE ====="
+  du -sh workspace/codespace-smoke
+  du -sh workspace 2>/dev/null || true
+  du -sh .cache 2>/dev/null || true
+  du -sh ~/.m2 2>/dev/null || true
 
-  echo ""
-  echo "--- 6. GIT STATUS ---"
-  echo ">>> git status --short:"
+  echo "===== /app CHECK ====="
+  test ! -e /app && echo "/app not required"
+
+  echo "===== GIT INTEGRITY ====="
   git status --short
 
-  echo ""
-  echo "========================================================"
-  echo "END OF REMOTE VALIDATION REPORT"
-  echo "========================================================"
+  echo "===== DOCKER CHECK ====="
+  docker --version 2>/dev/null || echo "Docker not installed"
 } > "$VAL_LOG" 2>&1
 
 echo "==> Stage A validation log written to $VAL_LOG"
@@ -111,4 +91,5 @@ git config user.email "codespace@systemaops.local"
 git add "$VAL_LOG"
 git commit -m "chore(codespace): record Stage A remote validation report" || true
 git push origin feature/open-source-mainframe-reference-stack || true
+
 
