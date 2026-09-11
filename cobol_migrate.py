@@ -1969,12 +1969,16 @@ def preprocess_cobol_for_cobj(repo_dir: str, sources: list, copybook_dirs: list,
                 fpath = os.path.join(abs_cb, fname)
                 if not os.path.isfile(fpath):
                     continue
-                # Always write with UPPERCASE extension (.CPY not .cpy) so that
-                # cobj on Linux (case-sensitive) finds our preprocessed version.
+                # Write both original filename and uppercase filename so that
+                # case-sensitive cobj lookups on Linux succeed for both quoted
+                # (e.g. COPY "copybooks/CC-POLICY.cpy") and unquoted COPY statements.
+                dest_orig = os.path.join(dest_cb, fname)
+                _norm_file(fpath, dest_orig, is_copybook=True)
                 stem, ext = os.path.splitext(fname)
                 out_fname = stem.upper() + ext.upper()
-                dest_path = os.path.join(dest_cb, out_fname)
-                _norm_file(fpath, dest_path, is_copybook=True)
+                if out_fname != fname:
+                    dest_path = os.path.join(dest_cb, out_fname)
+                    _norm_file(fpath, dest_path, is_copybook=True)
         preprocessed_cb_dirs.append(rel_cb)
         cb_map[cb_dir] = dest_cb
 
