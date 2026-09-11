@@ -45,7 +45,6 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
-          cache: "maven"
 
       - name: Install Python test dependencies
         run: |
@@ -138,7 +137,6 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
-          cache: "maven"
 
       - name: Install GnuCOBOL compiler
         run: |
@@ -206,7 +204,6 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
-          cache: "maven"
 
       - name: Install Python test dependencies
         run: |
@@ -410,7 +407,6 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "17"
-          cache: "maven"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
