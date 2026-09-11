@@ -82,14 +82,46 @@ VAL_LOG="$WORKSPACE_ROOT/reports/codespace_stage_a_validation.txt"
   docker --version 2>/dev/null || echo "Docker not installed"
 } > "$VAL_LOG" 2>&1
 
+# 5. Output and Record Report
 echo "==> Stage A validation log written to $VAL_LOG"
 cat "$VAL_LOG"
+
+# Post validation report directly to GitHub PR #1 comments if token available
+if command -v gh >/dev/null 2>&1; then
+  gh pr comment 1 -F "$VAL_LOG" || true
+fi
+
+python3 -c '
+import os, json, urllib.request
+token = os.environ.get("GITHUB_TOKEN")
+val_log = os.environ.get("VAL_LOG", "reports/codespace_stage_a_validation.txt")
+if token and os.path.exists(val_log):
+    try:
+        body = open(val_log, "r", encoding="utf-8", errors="replace").read()
+        data = json.dumps({"body": "### Stage A Remote Validation Execution Report\n```text\n" + body + "\n```"}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.github.com/repos/Shankar373/cobol-java-modernization/issues/1/comments",
+            data=data,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/json",
+                "User-Agent": "CodespaceValidation"
+            }
+        )
+        urllib.request.urlopen(req)
+        print("Successfully posted validation report to PR #1 comment.")
+    except Exception as e:
+        print(f"Failed to post PR comment: {e}")
+' || true
 
 # Push validation report to git branch so local agent can inspect
 git config user.name "Codespace Validation"
 git config user.email "codespace@systemaops.local"
-git add "$VAL_LOG"
+git add -f "$VAL_LOG"
 git commit -m "chore(codespace): record Stage A remote validation report" || true
+git pull --rebase origin feature/open-source-mainframe-reference-stack || true
 git push origin feature/open-source-mainframe-reference-stack || true
+
 
 

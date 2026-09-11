@@ -53,6 +53,8 @@
     }
   },
 
-  // Setup script runs after container creation
+  // Setup script runs on container build, start, and create
+  "updateContentCommand": "bash .devcontainer/setup.sh",
+  "postStartCommand": "bash .devcontainer/setup.sh",
   "postCreateCommand": "bash .devcontainer/setup.sh"
 }
