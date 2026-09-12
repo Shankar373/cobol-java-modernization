@@ -1101,6 +1101,7 @@ class CobolParser:
             val_tok = self.consume_val_or_subscript("Expected value to perform calculation")
 
             mid_kw = "TO"
+            divide_form = None
             if op == "SUBTRACT":
                 mid_kw = "FROM"
             elif op == "MULTIPLY":
@@ -1108,8 +1109,10 @@ class CobolParser:
             elif op == "DIVIDE":
                 if self.check("KEYWORD", "INTO"):
                     mid_kw = "INTO"
+                    divide_form = "INTO"
                 else:
                     mid_kw = "BY"
+                    divide_form = "BY"
 
             # For ADD, the mid keyword can be TO (for ADD a TO b) or omitted (for ADD a b GIVING c)
             if op == "ADD":
@@ -1204,6 +1207,9 @@ class CobolParser:
             else:
                 props["giving"] = False
                 props["targets"] = to_idents
+
+            if op == "DIVIDE" and divide_form:
+                props["form"] = divide_form
 
             if remainder_tgt:
                 props["remainder"] = remainder_tgt

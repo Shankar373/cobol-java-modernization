@@ -1066,6 +1066,13 @@ class NativeStatementTranslator:
                         val_expr = f"com.systema.modernized.runtime.CobolArithmetic.subtract({java_op2}, {java_val})" if tgt_type == "BigDecimal" else f"{java_op2} - {java_val}"
                     elif stype == "MULTIPLY":
                         val_expr = f"com.systema.modernized.runtime.CobolArithmetic.multiply({java_val}, {java_op2})" if tgt_type == "BigDecimal" else f"{java_val} * {java_op2}"
+                    elif stype == "DIVIDE":
+                        # COBOL: DIVIDE a BY b GIVING c   -> c = a / b
+                        # COBOL: DIVIDE a INTO b GIVING c -> c = b / a
+                        if props.get("form") == "INTO":
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_op2}, {java_val})" if tgt_type == "BigDecimal" else f"{java_op2} / {java_val}"
+                        else:
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_op2})" if tgt_type == "BigDecimal" else f"{java_val} / {java_op2}"
                     else:
                         val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_op2})" if tgt_type == "BigDecimal" else f"{java_val} / {java_op2}"
                 else:
@@ -1075,6 +1082,13 @@ class NativeStatementTranslator:
                         val_expr = f"com.systema.modernized.runtime.CobolArithmetic.subtract({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} - {java_val}"
                     elif stype == "MULTIPLY":
                         val_expr = f"com.systema.modernized.runtime.CobolArithmetic.multiply({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} * {java_val}"
+                    elif stype == "DIVIDE":
+                        # COBOL: DIVIDE a BY b    -> b = a / b   (b is both divisor-slot and receiver)
+                        # COBOL: DIVIDE a INTO b  -> b = b / a
+                        if props.get("form") == "BY":
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_tgt_read})" if tgt_type == "BigDecimal" else f"{java_val} / {java_tgt_read}"
+                        else:
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} / {java_val}"
                     else:
                         val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} / {java_val}"
 
@@ -1083,6 +1097,8 @@ class NativeStatementTranslator:
                 stmts.append(self.wrap_math_with_size_error(cur_tgt, val_expr, cur_props, tgt_type, val_is_bigdecimal=(tgt_type == "BigDecimal")))
 
                 # Remainder translation block
+                # COBOL: DIVIDE a BY b GIVING q REMAINDER r    -> r = a - trunc(q) * b
+                # COBOL: DIVIDE a INTO b GIVING q REMAINDER r  -> r = b - trunc(q) * a
                 if props.get("remainder"):
                     rem_tgt = props.get("remainder")
                     rem_type = self._get_var_type(rem_tgt, "BigDecimal")
@@ -1090,6 +1106,8 @@ class NativeStatementTranslator:
                     rem_div = f"BigDecimal.valueOf({java_val})" if tgt_type != "BigDecimal" else java_val
                     rem_op2 = f"BigDecimal.valueOf({java_op2})" if tgt_type != "BigDecimal" else java_op2
                     rem_tgt_q = f"BigDecimal.valueOf({java_tgt_read})" if tgt_type != "BigDecimal" else java_tgt_read
+                    if props.get("form") == "INTO":
+                        rem_div, rem_op2 = rem_op2, rem_div
 
                     if rem_type == "BigDecimal":
                         rem_val_expr = f"com.systema.modernized.runtime.CobolArithmetic.remainder({rem_div}, {rem_op2}, {rem_tgt_q})"
