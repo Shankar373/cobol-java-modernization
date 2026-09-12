@@ -1,0 +1,23 @@
+{
+  "jdks_found": {},
+  "results": {
+    "17": {
+      "compile_rc": 0,
+      "run_rc": 0,
+      "stdout": "SUM: +0010",
+      "stderr_tail": ""
+    },
+    "21": {
+      "compile_rc": 0,
+      "run_rc": 0,
+      "stdout": "SUM: +0010",
+      "stderr_tail": ""
+    },
+    "25": {
+      "compile_rc": 0,
+      "run_rc": 0,
+      "stdout": "SUM: +0010",
+      "stderr_tail": ""
+    }
+  }
+}
