@@ -842,6 +842,11 @@ public class SpringContextHelper {
             if os.path.exists(ksds_path):
                 shutil.copy2(ksds_path, os.path.join(helper_dir, "KsdSDbService.java"))
 
+            # Copy Db2ErrorMapper.java
+            db2_mapper_path = os.path.join(os.path.dirname(__file__), "java_helpers", "src", "main", "java", "com", "systema", "modernized", "Db2ErrorMapper.java")
+            if os.path.exists(db2_mapper_path):
+                shutil.copy2(db2_mapper_path, os.path.join(helper_dir, "Db2ErrorMapper.java"))
+
             # Generate mock SQL assets if mock_db.yaml exists
             mock_db_yaml = os.path.join(self.repo, "mock_db.yaml")
             if os.path.exists(mock_db_yaml):
@@ -1220,16 +1225,16 @@ public class CicsTransactionContext {
             if has_sql:
                 pg_container = os.environ.get("PG_CONTAINER_NAME")
                 if not pg_container:
-                    for c_name in ("modernization-platform-db-1", "modernization-platform_db_1", "db"):
+                    for c_name in ("postgres", "db", "modernization-platform-db-1", "modernization-platform_db_1"):
                         try:
-                            r = subprocess.run(["docker", "inspect", c_name], capture_output=True, text=True, check=False)
-                            if r.returncode == 0:
+                            r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", c_name], capture_output=True, text=True, check=False)
+                            if r.returncode == 0 and r.stdout.strip().lower() == "true":
                                 pg_container = c_name
                                 break
                         except Exception:
                             pass
                     if not pg_container:
-                        pg_container = "db"
+                        pg_container = "postgres"
                 data_dir = os.path.join(self.repo, "data")
                 if os.path.isdir(data_dir):
                     self.log(f"Seeding database for repo {os.path.basename(self.repo)} using container {pg_container}...")

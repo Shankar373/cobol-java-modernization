@@ -417,6 +417,12 @@ def run_cobol_baseline(fixture: ParityFixture, run_dir: str) -> ExecutionResult:
                 )
 
         if has_sql:
+            # 0. Preprocess COBOL source for ocesql (inject DECLARE SECTION, CONNECT, strip COMP, etc.)
+            preprocessed_cobol = preprocess_ocesql_source(cobol_code)
+            preprocessed_path = os.path.join(run_dir, "src_preprocessed.cob")
+            with open(preprocessed_path, "wb") as f:
+                f.write(preprocessed_cobol.encode("utf-8"))
+
             # 1. Run ocesql dry-run precompile step
             precompile_cmd = [
                 "docker", "run", "--rm",
@@ -578,6 +584,17 @@ public class MockSqlService {
 }
 """)
 
+    if fixture.has_sql:
+        mock_sql_path = os.path.join(jcl_context_dir, "MockSqlService.java")
+        if not os.path.exists(mock_sql_path):
+            with open(mock_sql_path, "w", encoding="utf-8") as f:
+                f.write("""package com.systema.modernized;
+public class MockSqlService {
+    // Parity-harness stub: no real datasource is provisioned on the Java side.
+    public static void initialize() {}
+}
+""")
+
     # Write JclExecutionContext, CobolFormatHelper, CicsProgramRegistry, SpringContextHelper
     with open(os.path.join(jcl_context_dir, "JclExecutionContext.java"), "w", encoding="utf-8") as f:
         f.write("""package com.systema.modernized;
@@ -714,6 +731,12 @@ public class DataSourceTransactionManager {
     with open(os.path.join(jcl_context_dir, "CobolFormatHelper.java"), "w", encoding="utf-8") as f:
         f.write(format_helper_src)
 
+    db2_mapper_path = os.path.join(helpers_dir, "modernize", "java_helpers", "src", "main", "java", "com", "systema", "modernized", "Db2ErrorMapper.java")
+    if os.path.exists(db2_mapper_path):
+        db2_mapper_src = open(db2_mapper_path, "r", encoding="utf-8").read()
+        with open(os.path.join(jcl_context_dir, "Db2ErrorMapper.java"), "w", encoding="utf-8") as f:
+            f.write(db2_mapper_src)
+
     runtime_dir = os.path.join(jcl_context_dir, "runtime")
     os.makedirs(runtime_dir, exist_ok=True)
     helpers_src_dir = os.path.join(helpers_dir, "modernize", "java_helpers", "src", "main", "java", "com", "systema", "modernized", "runtime")
@@ -728,13 +751,19 @@ public class DataSourceTransactionManager {
     if PARITY_JAVA_RUNTIME == "local":
         # Compile Java sources locally
         java_files = [os.path.join(runtime_dir, f) for f in os.listdir(runtime_dir) if f.endswith(".java")]
+        extra_helpers = []
+        if os.path.exists(os.path.join(jcl_context_dir, "Db2ErrorMapper.java")):
+            extra_helpers.append(os.path.join(jcl_context_dir, "Db2ErrorMapper.java"))
+        if os.path.exists(os.path.join(jcl_context_dir, "MockSqlService.java")):
+            extra_helpers.append(os.path.join(jcl_context_dir, "MockSqlService.java"))
+
         compile_cmd = [
             "javac", "-cp", run_dir,
             os.path.join(jcl_context_dir, "JclExecutionContext.java"),
             os.path.join(jcl_context_dir, "CicsProgramRegistry.java"),
             os.path.join(jcl_context_dir, "SpringContextHelper.java"),
             os.path.join(jcl_context_dir, "CobolFormatHelper.java")
-        ] + java_files + [src_file_path]
+        ] + extra_helpers + java_files + [src_file_path]
         rc, out, err, term = run_cmd_bytes(compile_cmd)
         if rc != 0:
             return ExecutionResult(rc, out, err, termination_status="error", error_message=f"Java compilation failed: {err.decode('utf-8', errors='replace')}")
@@ -770,6 +799,12 @@ public class DataSourceTransactionManager {
 
         run_dir_abs = os.path.abspath(run_dir).replace("\\", "/")
 
+        extra_docker_helpers = ""
+        if os.path.exists(os.path.join(jcl_context_dir, "Db2ErrorMapper.java")):
+            extra_docker_helpers += "/run/com/systema/modernized/Db2ErrorMapper.java "
+        if os.path.exists(os.path.join(jcl_context_dir, "MockSqlService.java")):
+            extra_docker_helpers += "/run/com/systema/modernized/MockSqlService.java "
+
         # Compile inside Docker
         inner_compile = (
             "javac -cp /run "
@@ -777,6 +812,7 @@ public class DataSourceTransactionManager {
             "/run/com/systema/modernized/CicsProgramRegistry.java "
             "/run/com/systema/modernized/SpringContextHelper.java "
             "/run/com/systema/modernized/CobolFormatHelper.java "
+            f"{extra_docker_helpers}"
             "/run/com/systema/modernized/runtime/*.java "
             f"/run/com/systema/modernized/native_gen/{fixture.program_name.capitalize()}.java"
         )

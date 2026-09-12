@@ -5338,8 +5338,14 @@ class NativeProgramGenerator:
             lines.append(f"    private org.springframework.jdbc.support.rowset.SqlRowSet cursor_{cname} = null;")
         if has_sql:
             lines.append("    private org.springframework.transaction.TransactionStatus txStatus = null;")
+            if "SQLCODE" not in self.var_types:
+                self.var_types["SQLCODE"] = "BigDecimal"
+                self.var_pics["SQLCODE"] = "S9(9)"
+                self.var_usages["SQLCODE"] = "COMP"
+            if "SQLSTATE" not in self.var_types:
+                self.var_types["SQLSTATE"] = "String"
+                self.var_pics["SQLSTATE"] = "X(5)"
 
-        # Track fields that need VALUE initialization with truncation (for BigDecimal fields)
         value_init_fields = []
 
         for v, java_type in self.var_types.items():
@@ -6221,6 +6227,7 @@ class NativeProgramGenerator:
             lines.append("            }")
             lines.append("        }")
         if has_sql:
+            lines.append("        com.systema.modernized.MockSqlService.initialize();")
             lines.append("        if (com.systema.modernized.SpringContextHelper.transactionManager != null) {")
             lines.append("            txStatus = com.systema.modernized.SpringContextHelper.transactionManager.getTransaction(new org.springframework.transaction.support.DefaultTransactionDefinition());")
             lines.append("        }")
@@ -6302,8 +6309,6 @@ class NativeProgramGenerator:
             lines.append("        if (args.length > 0) {")
             lines.append("            com.systema.modernized.CicsTransactionContext.setSessionInput(\"INPUTMAP\", \"MSET\", args[0]);")
             lines.append("        }")
-        if has_sql:
-            lines.append("        com.systema.modernized.MockSqlService.initialize();")
         lines.append("        try {")
         lines.append(f"            new {class_name}().execute();")
         lines.append("        } catch (StopRunException e) {")
