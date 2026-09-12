@@ -95,29 +95,21 @@ def normalize_stderr(b: bytes) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 Task 3: normalize_display — strip cosmetic display spacing
+# Phase 2 Task 3 / P1-003: normalize_display — canonical line-ending normalization
 # ---------------------------------------------------------------------------
 
 
 def normalize_display(b: bytes) -> bytes:
-    """Normalize display stdout bytes:
-    1. Replace Windows CRLF with LF.
-    2. Collapse multiple consecutive spaces to a single space.
-    3. Trim leading/trailing whitespace from each line.
-    4. Ignore empty lines at start/end.
+    """Normalize display stdout bytes.
+
+    P1-003 Hardened: Only normalizes Windows CRLF (\r\n) to Unix LF (\n).
+    Strictly preserves all leading spaces, trailing padding, internal column
+    alignments, and blank lines to prevent false-pass equivalence between
+    semantically divergent outputs.
     """
     if not b:
         return b""
-    text = b.decode("utf-8", errors="replace")
-    text = text.replace("\r\n", "\n")
-    lines = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if line:
-            # Collapse multiple spaces into one space
-            line = re.sub(r" {2,}", " ", line)
-            lines.append(line)
-    return "\n".join(lines).encode("utf-8")
+    return b.replace(b"\r\n", b"\n")
 
 
 # ---------------------------------------------------------------------------
