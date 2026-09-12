@@ -23,10 +23,18 @@ Environment:
 
 import pytest
 import os
+import tempfile
 
 from tests.utils.parity_harness import (
     ParityFixture,
     run_parity,
+    run_cobol_baseline,
+    run_java_transpiled,
+    normalize_display,
+    check_docker_available,
+    check_docker_image_cached,
+    PARITY_GNUCOBOL_IMAGE,
+    PARITY_JDK_IMAGE,
 )
 
 ALLOW_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "true").lower() == "true"
@@ -44,6 +52,77 @@ def _check(result, label: str):
             for m in result.mismatches
         )
         pytest.fail(f"{label}: Parity FAIL\n{details}")
+
+
+def _assert_mutation_kills(
+    fixture_orig: ParityFixture,
+    fixture_mut: ParityFixture,
+    label: str,
+    *,
+    orig_marker: bytes = b"",
+    mut_marker: bytes = b"",
+    check_files: bool = False,
+):
+    """Execute original COBOL oracle vs mutated Java and assert divergence."""
+    docker_ok = check_docker_available()
+    image_cobol_ok = check_docker_image_cached(PARITY_GNUCOBOL_IMAGE) if docker_ok else False
+    image_java_ok = check_docker_image_cached(PARITY_JDK_IMAGE) if docker_ok else False
+
+    if not docker_ok or not image_cobol_ok or not image_java_ok:
+        if ALLOW_SKIP:
+            pytest.skip("Docker/GnuCOBOL/JDK unavailable — skipping negative mutation proof")
+        else:
+            pytest.fail("CI Failure: Docker parity images unavailable for mutation proof")
+
+    # Guard: Prove this fixture contains no SQL before applying test-local non-SQL compatibility
+    assert "EXEC SQL" not in fixture_orig.cobol_code, f"{label}: SQL fixtures cannot use this helper"
+    assert "EXEC SQL" not in fixture_mut.cobol_code, f"{label}: SQL fixtures cannot use this helper"
+    if not hasattr(fixture_orig, "has_sql"):
+        fixture_orig.has_sql = False
+    if not hasattr(fixture_mut, "has_sql"):
+        fixture_mut.has_sql = False
+
+    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+        # Step 1: Independent original COBOL oracle execution via GnuCOBOL
+        orig_res = run_cobol_baseline(fixture_orig, d1)
+        assert orig_res.termination_status != "error", (
+            f"{label}: original COBOL oracle run failed: {orig_res.error_message}"
+        )
+
+        # Step 2: Mutated Java transpilation, compilation, and execution
+        java_mut_res = run_java_transpiled(fixture_mut, d2)
+        assert java_mut_res.termination_status != "error", (
+            f"{label}: mutated Java execution failed: {java_mut_res.error_message}"
+        )
+
+    # Step 3: Central assertion — Mutated Java output != Original COBOL oracle
+    orig_stdout_norm = normalize_display(orig_res.stdout)
+    java_stdout_norm = normalize_display(java_mut_res.stdout)
+    assert java_stdout_norm != orig_stdout_norm, (
+        f"{label}: mutated Java output failed to diverge from original COBOL oracle.\n"
+        f"  orig COBOL oracle: {orig_res.stdout[:120]!r}\n"
+        f"  mutated Java:      {java_mut_res.stdout[:120]!r}"
+    )
+
+    if orig_marker:
+        assert orig_marker in orig_stdout_norm, (
+            f"{label}: expected marker {orig_marker!r} in original COBOL oracle stdout {orig_stdout_norm!r}"
+        )
+    if mut_marker:
+        assert mut_marker in java_stdout_norm, (
+            f"{label}: expected marker {mut_marker!r} in mutated Java stdout {java_stdout_norm!r}"
+        )
+        assert mut_marker not in orig_stdout_norm, (
+            f"{label}: mutated marker {mut_marker!r} unexpectedly present in original COBOL oracle stdout"
+        )
+
+    if check_files:
+        for out_file in fixture_orig.declared_outputs:
+            orig_bytes = orig_res.files.get(out_file, b"")
+            java_bytes = java_mut_res.files.get(out_file, b"")
+            assert java_bytes != orig_bytes, (
+                f"{label}: declared output file '{out_file}' from mutated Java did not diverge from original COBOL oracle"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -108,8 +187,6 @@ def test_occurs_fixed_and_odo_differential():
 
 def test_occurs_odo_negative_mutation():
     """Negative test: mutating ODO bound must cause a detectable divergence."""
-    # We compare the mutant's Java output vs the original COBOL output.
-    # They should differ because ODO=5 adds two extra DISPLAY lines vs ODO=3.
     fixture_original = ParityFixture(
         name="occurs_odo_original",
         program_name="OCCURS01",
@@ -120,19 +197,10 @@ def test_occurs_odo_negative_mutation():
         program_name="OCCURS01",
         cobol_code=OCCURS_MUTANT,
     )
-    result_original = run_parity(fixture_original)
-    result_mutant = run_parity(fixture_mutant)
-
-    if result_original.status == "SKIP" or result_mutant.status == "SKIP":
-        pytest.skip("Docker unavailable — skipping negative mutation test")
-
-    # Outputs must differ (ODO=3 vs ODO=5 produces different line count)
-    orig_stdout = result_original.cobol_result.stdout if hasattr(result_original, "cobol_result") else b""
-    mut_stdout = result_mutant.cobol_result.stdout if hasattr(result_mutant, "cobol_result") else b""
-
-    # At minimum the two COBOL runs must differ — validates the test fixture itself
-    # (If they are equal the mutation is silent and is a test defect, not a pass)
-    assert result_original.status in ("PASS", "FAIL"), f"Unexpected status: {result_original.status}"
+    _assert_mutation_kills(
+        fixture_original, fixture_mutant, "OCCURS.ODO",
+        orig_marker=b"ODO count: 3", mut_marker=b"ODO count: 5"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,14 +251,20 @@ def test_comp_binary_arithmetic_differential():
 
 def test_comp_binary_negative_mutation():
     """Negative: mutating COMP operand must produce different output."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="comp_binary_orig",
+        program_name="COMPTEST",
+        cobol_code=COMP_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="comp_binary_mutant",
         program_name="COMPTEST",
         cobol_code=COMP_MUTANT,
     )
-    result = run_parity(fixture)
-    # Mutant must not accidentally match the original — verified by running original test separately
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "USAGE.COMP",
+        orig_marker=b"ADD: +00001500", mut_marker=b"ADD: +00010499"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -235,13 +309,20 @@ def test_comp5_differential():
 
 def test_comp5_negative_mutation():
     """Negative: different COMP-5 initial value must produce different output."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="comp5_orig",
+        program_name="COMP5TEST",
+        cobol_code=COMP5_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="comp5_mutant",
         program_name="COMP5TEST",
         cobol_code=COMP5_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "USAGE.COMP_5",
+        orig_marker=b"SUM: +0000000107", mut_marker=b"SUM: +0000001006"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -302,14 +383,22 @@ def test_call_by_reference_mutation_differential():
 
 def test_call_by_reference_negative_mutation():
     """Negative: changing initial value must produce different output."""
-    combined_cobol = CALLREF_MUTANT_MAIN + "\n" + CALLREF_SUB
-    fixture = ParityFixture(
+    combined_orig = CALLREF_MAIN + "\n" + CALLREF_SUB
+    combined_mut = CALLREF_MUTANT_MAIN + "\n" + CALLREF_SUB
+    fixture_orig = ParityFixture(
+        name="call_by_reference_orig",
+        program_name="CALLMAIN",
+        cobol_code=combined_orig,
+    )
+    fixture_mut = ParityFixture(
         name="call_by_reference_mutant",
         program_name="CALLMAIN",
-        cobol_code=combined_cobol,
+        cobol_code=combined_mut,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "PROC.CALL_BY_REFERENCE",
+        orig_marker=b"AFTER: +00015", mut_marker=b"AFTER: +00104"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -358,14 +447,22 @@ def test_call_dynamic_differential():
 
 def test_call_dynamic_negative_mutation():
     """Negative: different initial WS-VAL must produce different output."""
-    combined = CALLDYN_MUTANT + "\n" + CALLDYN_SUB
-    fixture = ParityFixture(
+    combined_orig = CALLDYN_MAIN + "\n" + CALLDYN_SUB
+    combined_mut = CALLDYN_MUTANT + "\n" + CALLDYN_SUB
+    fixture_orig = ParityFixture(
+        name="call_dynamic_orig",
+        program_name="DYNMAIN",
+        cobol_code=combined_orig,
+    )
+    fixture_mut = ParityFixture(
         name="call_dynamic_mutant",
         program_name="DYNMAIN",
-        cobol_code=combined,
+        cobol_code=combined_mut,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "PROC.CALL_DYNAMIC",
+        orig_marker=b"AFTER: 00084", mut_marker=b"AFTER: 00020"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -405,13 +502,20 @@ def test_sections_fallthrough_differential():
 
 def test_sections_negative_mutation():
     """Negative: mutating section arithmetic must produce different result."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="sections_orig",
+        program_name="SECTTEST",
+        cobol_code=SECTIONS_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="sections_mutant",
         program_name="SECTTEST",
         cobol_code=SECTIONS_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "PROC.SECTIONS",
+        orig_marker=b"RESULT: 030", mut_marker=b"RESULT: 119"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -457,13 +561,20 @@ def test_evaluate_differential():
 
 def test_evaluate_negative_mutation():
     """Negative: mutating a WHEN branch must cause display output mismatch."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="evaluate_orig",
+        program_name="EVALTEST",
+        cobol_code=EVALUATE_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="evaluate_mutant",
         program_name="EVALTEST",
         cobol_code=EVALUATE_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "PROC.EVALUATE",
+        orig_marker=b"ONE\nTWO", mut_marker=b"MUTATED\nTWO"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -506,13 +617,20 @@ def test_string_with_pointer_differential():
 
 def test_string_negative_mutation():
     """Negative: mutating input string must produce different concatenated result."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="string_orig",
+        program_name="STRINGTEST",
+        cobol_code=STRING_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="string_mutant",
         program_name="STRINGTEST",
         cobol_code=STRING_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "STRING.STRING_STMT",
+        orig_marker=b"RESULT: [HELLO WORLD", mut_marker=b"RESULT: [MUTATED WORLD"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -572,14 +690,24 @@ def test_file_sequential_fixed_differential():
 
 def test_file_sequential_fixed_negative_mutation():
     """Negative: writing more records must produce different file and stdout."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="file_sequential_fixed_orig",
+        program_name="FILETEST",
+        cobol_code=FILE_FIXED_COBOL,
+        declared_outputs=["output.dat"],
+    )
+    fixture_mut = ParityFixture(
         name="file_sequential_fixed_mutant",
         program_name="FILETEST",
         cobol_code=FILE_FIXED_MUTANT,
         declared_outputs=["output.dat"],
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "FILE.SEQUENTIAL_FIXED",
+        orig_marker=b"RECORD-01",
+        mut_marker=b"RECORD-04",
+        check_files=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -697,13 +825,20 @@ def test_sort_input_procedure_differential():
 
 def test_sort_input_procedure_negative_mutation():
     """Negative: mutating a sort input value must change sorted output."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="sort_input_procedure_orig",
+        program_name="SORTIP",
+        cobol_code=SORT_INPUT_PROC_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="sort_input_procedure_mutant",
         program_name="SORTIP",
         cobol_code=SORT_INPUT_PROC_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "SORT_MERGE INPUT/OUTPUT",
+        orig_marker=b"050", mut_marker=b"099",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -744,13 +879,20 @@ def test_perform_thru_differential():
 
 def test_perform_thru_negative_mutation():
     """Negative: mutating one ADD in the THRU range must change TOTAL."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="perform_thru_orig",
+        program_name="PERFTHRU",
+        cobol_code=PERFORM_THRU_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="perform_thru_mutant",
         program_name="PERFTHRU",
         cobol_code=PERFORM_THRU_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "PROC.PERFORM_THRU",
+        orig_marker=b"TOTAL: 00600", mut_marker=b"TOTAL: 01499"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -793,13 +935,20 @@ def test_group_move_differential():
 
 def test_group_move_negative_mutation():
     """Negative: mutating source ID must produce different DST-ID display."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="group_move_orig",
+        program_name="GRPMOVE",
+        cobol_code=GROUP_MOVE_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="group_move_mutant",
         program_name="GRPMOVE",
         cobol_code=GROUP_MOVE_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "MOVE.GROUP_TO_GROUP",
+        orig_marker=b"ID: 1234", mut_marker=b"ID: 9999"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -841,13 +990,20 @@ def test_pic_edited_numeric_differential():
 
 def test_pic_edited_numeric_negative_mutation():
     """Negative: different input value must produce different formatted output."""
-    fixture = ParityFixture(
+    fixture_orig = ParityFixture(
+        name="pic_edited_numeric_orig",
+        program_name="EDITNUM",
+        cobol_code=EDITED_NUM_COBOL,
+    )
+    fixture_mut = ParityFixture(
         name="pic_edited_numeric_mutant",
         program_name="EDITNUM",
         cobol_code=EDITED_NUM_MUTANT,
     )
-    result = run_parity(fixture)
-    assert result.status in ("PASS", "FAIL", "SKIP")
+    _assert_mutation_kills(
+        fixture_orig, fixture_mut, "PIC.EDITED_NUMERIC",
+        orig_marker=b"1,234.56", mut_marker=b"9,999.99"
+    )
 
 
 # ---------------------------------------------------------------------------
