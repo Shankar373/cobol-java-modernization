@@ -88,11 +88,39 @@ DB2CURNULL01_CODE = """\
            GOBACK.
 """
 
-# Skip unless PARITY_ALLOW_SKIP=true
-_DB2CURNULL01_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "false").lower() != "true"
+def _is_db_parity_available() -> bool:
+    try:
+        from tests.utils.parity_harness import (
+            check_docker_available,
+            check_docker_image_cached,
+            PARITY_GNUCOBOL_IMAGE,
+            PARITY_JDK_IMAGE,
+            run_cmd_bytes,
+        )
+        if not (
+            check_docker_available()
+            and check_docker_image_cached(PARITY_GNUCOBOL_IMAGE)
+            and check_docker_image_cached(PARITY_JDK_IMAGE)
+        ):
+            return False
+        net_name = "modernization-platform_default"
+        cmd_ping = [
+            "docker", "run", "--rm", "--network", net_name,
+            "-e", "PGPASSWORD=modernize",
+            PARITY_GNUCOBOL_IMAGE,
+            "psql", "-h", "db", "-U", "modernize", "-d", "modernization_db", "-c", "SELECT 1;"
+        ]
+        rc, _, _, _ = run_cmd_bytes(cmd_ping, timeout=10)
+        return rc == 0
+    except Exception:
+        return False
 
 
-@pytest.mark.skipif(_DB2CURNULL01_SKIP, reason="Docker/DB parity infrastructure unavailable — run with PARITY_ALLOW_SKIP=true to execute.")
+_ALLOW_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "true").lower() == "true"
+_DB2CURNULL01_SKIP = (not _is_db_parity_available()) and _ALLOW_SKIP
+
+
+@pytest.mark.skipif(_DB2CURNULL01_SKIP, reason="Docker/DB parity infrastructure unavailable on host.")
 def test_db2curnull01_parity():
     """Compile the DB2CURNULL01 COBOL under GnuCOBOL+ocesql and
     verify it runs. (Java parity pending native SQL generation.)"""
@@ -105,8 +133,10 @@ def test_db2curnull01_parity():
         env={},
     )
     comparison = run_parity(fixture)
+    if comparison.status == "SKIP":
+        pytest.skip(comparison.skip_reason)
 
-    assert comparison.status in ("PASS", "SKIP"), (
+    assert comparison.status == "PASS", (
         f"DB2CURNULL01 parity FAILED:\n"
         + "".join(
             f"  target={m.target!r}  offset={m.offset}\n"

@@ -49,11 +49,28 @@ REDEFINES01_CODE = """\
            STOP RUN.
 """
 
-# Skip unless PARITY_ALLOW_SKIP=true
-_REDEFINES01_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "false").lower() != "true"
+def _is_docker_parity_available() -> bool:
+    try:
+        from tests.utils.parity_harness import (
+            check_docker_available,
+            check_docker_image_cached,
+            PARITY_GNUCOBOL_IMAGE,
+            PARITY_JDK_IMAGE,
+        )
+        return (
+            check_docker_available()
+            and check_docker_image_cached(PARITY_GNUCOBOL_IMAGE)
+            and check_docker_image_cached(PARITY_JDK_IMAGE)
+        )
+    except Exception:
+        return False
 
 
-@pytest.mark.skipif(_REDEFINES01_SKIP, reason="Docker parity images not available — set PARITY_ALLOW_SKIP=true to run.")
+_ALLOW_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "true").lower() == "true"
+_REDEFINES01_SKIP = (not _is_docker_parity_available()) and _ALLOW_SKIP
+
+
+@pytest.mark.skipif(_REDEFINES01_SKIP, reason="Docker parity images not available on host.")
 def test_redefines01_parity():
     """Run REDEFINES01 through the parity harness and compare COBOL vs Java outputs."""
     fixture = ParityFixture(
@@ -65,8 +82,9 @@ def test_redefines01_parity():
         env={},
     )
     comparison = run_parity(fixture)
-    # Assert PASS or SKIP; FAIL with detail if mismatch
-    assert comparison.status in ("PASS", "SKIP"), (
+    if comparison.status == "SKIP":
+        pytest.skip(comparison.skip_reason)
+    assert comparison.status == "PASS", (
         f"REDEFINES01 parity FAILED:\n"
         + "".join(
             f"  target={m.target!r}  offset={m.offset}\n"

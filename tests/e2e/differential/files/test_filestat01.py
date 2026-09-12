@@ -69,11 +69,28 @@ FILESTAT01_CODE = """\
            STOP RUN.
 """
 
-# Skip unless PARITY_ALLOW_SKIP=true
-_FILESTAT01_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "false").lower() != "true"
+def _is_docker_parity_available() -> bool:
+    try:
+        from tests.utils.parity_harness import (
+            check_docker_available,
+            check_docker_image_cached,
+            PARITY_GNUCOBOL_IMAGE,
+            PARITY_JDK_IMAGE,
+        )
+        return (
+            check_docker_available()
+            and check_docker_image_cached(PARITY_GNUCOBOL_IMAGE)
+            and check_docker_image_cached(PARITY_JDK_IMAGE)
+        )
+    except Exception:
+        return False
 
 
-@pytest.mark.skipif(_FILESTAT01_SKIP, reason="Docker parity images not available — run with PARITY_ALLOW_SKIP=true to execute.")
+_ALLOW_SKIP = os.environ.get("PARITY_ALLOW_SKIP", "true").lower() == "true"
+_FILESTAT01_SKIP = (not _is_docker_parity_available()) and _ALLOW_SKIP
+
+
+@pytest.mark.skipif(_FILESTAT01_SKIP, reason="Docker parity images not available on host.")
 def test_filestat01_parity():
     """Run FILESTAT01 through the parity harness and compare COBOL vs Java outputs."""
     fixture = ParityFixture(
@@ -85,7 +102,9 @@ def test_filestat01_parity():
         env={},
     )
     comparison = run_parity(fixture)
-    assert comparison.status in ("PASS", "SKIP"), (
+    if comparison.status == "SKIP":
+        pytest.skip(comparison.skip_reason)
+    assert comparison.status == "PASS", (
         f"FILESTAT01 parity FAILED:\n"
         + "".join(
             f"  target={m.target!r}  offset={m.offset}\n"
