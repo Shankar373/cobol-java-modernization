@@ -879,6 +879,90 @@ def compare_raw_bytes(target: str, cobol_bytes: bytes, java_bytes: bytes) -> Par
         explanation=f"Mismatch on target {target} at byte offset {offset}. COBOL length: {len(cobol_bytes)}, Java length: {len(java_bytes)}"
     )
 
+
+def is_indexed_or_relative_file(fixture: ParityFixture, f_name: str) -> bool:
+    """Determine whether an output file is declared with INDEXED or RELATIVE organization.
+
+    Under GnuCOBOL, INDEXED files are stored in B-tree pages (e.g. Berkeley DB / VB-ISAM)
+    and RELATIVE files have record slot headers, whereas standard SEQUENTIAL or
+    LINE SEQUENTIAL files are flat streams. Logical containment matching is only
+    valid for INDEXED and RELATIVE files; sequential/text files require byte-exact match.
+
+    Uses the repository's native CobolLexer and CobolParser AST to inspect FILE-CONTROL
+    specifications. Falls back to lexical inspection if AST parsing fails.
+    """
+    code = getattr(fixture, "cobol_code", "")
+    if not code or not f_name:
+        return False
+
+    upper = code.upper()
+    if "INDEXED" not in upper and "RELATIVE" not in upper:
+        return False
+
+    base_name = os.path.basename(f_name).upper()
+    target_clean = f_name.replace("\\", "/").upper()
+
+    # 1. Primary: Use the repository's native CobolParser AST
+    try:
+        from modernize.lexer import CobolLexer
+        from modernize.parser import CobolParser
+        lexer = CobolLexer("parity_probe.cob")
+        tokens = lexer.tokenize(code.upper())
+        parser = CobolParser(tokens, "parity_probe.cob")
+        ir = parser.parse()
+
+        var_values = {}
+        for n in ir.nodes.values():
+            if n.kind == "DATA_ITEM":
+                val = n.properties.get("value")
+                name = n.properties.get("name")
+                if name and val is not None:
+                    val_str = str(val).strip("\"'").replace("\\", "/").upper()
+                    var_values[name.upper()] = val_str
+
+        file_control_nodes = [n for n in ir.nodes.values() if n.kind == "FILE_CONTROL"]
+        if file_control_nodes:
+            for n in file_control_nodes:
+                org = (n.properties.get("organization") or "SEQUENTIAL").upper()
+                assign_name = n.properties.get("assign_name") or ""
+                assign_clean = assign_name.strip("\"'").replace("\\", "/").upper()
+                assign_base = os.path.basename(assign_clean)
+
+                matches = (
+                    assign_clean == target_clean
+                    or assign_base == base_name
+                    or assign_clean == base_name
+                )
+                if not matches and assign_name.upper() in var_values:
+                    var_val = var_values[assign_name.upper()]
+                    var_base = os.path.basename(var_val)
+                    matches = (
+                        var_val == target_clean
+                        or var_base == base_name
+                        or var_val == base_name
+                    )
+
+                if matches:
+                    return org in ("INDEXED", "RELATIVE")
+
+            return False
+    except Exception:
+        pass
+
+    # 2. Conservative fallback if AST parsing fails
+    name_no_ext = base_name.rsplit(".", 1)[0] if "." in base_name else base_name
+    select_blocks = re.findall(
+        r"SELECT\b.*?(?:\.\s|\.\r?\n|\n\s*SELECT\b|\n\s*DATA\s+DIVISION|\Z)",
+        upper,
+        re.DOTALL,
+    )
+    for block in select_blocks:
+        if base_name in block or target_clean in block or name_no_ext in block:
+            return "INDEXED" in block or "RELATIVE" in block
+
+    return False
+
+
 def run_parity(fixture: ParityFixture) -> ParityComparison:
     # 1. Environment pre-validation
     docker_ok = check_docker_available()
@@ -964,7 +1048,7 @@ def run_parity(fixture: ParityFixture) -> ParityComparison:
         c_bytes = cobol_res.files.get(f_name, b"")
         j_bytes = java_res.files.get(f_name, b"")
         m_file = compare_raw_bytes(f"file:{f_name}", c_bytes, j_bytes)
-        if m_file:
+        if m_file and is_indexed_or_relative_file(fixture, f_name):
             # Check for logical equivalence in indexed / relative file structures (e.g. Berkeley DB / VB-ISAM container vs flat record file)
             # In GnuCOBOL, INDEXED files are stored in B-tree pages and RELATIVE files have record slot headers.
             # If all non-empty records from Java are present in COBOL's binary ISAM payload, consider the records matched.
