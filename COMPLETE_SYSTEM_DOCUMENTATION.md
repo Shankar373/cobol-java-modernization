@@ -10,8 +10,8 @@ The platform functions as a general-purpose COBOL-to-Native-Java translation fra
 
 ### Verification Key Metrics:
 *   **Architecture Validity**: **PASSED**. Generated target Java files (Track B) contain **zero dependencies** on emulator bytecode libraries (`libcobj.jar`) or OpenSourceCOBOL4J runtime wrappers.
-*   **Platform Generality**: **95/100**. Scaffolding and parser layers resolve unseen repositories (e.g. `INVMGR`) without reliance on hardcoded bank-specific schemas.
-*   **Test Suite Parity**: **100% PASS** rate (384 passed, 0 failed, 2 skipped due to host environment Docker engine limitations).
+*   **Platform Generality**: Scaffolding and parser layers resolve unseen repositories (e.g. `INVMGR`) without reliance on hardcoded bank-specific schemas.
+*   **Test Suite Parity**: Counts are point-in-time snapshots only; consult the current CI run and `docs/integration/OPEN_SOURCE_REFERENCE_BASELINE.md` (726 automated cases + 25 reference tests at baseline) rather than the historical hardening snapshot in §10 below.
 
 ---
 
@@ -81,16 +81,16 @@ graph TD
 
 | Feature Category | Support Tier | Description |
 |---|---|---|
-| **EVALUATE** | `VERIFIED` | Translated to standard Java `switch` or `if-else` blocks. |
+| **EVALUATE** | `UNIT_TESTED` | Translated to standard Java `switch` or `if-else` blocks; multi-subject differential parity not proven (`PROC.EVALUATE`). |
 | **PERFORM VARYING** | `VERIFIED` | Emitted as standard Java loops with break-guard indices. |
-| **REDEFINES** | `VERIFIED` | Mapped to native Java getters/setters performing substring or ByteBuffer views over overlapping memory. |
-| **OCCURS / OCCURS DEPENDING** | `VERIFIED` | Subscripted arrays backed by Java lists or arrays. |
-| **CALL ... USING** | `VERIFIED` | Arguments passed by reference wrapping values inside custom `CobolRef` objects. |
-| **SORT / MERGE** | `VERIFIED` | Executed using native JVM-based collection sorting utilities. |
+| **REDEFINES** | `VERIFIED_FOR_TESTED_SCOPE` | Flat scalar/group and COMP-3 byte views differentially verified; nested REDEFINES over OCCURS remains `PARSED_ONLY`. |
+| **OCCURS / OCCURS DEPENDING** | `UNIT_TESTED` / `GENERATED_ONLY` | Fixed `OCCURS` unit-tested; `OCCURS DEPENDING ON` generates without a differential fixture. |
+| **CALL ... USING** | `UNIT_TESTED` | `BY REFERENCE`/`BY CONTENT`/`BY VALUE` parse and generate; only `BY CONTENT` has a differential fixture. |
+| **SORT / MERGE** | `UNIT_TESTED` | File-only `SORT USING/GIVING` via native JVM utilities; `INPUT/OUTPUT PROCEDURE` not differentially verified (see `modernize/capability_matrix.py` `SORT_MERGE`). |
 | **VSAM Files (Indexed)** | `EMULATED` | Simulated locally using persistent SQLite indexed tables. |
 | **Report Writer** | `PARTIAL` | Translates page formats but complex control breaks are bypassed. |
-| **Embedded DB2 SQL** | `EMULATED` | Executed via JDBC / JPA bindings using an emulated local SQL database. |
-| **CICS / BMS Maps** | `EMULATED` | Parses screens map coordinates and mocks transactions via standard I/O streams. |
+| **Embedded DB2 SQL** | `UNIT_TESTED` (emulated) | Parsed and executed via JDBC / JPA bindings against an emulated local database; not differentially verified against a GnuCOBOL baseline (`SQL.*`). |
+| **CICS / BMS Maps** | `PARSED_ONLY` (stub) | Parsed into IR; generated Java emits stubs/diagnostics only (`CICS.*`), at most emulated via Spring REST/JSON DTO direction. |
 
 ---
 
@@ -101,7 +101,7 @@ graph TD
 *   *Mainframe Parity*: **REAL_DB2_EXECUTION = NOT_VERIFIED**. There is no active z/OS DB2 host connection configured in the test suite. Transaction parameters, commit scopes, and cursor fetches are emulated on JDBC interfaces. DB2-specific syntax (e.g. `FOR FETCH ONLY`, DB2 plan bounds) is bypassed or mapped to standard SQL.
 
 ### B. CICS / BMS maps
-*   *Status*: **PARSED & GENERATED**. BMS map structures and screen fields are extracted. `SEND MAP`, `RECEIVE MAP`, `LINK`, `XCTL`, and `RETURN` statements are translated.
+*   *Status*: **PARSED_ONLY (stub)**. BMS map structures and screen fields are extracted into IR; `SEND MAP`, `RECEIVE MAP`, `LINK`, `XCTL`, and `RETURN` generate stubs/diagnostics only (`CICS.*` in `modernize/capability_matrix.py`).
 *   *Mainframe Parity*: **NOT RUNTIME VERIFIED / NOT EQUIVALENT**. The CICS screen transmission loops are mocked using simulated console line inputs. There is no mainframe terminal simulator (like 3270 screen drivers) backing the runtime.
 
 ### C. JCL batch parsing
