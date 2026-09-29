@@ -196,4 +196,76 @@ def test_no_single_quoted_string_literals():
     assert java_code_num is not None
 
 
+# Fixed-point lowering contract: BigDecimal operands must use
+# CobolArithmetic.add/subtract/multiply/divide, never primitive Java
+# operators (invalid Java). Pure primitive arithmetic keeps `+ - * /`.
+_MIXED_TYPES = {"WS-A": "BigDecimal", "WS-B": "Integer", "WS-C": "Integer", "WS-D": "BigDecimal"}
+
+
+def _giving_stmt(stype, val, op2, tgt, form=None):
+    props = {"statement_type": stype, "value": val, "targets": [tgt]}
+    if op2 is not None:
+        props["operand2"] = op2
+    if form is not None:
+        props["form"] = form
+    return {"properties": props}
+
+
+def test_giving_mixed_add_uses_bigdecimal_add():
+    trans = NativeStatementTranslator(_MIXED_TYPES)
+    java_code = trans.translate_statement(_giving_stmt("ADD", "WS-A", "WS-B", "WS-C"))
+    assert "CobolArithmetic.add(ws_a.getValue(), BigDecimal.valueOf(ws_b))" in java_code
+    assert ".longValue()" in java_code
+    assert "ws_a.getValue() +" not in java_code
+
+
+def test_giving_mixed_subtract_multiply_use_bigdecimal_ops():
+    trans = NativeStatementTranslator(_MIXED_TYPES)
+    java_sub = trans.translate_statement(_giving_stmt("SUBTRACT", "WS-B", "WS-A", "WS-C"))
+    # SUBTRACT WS-B FROM WS-A GIVING WS-C -> WS-A - WS-B (operand order kept)
+    assert "CobolArithmetic.subtract(ws_a.getValue(), BigDecimal.valueOf(ws_b))" in java_sub
+    java_mul = trans.translate_statement(_giving_stmt("MULTIPLY", "WS-A", "WS-B", "WS-C"))
+    assert "CobolArithmetic.multiply(ws_a.getValue(), BigDecimal.valueOf(ws_b))" in java_mul
+
+
+def test_giving_mixed_divide_preserves_by_into_forms():
+    trans = NativeStatementTranslator(_MIXED_TYPES)
+    java_by = trans.translate_statement(_giving_stmt("DIVIDE", "WS-A", "WS-B", "WS-C", form="BY"))
+    assert "CobolArithmetic.divide(ws_a.getValue(), BigDecimal.valueOf(ws_b))" in java_by
+    java_into = trans.translate_statement(_giving_stmt("DIVIDE", "WS-A", "WS-B", "WS-C", form="INTO"))
+    assert "CobolArithmetic.divide(BigDecimal.valueOf(ws_b), ws_a.getValue())" in java_into
+
+
+def test_mixed_non_giving_add_to_int_target():
+    trans = NativeStatementTranslator(_MIXED_TYPES)
+    java_code = trans.translate_statement(_giving_stmt("ADD", "WS-A", None, "WS-C"))
+    assert "CobolArithmetic.add(BigDecimal.valueOf(ws_c), ws_a.getValue())" in java_code
+
+
+def test_giving_mixed_decimal_target_keeps_scale_and_assign():
+    trans = NativeStatementTranslator(_MIXED_TYPES)
+    java_code = trans.translate_statement(_giving_stmt("ADD", "WS-A", "WS-B", "WS-D"))
+    assert java_code == (
+        'ws_d.assign(com.systema.modernized.runtime.CobolArithmetic.add('
+        'ws_a.getValue(), BigDecimal.valueOf(ws_b)), '
+        'com.systema.modernized.runtime.CobolRoundingMode.TRUNCATION, '
+        'com.systema.modernized.runtime.SizeErrorPolicy.UNCHECKED);'
+    )
+
+
+def test_giving_all_primitive_operators_preserved():
+    trans = NativeStatementTranslator({"WS-I": "Integer", "WS-J": "Integer", "WS-K": "Integer"})
+    java_add = trans.translate_statement(_giving_stmt("ADD", "WS-I", "WS-J", "WS-K"))
+    assert "ws_i + ws_j" in java_add
+    assert "CobolArithmetic" not in java_add
+    java_sub = trans.translate_statement(_giving_stmt("SUBTRACT", "WS-I", "WS-J", "WS-K"))
+    assert "ws_j - ws_i" in java_sub
+    java_mul = trans.translate_statement(_giving_stmt("MULTIPLY", "WS-I", "WS-J", "WS-K"))
+    assert "ws_i * ws_j" in java_mul
+    java_div = trans.translate_statement(_giving_stmt("DIVIDE", "WS-I", "WS-J", "WS-K", form="BY"))
+    assert "ws_i / ws_j" in java_div
+    java_lit = trans.translate_statement(_giving_stmt("ADD", "10", None, "WS-K"))
+    assert "ws_k + 10" in java_lit
+
+
 

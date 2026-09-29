@@ -578,6 +578,31 @@ class NativeStatementTranslator:
                 return expr[19:-1]
         return expr
 
+    def _arith_operand_is_decimal(self, operand) -> bool:
+        """True when an arithmetic operand lowers to a BigDecimal value.
+
+        Covers decimal literals, FUNCTION results (NUMVAL/MOD lower to
+        BigDecimal), and variables declared with fixed-point PICTUREs.
+        Used to select BigDecimal-space lowering so that fixed-point
+        operands are never combined with primitive Java operators.
+        """
+        if operand is None:
+            return False
+        text = str(operand).strip()
+        if not text:
+            return False
+        if re.match(r'^[+-]?\d+\.\d+$', text):
+            return True
+        if "FUNCTION" in text.upper():
+            return True
+        base = re.split(r'\(', text)[0].strip().upper()
+        if base in self.var_types:
+            return self.var_types.get(base) == "BigDecimal"
+        if self.is_child and base in self.parent_global_vars:
+            parent_type, _ = self.parent_global_vars[base]
+            return parent_type == "BigDecimal"
+        return False
+
     def generate_initialization_statement(self, var_name):
         var_type = self._get_var_type(var_name, "String")
         val = self.var_values.get(var_name, "")
@@ -1046,55 +1071,71 @@ class NativeStatementTranslator:
                 cur_tgt_rounded = cur_tgt_info.get("rounded", False) if isinstance(cur_tgt_info, dict) else False
 
                 tgt_type = self._get_var_type(cur_tgt, "BigDecimal")
-                java_tgt_read = self.translate_math_operand(cur_tgt, tgt_type)
+                # Fixed-point contract: lower in BigDecimal space whenever the
+                # receiver or any read operand is fixed-point. This keeps
+                # BigDecimal operands on CobolArithmetic.add/subtract/multiply/
+                # divide (which the COMPUTE path already uses) and converts at
+                # the primitive boundary via wrap_math_with_size_error, instead
+                # of emitting primitive Java operators over BigDecimal values
+                # (invalid Java). Pure primitive arithmetic keeps its operators.
+                if operand2:
+                    lower_in_bd = (tgt_type == "BigDecimal") or (
+                        tgt_type in ("Integer", "Long", "int", "long", "Float", "Double")
+                        and (self._arith_operand_is_decimal(val)
+                             or self._arith_operand_is_decimal(operand2)))
+                else:
+                    lower_in_bd = (tgt_type == "BigDecimal") or (
+                        tgt_type in ("Integer", "Long", "int", "long", "Float", "Double")
+                        and (self._arith_operand_is_decimal(val)
+                             or self._arith_operand_is_decimal(cur_tgt)))
+                eff_type = "BigDecimal" if lower_in_bd else tgt_type
+                java_tgt_read = self.translate_math_operand(cur_tgt, eff_type)
 
-                if re.match(r'^\d+(\.\d+)?$', val):
-                    if tgt_type == "BigDecimal":
-                        java_val = f"new BigDecimal(\"{val}\")"
-                    elif tgt_type == "Long" and val.isdigit():
+                if re.match(r'^\d+(\.\d+)?$', val) and eff_type != "BigDecimal":
+                    if tgt_type == "Long" and val.isdigit():
                         java_val = val + "L"
                     else:
                         java_val = val
                 else:
-                    java_val = self.translate_math_operand(val, tgt_type)
+                    java_val = self.translate_math_operand(val, eff_type)
 
                 if operand2:
-                    java_op2 = self.translate_math_operand(operand2, tgt_type)
+                    java_op2 = self.translate_math_operand(operand2, eff_type)
                     if stype == "ADD":
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.add({java_val}, {java_op2})" if tgt_type == "BigDecimal" else f"{java_val} + {java_op2}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.add({java_val}, {java_op2})" if lower_in_bd else f"{java_val} + {java_op2}"
                     elif stype == "SUBTRACT":
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.subtract({java_op2}, {java_val})" if tgt_type == "BigDecimal" else f"{java_op2} - {java_val}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.subtract({java_op2}, {java_val})" if lower_in_bd else f"{java_op2} - {java_val}"
                     elif stype == "MULTIPLY":
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.multiply({java_val}, {java_op2})" if tgt_type == "BigDecimal" else f"{java_val} * {java_op2}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.multiply({java_val}, {java_op2})" if lower_in_bd else f"{java_val} * {java_op2}"
                     elif stype == "DIVIDE":
                         # COBOL: DIVIDE a BY b GIVING c   -> c = a / b
                         # COBOL: DIVIDE a INTO b GIVING c -> c = b / a
                         if props.get("form") == "INTO":
-                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_op2}, {java_val})" if tgt_type == "BigDecimal" else f"{java_op2} / {java_val}"
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_op2}, {java_val})" if lower_in_bd else f"{java_op2} / {java_val}"
                         else:
-                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_op2})" if tgt_type == "BigDecimal" else f"{java_val} / {java_op2}"
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_op2})" if lower_in_bd else f"{java_val} / {java_op2}"
                     else:
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_op2})" if tgt_type == "BigDecimal" else f"{java_val} / {java_op2}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_op2})" if lower_in_bd else f"{java_val} / {java_op2}"
                 else:
                     if stype == "ADD":
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.add({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} + {java_val}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.add({java_tgt_read}, {java_val})" if lower_in_bd else f"{java_tgt_read} + {java_val}"
                     elif stype == "SUBTRACT":
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.subtract({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} - {java_val}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.subtract({java_tgt_read}, {java_val})" if lower_in_bd else f"{java_tgt_read} - {java_val}"
                     elif stype == "MULTIPLY":
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.multiply({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} * {java_val}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.multiply({java_tgt_read}, {java_val})" if lower_in_bd else f"{java_tgt_read} * {java_val}"
                     elif stype == "DIVIDE":
                         # COBOL: DIVIDE a BY b    -> b = a / b   (b is both divisor-slot and receiver)
                         # COBOL: DIVIDE a INTO b  -> b = b / a
                         if props.get("form") == "BY":
-                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_tgt_read})" if tgt_type == "BigDecimal" else f"{java_val} / {java_tgt_read}"
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_val}, {java_tgt_read})" if lower_in_bd else f"{java_val} / {java_tgt_read}"
                         else:
-                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} / {java_val}"
+                            val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_tgt_read}, {java_val})" if lower_in_bd else f"{java_tgt_read} / {java_val}"
                     else:
-                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_tgt_read}, {java_val})" if tgt_type == "BigDecimal" else f"{java_tgt_read} / {java_val}"
+                        val_expr = f"com.systema.modernized.runtime.CobolArithmetic.divide({java_tgt_read}, {java_val})" if lower_in_bd else f"{java_tgt_read} / {java_val}"
 
                 cur_props = dict(props)
                 cur_props["rounded"] = cur_tgt_rounded
-                stmts.append(self.wrap_math_with_size_error(cur_tgt, val_expr, cur_props, tgt_type, val_is_bigdecimal=(tgt_type == "BigDecimal")))
+                stmts.append(self.wrap_math_with_size_error(cur_tgt, val_expr, cur_props, tgt_type, val_is_bigdecimal=lower_in_bd))
 
                 # Remainder translation block
                 # COBOL: DIVIDE a BY b GIVING q REMAINDER r    -> r = a - trunc(q) * b
@@ -1103,16 +1144,20 @@ class NativeStatementTranslator:
                     rem_tgt = props.get("remainder")
                     rem_type = self._get_var_type(rem_tgt, "BigDecimal")
 
-                    rem_div = f"BigDecimal.valueOf({java_val})" if tgt_type != "BigDecimal" else java_val
-                    rem_op2 = f"BigDecimal.valueOf({java_op2})" if tgt_type != "BigDecimal" else java_op2
-                    rem_tgt_q = f"BigDecimal.valueOf({java_tgt_read})" if tgt_type != "BigDecimal" else java_tgt_read
-                    if props.get("form") == "INTO":
-                        rem_div, rem_op2 = rem_op2, rem_div
-
-                    if rem_type == "BigDecimal":
+                    if rem_type == "BigDecimal" or lower_in_bd:
+                        if lower_in_bd:
+                            rem_div, rem_op2, rem_tgt_q = java_val, java_op2, java_tgt_read
+                        else:
+                            rem_div = f"BigDecimal.valueOf({java_val})"
+                            rem_op2 = f"BigDecimal.valueOf({java_op2})"
+                            rem_tgt_q = f"BigDecimal.valueOf({java_tgt_read})"
+                        if props.get("form") == "INTO":
+                            rem_div, rem_op2 = rem_op2, rem_div
                         rem_val_expr = f"com.systema.modernized.runtime.CobolArithmetic.remainder({rem_div}, {rem_op2}, {rem_tgt_q})"
+                        rem_is_bd = True
                     else:
                         rem_val_expr = f"{java_val} % {java_op2}"
+                        rem_is_bd = False
 
                     rem_props = {
                         "statement_type": "DIVIDE_REMAINDER",
@@ -1120,7 +1165,7 @@ class NativeStatementTranslator:
                         "on_size_error_nodes": [],
                         "not_on_size_error_nodes": []
                     }
-                    stmts.append(self.wrap_math_with_size_error(rem_tgt, rem_val_expr, rem_props, rem_type, val_is_bigdecimal=(rem_type == "BigDecimal")))
+                    stmts.append(self.wrap_math_with_size_error(rem_tgt, rem_val_expr, rem_props, rem_type, val_is_bigdecimal=rem_is_bd))
 
             return "\n        ".join(stmts) if stmts else ""
 
@@ -2329,6 +2374,10 @@ class NativeStatementTranslator:
                     for cl in call_lines:
                         lines.append(f"    {cl}")
                     lines.append("}")
+                # Fail-closed: if no known program matches, raise error
+                lines.append("else {")
+                lines.append(f"    throw new IllegalStateException(\"Dynamic CALL target '\" + targetProg_{java_var} + \"' not found in known programs\");")
+                lines.append("}")
                 return "\n        ".join(lines)
             else:
                 target_upper = target.strip('"').strip("'").upper()
@@ -3287,6 +3336,7 @@ class NativeStatementTranslator:
         """Generate CALL linkage code.
         BY REFERENCE (default): value is written in AND written back after call.
         BY CONTENT: value is snapshot-copied in; no writeback after call.
+        BY VALUE: value is copied in; no writeback after call (caller's copy unchanged).
         """
         self.call_counter += 1
         suffix = f"_{self.call_counter}"
@@ -3372,16 +3422,21 @@ class NativeStatementTranslator:
         lines.append(f"return_code = {var_name}.return_code;")
         if returning:
             ret_jvar = to_java_var(returning)
-            lines.append(f"{ret_jvar} = {var_name}.return_code;")
+            # If callee has PROCEDURE DIVISION RETURNING, use that value; otherwise use return_code
+            if hasattr(target_gen, 'returning_arg') and target_gen.returning_arg:
+                callee_ret_var = to_java_var(target_gen.returning_arg)
+                lines.append(f"{ret_jvar} = {var_name}.{callee_ret_var};")
+            else:
+                lines.append(f"{ret_jvar} = {var_name}.return_code;")
 
-        # Writeback: only for BY REFERENCE args
+        # Writeback: only for BY REFERENCE args (not CONTENT or VALUE)
         for i, c_var in enumerate(caller_vars):
             if i < len(target_vars):
                 t_var = target_vars[i]
                 c_jvar = to_java_var(c_var)
                 t_jvar = to_java_var(t_var)
                 mode = flat_modes[i] if i < len(flat_modes) else "REFERENCE"
-                if mode != "CONTENT":
+                if mode == "REFERENCE":
                     c_type = "String"
                     c_var_upper = c_var.upper()
                     for k, t in self.var_types.items():
@@ -4619,6 +4674,7 @@ class NativeProgramGenerator:
         self.record_to_fd = {}
         self.group_fields = {}
         self.using_args = []
+        self.returning_arg = None
         self.constants_map = {}
         # level88_map: {condition_name: (parent_name, [values])}
         self.level88_map = {}
@@ -4765,6 +4821,7 @@ class NativeProgramGenerator:
         for n in sorted_nodes:
             if n.kind == "DIVISION" and n.properties.get("name") == "PROCEDURE":
                 self.using_args = n.properties.get("using_args", [])
+                self.returning_arg = n.properties.get("returning_arg")
                 break
 
         last_non88 = None   # track parent of 88 conditions
