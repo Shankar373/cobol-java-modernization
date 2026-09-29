@@ -3647,7 +3647,8 @@ class Pipeline:
             pass
         if self.skip_legacy:
             import hashlib as _hashlib
-            bl = load_snapshot_dir(os.path.join(self.out, "baseline", "legacy"))
+            baseline_dir = os.path.join(self.out, "baseline", "legacy")
+            bl = load_snapshot_dir(baseline_dir)
             # Record a SHA-256 manifest so downstream stages / CI can verify
             # that the seeded baseline has not changed between runs.
             # STALE_BASELINE_RISK: without a live GnuCOBOL execution this path
@@ -3658,11 +3659,27 @@ class Pipeline:
                 k: _hashlib.sha256(v).hexdigest()
                 for k, v in bl.items()
             }
-            self.set_data("legacy", {
+
+            # Load exit_code.txt if present from previous run
+            exit_code_path = os.path.join(baseline_dir, "exit_code.txt")
+            seeded_run_rc = None
+            if os.path.isfile(exit_code_path):
+                try:
+                    with open(exit_code_path, "r", encoding="utf-8") as fh:
+                        seeded_run_rc = int(fh.read().strip())
+                except (ValueError, OSError):
+                    pass
+
+            legacy_data = {
                 "skipped": True,
                 "seeded_baseline_files": sorted(bl),
                 "seeded_baseline_sha256": bl_manifest,
-            })
+            }
+            if seeded_run_rc is not None:
+                legacy_data["run_rc"] = seeded_run_rc
+                legacy_data["termination_status"] = "normal" if seeded_run_rc == 0 else "nonzero_exit"
+
+            self.set_data("legacy", legacy_data)
             self.set_data("baseline_files", sorted(bl))
             if bl:
                 self.log(
@@ -4047,6 +4064,13 @@ class Pipeline:
 
         bl = snapshot(self.repo, d["output_dirs"],
                       os.path.join(self.out, "baseline", "legacy"))
+
+        # Persist exit code as explicit artifact for --skip-legacy seeding
+        exit_code_path = os.path.join(self.out, "baseline", "legacy", "exit_code.txt")
+        os.makedirs(os.path.dirname(exit_code_path), exist_ok=True)
+        with open(exit_code_path, "w", encoding="utf-8") as fh:
+            fh.write(f"{run_rc}\n")
+
         self.set_data("legacy", leg)
         self.set_data("baseline_files", sorted(bl))
         for f in sorted(bl):
@@ -4211,8 +4235,16 @@ class Pipeline:
         obs_cobol = ExecutionObservation(
             scenario_id=sc_id,
             # Fail-closed: missing execution evidence is None (UNVERIFIED), never 0.
-            exit_code=self.data("legacy", {}).get("run_rc")
-            if self.data("legacy", {}).get("run_rc") is not None else -1,
+            # Prefer run_rc from legacy data; fall back to exit_code.txt artifact for --skip-legacy.
+            exit_code=(lambda: (
+                self.data("legacy", {}).get("run_rc")
+                if self.data("legacy", {}).get("run_rc") is not None
+                else (
+                    int(open(os.path.join(self.out, "baseline", "legacy", "exit_code.txt"), "r", encoding="utf-8").read().strip())
+                    if os.path.isfile(os.path.join(self.out, "baseline", "legacy", "exit_code.txt"))
+                    else -1
+                )
+            ))(),
             stdout=stdout_baseline,
             stderr=stderr_baseline,
             files=cobol_obs_files,
